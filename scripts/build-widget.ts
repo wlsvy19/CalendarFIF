@@ -28,6 +28,7 @@ export function bundleProblems(script: string): string[] {
   const problems: string[] = [];
   if (/^\s*(import|export)\s/m.test(script)) problems.push('import 또는 export 문이 있다');
   if (/\brequire\s*\(/.test(script)) problems.push('require( 호출이 있다');
+  if (/\bimport\s*\(/.test(script)) problems.push('동적 import( 호출이 있다');
   for (const p of PLACEHOLDERS) {
     const n = count(script, p);
     if (n !== 1) problems.push(`자리표시자 ${p}가 ${n}번 나온다(한 번이어야 한다)`);

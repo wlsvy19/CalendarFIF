@@ -1,7 +1,7 @@
 import { isColor } from '../core/color';
 import type { DayValue } from '../core/types';
 import { isApiError, readMonth, refreshSession, signIn, type Config } from './api';
-import type { Host } from './host';
+import type { Host, ListWidgetLike } from './host';
 import { makeWidget } from './render';
 import { buildScene, messageScene, type MonthData, type Scene } from './scene';
 import { widgetSize, type Family, type Size } from './sizes';
@@ -40,7 +40,7 @@ function writeCache(host: Host, data: MonthData, now: Date): void {
   }
 }
 
-function readCache(host: Host, monthId: string): MonthData | null {
+export function readCache(host: Host, monthId: string): MonthData | null {
   try {
     const fm = host.FileManager.local();
     const path = cachePath(host);
@@ -51,6 +51,7 @@ function readCache(host: Host, monthId: string): MonthData | null {
     if (id !== monthId || typeof days !== 'object' || days === null) return null;
     const out: Record<string, DayValue> = {};
     for (const [key, v] of Object.entries(days)) {
+      if (!/^(0[1-9]|[12][0-9]|3[01])$/.test(key)) continue;
       const day = v as Partial<DayValue> | null;
       if (day && typeof day.text === 'string' && typeof day.color === 'string' && isColor(day.color)) out[key] = { text: day.text, color: day.color };
     }
@@ -84,11 +85,12 @@ async function load(host: Host, cfg: Config, env: Env, now: Date): Promise<Scene
   const token = host.Keychain.contains(REFRESH_KEY) ? host.Keychain.get(REFRESH_KEY) : '';
   if (token === '') return loginHint(env);
   const monthId = env.today.slice(0, 7);
-  const fromCache = (): Scene => {
+  const fromCache = (code: string | null): Scene => {
     const cached = readCache(host, monthId);
-    return cached
-      ? buildScene({ family: env.family, theme: env.theme, size: env.size, today: env.today, month: cached, offline: true })
-      : message(env, '불러오지 못했습니다', ['네트워크를 확인하세요.']);
+    if (cached) return buildScene({ family: env.family, theme: env.theme, size: env.size, today: env.today, month: cached, offline: true });
+    return code === null
+      ? message(env, '불러오지 못했습니다', ['네트워크를 확인하세요.'])
+      : message(env, '불러오지 못했습니다', ['잠시 뒤 다시 시도합니다.', `(${Array.from(code).slice(0, 40).join('')})`]);
   };
   try {
     const session = await refreshSession(host, cfg, token);
@@ -99,7 +101,8 @@ async function load(host: Host, cfg: Config, env: Env, now: Date): Promise<Scene
     return buildScene({ family: env.family, theme: env.theme, size: env.size, today: env.today, month, offline: false });
   } catch (e) {
     if (!isApiError(e)) throw e;
-    if (e.kind === 'network') return fromCache();
+    if (e.kind === 'network') return fromCache(null);
+    if (e.kind === 'failed') return fromCache(e.code);
     if (e.kind === 'denied') return message(env, '권한이 없습니다', ['관리자에게 문의하세요.']);
     if (e.kind === 'rejected') {
       clearLogin(host);
@@ -132,6 +135,8 @@ async function askLogin(host: Host, cfg: Config): Promise<boolean> {
     try {
       const session = await signIn(host, cfg, email, password);
       storeLogin(host, session.refreshToken, session.uid);
+      const fm = host.FileManager.local();
+      if (fm.fileExists(cachePath(host))) fm.remove(cachePath(host)); // 다른 계정의 것일 수 있다
       return true;
     } catch (e) {
       if (!isApiError(e)) throw e;
@@ -183,6 +188,30 @@ const errorLines = (e: unknown): string[] => {
   return lines;
 };
 
+/** 마지막 수단: 오류 위젯을 둔다. 이것마저 그리지 못하면 빈 위젯을 둔다. 절대 던지지 않는다. */
+async function deliverError(host: Host, cfg: Config, now: () => Date, error: unknown): Promise<void> {
+  const inApp = host.config.runsInApp;
+  try {
+    let widget: ListWidgetLike;
+    try {
+      const at = now();
+      const env = makeEnv(host, inApp ? 'large' : pickFamily(host.config.widgetFamily), at);
+      widget = makeWidget(host, message(env, '오류', errorLines(error)), cfg.appUrl, at);
+    } catch {
+      widget = new host.ListWidget();
+      try {
+        widget.url = cfg.appUrl;
+      } catch {
+        // 주소가 안 들어가도 빈 위젯은 둔다.
+      }
+    }
+    if (inApp) await widget.presentLarge();
+    else host.Script.setWidget(widget);
+  } catch {
+    // 더 할 수 있는 일이 없다.
+  }
+}
+
 export async function run(host: Host, cfg: Config, now: () => Date = () => new Date()): Promise<void> {
   const inApp = host.config.runsInApp;
   try {
@@ -194,11 +223,6 @@ export async function run(host: Host, cfg: Config, now: () => Date = () => new D
       host.Script.setWidget(makeWidget(host, await load(host, cfg, env, at), cfg.appUrl, at));
     }
   } catch (e) {
-    // 위젯은 어떤 경우에도 하나는 만들어 둔다.
-    const at = now();
-    const env = makeEnv(host, inApp ? 'large' : pickFamily(host.config.widgetFamily), at);
-    const widget = makeWidget(host, message(env, '오류', errorLines(e)), cfg.appUrl, at);
-    if (inApp) await widget.presentLarge();
-    else host.Script.setWidget(widget);
+    await deliverError(host, cfg, now, e);
   }
 }

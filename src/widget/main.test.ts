@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Config } from './api';
 import { drawnTexts, makeFakeHost, widgetRecord, type FakeAnswer, type FakeHost, type FakeOptions, type FakeRequest } from './fakeHost';
-import { run } from './main';
+import { readCache, run } from './main';
 
 const cfg: Config = { projectId: 'demo-calfif', apiKey: 'demo-key', appUrl: 'https://example.test/' };
 const now = () => new Date(2026, 10, 13, 9, 0, 0);
@@ -90,13 +90,6 @@ describe('위젯으로 실행', () => {
 
   it('갱신이 거절되면 로그인 정보를 지우고 로그인 안내', async () => {
     const host = make({ keychain: loggedIn }, { refresh: () => err(400, 'TOKEN_EXPIRED') });
-    await run(host, cfg, now);
-    expect(host.state.keychain.size).toBe(0);
-    expect(drawnTexts(host)).toContain('로그인이 필요합니다');
-  });
-
-  it('읽기가 거절되어도(401) 마찬가지', async () => {
-    const host = make({ keychain: loggedIn }, { read: () => err(401, 'UNAUTHENTICATED') });
     await run(host, cfg, now);
     expect(host.state.keychain.size).toBe(0);
     expect(drawnTexts(host)).toContain('로그인이 필요합니다');
@@ -248,5 +241,105 @@ describe('앱에서 실행', () => {
     await run(host, cfg, now);
     expect(host.state.widgets.at(-1)!.presented).toBe('large');
     expect(drawnTexts(host)).toContain('오류');
+  });
+});
+
+describe('일시적인 거절은 로그아웃시키지 않는다', () => {
+  it.each([408, 429])('갱신이 %i이면 network로 보고 로그인 정보는 그대로', async (status) => {
+    const host = make({ keychain: loggedIn }, { refresh: () => err(status, 'X') });
+    await run(host, cfg, now);
+    expect(host.state.keychain.size).toBe(2);
+    expect(drawnTexts(host)).toContain('불러오지 못했습니다');
+  });
+
+  it.each([408, 429])('읽기가 %i이면 보관본을 오프라인으로 그린다', async (status) => {
+    const files = { [CACHE]: JSON.stringify({ monthId: '2026-11', days: {}, savedAt: 1 }) };
+    const host = make({ keychain: loggedIn, files }, { read: () => err(status, 'X') });
+    await run(host, cfg, now);
+    expect(host.state.keychain.size).toBe(2);
+    expect(drawnTexts(host)).toContain('오프라인');
+  });
+
+  it('갱신이 API 키 문제로 400이면 failed: 로그인 정보는 그대로, 보관본이 있으면 그것을 보인다', async () => {
+    const files = { [CACHE]: JSON.stringify({ monthId: '2026-11', days: { '13': { text: '보관', color: '' } }, savedAt: 1 }) };
+    const host = make({ keychain: loggedIn, files }, { refresh: () => err(400, 'API key not valid. Please pass a valid API key.') });
+    await run(host, cfg, now);
+    expect(host.state.keychain.size).toBe(2);
+    expect(drawnTexts(host)).toEqual(expect.arrayContaining(['보관', '오프라인']));
+  });
+
+  it('보관본이 없으면 다시 시도한다는 안내와 40자까지의 코드', async () => {
+    const host = make({ keychain: loggedIn }, { refresh: () => err(400, 'KEY_PROBLEM_' + 'X'.repeat(48)) });
+    await run(host, cfg, now);
+    expect(host.state.keychain.size).toBe(2);
+    const texts = drawnTexts(host);
+    expect(texts).toContain('불러오지 못했습니다');
+    expect(texts).toContain('잠시 뒤 다시 시도합니다.');
+    expect(texts.join('')).toContain('(KEY_PROBLEM_' + 'X'.repeat(28) + ')');
+    expect(texts.join('')).not.toContain('X'.repeat(29));
+  });
+
+  it('읽기가 401이면 failed: 로그인 정보는 그대로', async () => {
+    const host = make({ keychain: loggedIn }, { read: () => err(401, 'UNAUTHENTICATED') });
+    await run(host, cfg, now);
+    expect(host.state.keychain.size).toBe(2);
+    expect(drawnTexts(host)).toContain('잠시 뒤 다시 시도합니다.');
+  });
+});
+
+describe('마지막 수단', () => {
+  it('오류 위젯도 그리지 못하면 빈 위젯을 두고 던지지 않는다', async () => {
+    const host = make({ keychain: loggedIn, failDrawing: 99 });
+    await expect(run(host, cfg, now)).resolves.toBeUndefined();
+    expect(host.state.setWidgets).toHaveLength(1);
+    expect(host.state.contexts).toEqual([]);
+    expect(widgetRecord(host.state.setWidgets[0]).props.url).toBe('https://example.test/');
+  });
+
+  it('앱에서도 빈 위젯을 보여 준다', async () => {
+    const host = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: 0 }], failDrawing: 99 });
+    await expect(run(host, cfg, now)).resolves.toBeUndefined();
+    expect(host.state.widgets.at(-1)!.presented).toBe('large');
+  });
+});
+
+describe('보관 파일', () => {
+  it('읽을 때 01~31 말고는 버린다', () => {
+    const days = { '01': { text: 'a', color: '' }, '31': { text: 'b', color: '' }, '00': { text: 'c', color: '' }, '32': { text: 'd', color: '' }, '1': { text: 'e', color: '' }, x: { text: 'f', color: '' } };
+    const host = make({ files: { [CACHE]: JSON.stringify({ monthId: '2026-11', days, savedAt: 1 }) } });
+    expect(readCache(host, '2026-11')).toEqual({ monthId: '2026-11', days: { '01': { text: 'a', color: '' }, '31': { text: 'b', color: '' } } });
+  });
+
+  it('로그인에 성공하면 이전 보관 파일은 지워지고 새로 읽은 것으로 바뀐다', async () => {
+    const old = JSON.stringify({ monthId: '2026-11', days: { '14': { text: '다른계정', color: '' } }, savedAt: 1 });
+    const host = make({ runsInApp: true, files: { [CACHE]: old }, alerts: [{ button: 0, fields: ['a@example.com', 'pw'] }] });
+    await run(host, cfg, now);
+    expect(host.state.files.get(CACHE)).not.toContain('다른계정');
+    expect(host.state.files.get(CACHE)).toContain('리뷰');
+  });
+});
+
+describe('비밀이 새지 않는다', () => {
+  const secret: Backend = {
+    signIn: () => ({ body: { idToken: 'tok-id-xyz', refreshToken: 'tok-refresh-xyz', localId: 'owner-test-uid' } }),
+    refresh: () => ({ body: { id_token: 'tok-id-xyz', refresh_token: 'tok-refresh-xyz', user_id: 'owner-test-uid' } }),
+  };
+  const tokens = ['tok-id-xyz', 'tok-refresh-xyz', 'pw-secret'];
+
+  it('보관 파일에 토큰이 없다', async () => {
+    const host = make({ keychain: { [REFRESH]: 'tok-refresh-xyz', [UID]: 'owner-test-uid' } }, secret);
+    await run(host, cfg, now);
+    const cache = host.state.files.get(CACHE)!;
+    expect(cache).toContain('리뷰');
+    for (const t of tokens) expect(cache).not.toContain(t);
+  });
+
+  it('로그인 뒤에 난 오류 위젯의 글에 토큰도 비밀번호도 없다', async () => {
+    const host = make({ runsInApp: true, alerts: [{ button: 0, fields: ['a@example.com', 'pw-secret'] }], failDrawing: 1 }, secret);
+    await run(host, cfg, now);
+    const texts = drawnTexts(host);
+    expect(texts).toContain('오류');
+    for (const t of tokens) expect(texts.join('\n')).not.toContain(t);
+    for (const t of ['pw-secret']) expect(JSON.stringify([...host.state.files])).not.toContain(t);
   });
 });

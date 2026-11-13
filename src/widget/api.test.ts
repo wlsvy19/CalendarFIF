@@ -91,16 +91,32 @@ describe('오류의 갈래', () => {
     expect((await failure(signIn(hostWith(() => err(503, 'X')), cfg, 'e', 'p'))).kind).toBe('network');
   });
 
-  it('갱신의 4xx는 모두 rejected', async () => {
-    for (const m of ['TOKEN_EXPIRED', 'USER_DISABLED', 'USER_NOT_FOUND', 'INVALID_REFRESH_TOKEN']) {
-      expect(await failure(refreshSession(hostWith(() => err(400, m)), cfg, 't'))).toEqual({ kind: 'rejected', code: m });
+  it('갱신: 토큰이 죽었다는 답만 rejected', async () => {
+    for (const m of ['TOKEN_EXPIRED', 'USER_DISABLED', 'USER_NOT_FOUND', 'INVALID_REFRESH_TOKEN', 'MISSING_REFRESH_TOKEN']) {
+      for (const status of [400, 401, 403]) {
+        expect(await failure(refreshSession(hostWith(() => err(status, m)), cfg, 't'))).toEqual({ kind: 'rejected', code: m });
+      }
     }
   });
 
-  it('읽기: 401 rejected, 403 denied, 그 밖의 4xx rejected', async () => {
-    expect((await failure(readMonth(hostWith(() => err(401, 'UNAUTHENTICATED')), cfg, session, '2026-11'))).kind).toBe('rejected');
+  it('갱신: 그 밖의 4xx(키 문제, 할당량, 모르는 것)는 failed', async () => {
+    expect(await failure(refreshSession(hostWith(() => err(400, 'API key not valid. Please pass a valid API key.')), cfg, 't'))).toMatchObject({ kind: 'failed' });
+    expect((await failure(refreshSession(hostWith(() => err(404, 'TOKEN_EXPIRED')), cfg, 't'))).kind).toBe('failed');
+    expect((await failure(refreshSession(hostWith(() => err(400, 'SOMETHING_NEW')), cfg, 't'))).kind).toBe('failed');
+  });
+
+  it('408과 429와 5xx는 어느 요청이든 network', async () => {
+    for (const status of [408, 429, 500, 503]) {
+      expect((await failure(refreshSession(hostWith(() => err(status, 'X')), cfg, 't'))).kind).toBe('network');
+      expect((await failure(readMonth(hostWith(() => err(status, 'X')), cfg, session, 'm'))).kind).toBe('network');
+      expect((await failure(signIn(hostWith(() => err(status, 'X')), cfg, 'e', 'p'))).kind).toBe('network');
+    }
+  });
+
+  it('읽기: 403 denied, 그 밖의 4xx(401 포함) failed', async () => {
+    expect((await failure(readMonth(hostWith(() => err(401, 'UNAUTHENTICATED')), cfg, session, '2026-11'))).kind).toBe('failed');
     expect((await failure(readMonth(hostWith(() => err(403, 'PERMISSION_DENIED')), cfg, session, '2026-11'))).kind).toBe('denied');
-    expect((await failure(readMonth(hostWith(() => err(429, 'RESOURCE_EXHAUSTED')), cfg, session, '2026-11'))).kind).toBe('rejected');
+    expect((await failure(readMonth(hostWith(() => err(400, 'INVALID_ARGUMENT')), cfg, session, '2026-11'))).kind).toBe('failed');
   });
 
   it('코드는 error.message, 없으면 error.status, 그것도 없으면 HTTP 상태', async () => {
@@ -119,11 +135,13 @@ describe('오류의 갈래', () => {
     expect((await failure(signIn(hostWith(() => ({ body: { idToken: 'I' } })), cfg, 'e', 'p'))).kind).toBe('network');
   });
 
-  it('오류에 비밀번호나 토큰이 들어가지 않는다', async () => {
+  it('오류에 보낸 비밀번호나 토큰이 들어가지 않는다', async () => {
     const e = await failure(signIn(hostWith(() => err(400, 'INVALID_PASSWORD')), cfg, 'e', 'secret-pw'));
     expect(JSON.stringify(e)).not.toContain('secret-pw');
-    const r = await failure(readMonth(hostWith(() => err(401, 'X')), cfg, session, 'm'));
-    expect(JSON.stringify(r)).not.toContain('ID');
+    const r = await failure(refreshSession(hostWith(() => err(400, 'TOKEN_EXPIRED')), cfg, 'secret-refresh'));
+    expect(JSON.stringify(r)).not.toContain('secret-refresh');
+    const d = await failure(readMonth(hostWith(() => err(403, 'PERMISSION_DENIED')), cfg, session, 'm'));
+    expect(JSON.stringify(d)).not.toContain('ID');
   });
 });
 

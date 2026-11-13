@@ -56,8 +56,14 @@ describe('bundleProblems', () => {
     expect(problems(`${ok}\nconst = ;`)).toContain('async 함수 본문');
   });
 
-  it('최상위 await는 읽힌다', () => {
-    expect(bundleProblems(ok)).toEqual([]);
+  it('최상위 await가 있는 글도 읽힌다', () => {
+    const withAwait = ok.replace('Script.complete();', 'await Promise.resolve(1);\nScript.complete();');
+    expect(withAwait).toContain('await Promise.resolve(1);');
+    expect(bundleProblems(withAwait)).toEqual([]);
+  });
+
+  it('동적 import( 호출', () => {
+    expect(problems(ok + "\nconst m = await import('x');")).toContain('import(');
   });
 
   it('가짜 호스트의 표지', () => {

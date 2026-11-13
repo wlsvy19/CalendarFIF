@@ -10,9 +10,9 @@ export type Config = {
   firestoreBase?: string; // 기본 'https://firestore.googleapis.com'
 };
 export type Session = { idToken: string; refreshToken: string; uid: string };
-export type ApiError = { kind: 'credentials' | 'throttled' | 'rejected' | 'denied' | 'network'; code: string };
+export type ApiError = { kind: 'credentials' | 'throttled' | 'rejected' | 'denied' | 'network' | 'failed'; code: string };
 
-const KINDS = ['credentials', 'throttled', 'rejected', 'denied', 'network'];
+const KINDS = ['credentials', 'throttled', 'rejected', 'denied', 'network', 'failed'];
 export function isApiError(e: unknown): e is ApiError {
   return typeof e === 'object' && e !== null && KINDS.includes((e as ApiError).kind) && typeof (e as ApiError).code === 'string';
 }
@@ -42,7 +42,7 @@ async function send(host: Host, url: string, method: string, headers: Record<str
     if (!isObject(json)) throw { kind: 'network', code: 'network' } satisfies ApiError;
     status = 'error' in json ? 400 : 200;
   }
-  if (status >= 500) throw { kind: 'network', code: String(status) } satisfies ApiError;
+  if (status >= 500 || status === 408 || status === 429) throw { kind: 'network', code: String(status) } satisfies ApiError;
   return { status, json };
 }
 
@@ -53,6 +53,7 @@ function errorCode(a: Answer): string {
   return String(a.status);
 }
 
+const DEAD_TOKEN_CODES = ['TOKEN_EXPIRED', 'USER_DISABLED', 'USER_NOT_FOUND', 'INVALID_REFRESH_TOKEN', 'MISSING_REFRESH_TOKEN'];
 const isClientError = (status: number): boolean => status >= 400 && status < 500;
 
 function sessionFrom(json: unknown, keys: { id: string; refresh: string; uid: string }): Session {
@@ -78,7 +79,9 @@ export async function refreshSession(host: Host, cfg: Config, refreshToken: stri
   const base = cfg.tokenBase ?? 'https://securetoken.googleapis.com';
   const a = await send(host, `${base}/v1/token?key=${cfg.apiKey}`, 'POST', { 'Content-Type': 'application/x-www-form-urlencoded' }, `grant_type=refresh_token&refresh_token=${encodeURIComponent(refreshToken)}`);
   if (a.status === 200) return sessionFrom(a.json, { id: 'id_token', refresh: 'refresh_token', uid: 'user_id' });
-  throw { kind: isClientError(a.status) ? 'rejected' : 'network', code: errorCode(a) } satisfies ApiError;
+  const code = errorCode(a);
+  if ([400, 401, 403].includes(a.status) && DEAD_TOKEN_CODES.some((c) => code.startsWith(c))) throw { kind: 'rejected', code } satisfies ApiError;
+  throw { kind: isClientError(a.status) ? 'failed' : 'network', code } satisfies ApiError;
 }
 
 /** 그 달 문서의 날짜들. 문서가 없으면 빈 객체. */
@@ -90,7 +93,7 @@ export async function readMonth(host: Host, cfg: Config, session: Session, month
   if (a.status === 404) return {};
   const code = errorCode(a);
   if (a.status === 403) throw { kind: 'denied', code } satisfies ApiError;
-  throw { kind: isClientError(a.status) ? 'rejected' : 'network', code } satisfies ApiError;
+  throw { kind: isClientError(a.status) ? 'failed' : 'network', code } satisfies ApiError;
 }
 
 /** Firestore REST 문서(JSON)에서 날짜별 값을 꺼낸다. 모양이 다르면 그 날짜를 건너뛴다. */
