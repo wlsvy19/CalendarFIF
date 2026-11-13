@@ -4,7 +4,7 @@ import type { GridCell } from '../core/dates';
 import type { DayValue } from '../core/types';
 import type { MonthData } from './scene';
 import type { Family, Size } from './sizes';
-import { capLines, fitText, memoLines, strike } from './text';
+import { capLines, fitText, memoLines } from './text';
 import { PALETTES, dayBackground, type Palette } from './theme';
 
 export type Dyn = { light: string; dark: string }; // 밝은 화면과 어두운 화면의 색 ('#RRGGBB')
@@ -29,6 +29,9 @@ const C: Colors = {
 const dowColor = (dow: number): Dyn => (dow === 0 ? C.sun : dow === 6 ? C.sat : C.ink);
 const validColor = (day: DayValue | undefined): string => (day && day.color !== '' && isColor(day.color) ? day.color : '');
 const dayPair = (color: string): Dyn => ({ light: dayBackground(color, 'light'), dark: dayBackground(color, 'dark') });
+
+/** 완료 줄 앞에 붙이는 표시. 결합 글자(취소선)는 한글 위에서 깨질 수 있어 쓰지 않는다. */
+const DONE_MARK = '\u2713 ';
 
 const flex = (): SpacerNode => ({ kind: 'spacer', length: null });
 const fixed = (length: number): SpacerNode => ({ kind: 'spacer', length });
@@ -68,15 +71,12 @@ function dayCell(cell: GridCell, day: DayValue | undefined, today: string, lay: 
   const children: Node[] = [leading(number)];
   if (cell.inMonth && day) {
     const { shown, more } = capLines(memoLines(day.text), lay.capacity);
-    const lines = shown.map((l) => {
-      const cut = fitText(l.text, 9, lay.innerWidth);
-      return l.done ? strike(cut) : cut;
-    });
+    const lines = shown.map((l) => fitText(l.done ? DONE_MARK + l.text : l.text, 9, lay.innerWidth));
     if (more > 0) lines.push(`+${more}`);
-    if (lines.length > 0) children.push(leading(text(lines.join('\n'), 9, 'regular', C.ink, lines.length)));
+    if (lay.capacity > 0 && lines.length > 0) children.push(leading(text(lines.join('\n'), 9, 'regular', C.ink, lines.length)));
   }
   children.push(flex());
-  return { kind: 'stack', dir: 'v', padding: [2, 3, 2, 3], background: hasColor && cell.inMonth ? dayPair(color) : C.surface, children };
+  return { kind: 'stack', dir: 'v', padding: [2, 2, 2, 2], background: hasColor && cell.inMonth ? dayPair(color) : C.surface, children };
 }
 
 function weekRow(cells: GridCell[], month: MonthData, today: string, lay: CellLayout): StackNode {
@@ -97,7 +97,7 @@ function gridTree(input: { family: Family; size: Size; today: string; month: Mon
   const weeks = rows.length;
   const cellHeight = (size.height - 24 - 22 - 4 - 14 - 3 - (weeks - 1)) / weeks;
   const lay: CellLayout = {
-    innerWidth: (size.width - 24 - 6) / 7 - 6 - 2,
+    innerWidth: (size.width - 24 - 6) / 7 - 4,
     capacity: Math.min(family === 'medium' ? 6 : Infinity, Math.max(0, Math.floor((cellHeight - 4 - 15 - 2) / 11))),
   };
   return {
@@ -123,7 +123,7 @@ function smallTree(input: { today: string; month: MonthData; offline: boolean })
     memo.push(leading(text('메모 없음', 11, 'regular', C.muted, 1)));
   } else {
     const { shown, more } = capLines(lines, 6);
-    for (const l of shown) memo.push(leading(l.done ? text(strike(l.text), 11, 'regular', C.ink, 1, { opacity: 0.55 }) : text(l.text, 11, 'regular', C.ink, 1)));
+    for (const l of shown) memo.push(leading(l.done ? text(DONE_MARK + l.text, 11, 'regular', C.ink, 1, { opacity: 0.55 }) : text(l.text, 11, 'regular', C.ink, 1)));
     if (more > 0) memo.push(leading(text(`+${more}`, 11, 'regular', C.muted, 1)));
   }
   const children: Node[] = [

@@ -81,9 +81,7 @@ const nativeShots: NativeShot[] = [
 
 // 나무를 HTML로 바꾼다. iOS와 같은 규칙: 남는 곳 채우기(spacer)가 든 상자는 그 방향으로 늘어나고,
 // 늘어나는 형제들은 남는 길이를 똑같이 나눈다. 상자는 자식 중 하나라도 늘어나면 늘어난다.
-// 취소선 글자(U+0336)는 이 PC의 글꼴이 한글 위에 그리지 못하고 네모로 보이므로, 미리 보기에서는 줄 긋기로 바꿔 그린다.
-// 실제 iOS에서 어떻게 보이는지는 폰에서 확인해야 한다.
-const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/(.)̶/gu, '<s>$1</s>');
+const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 type Axis = 'x' | 'y';
 const mainAxis = (dir: 'h' | 'v'): Axis => (dir === 'h' ? 'x' : 'y');
 function flexes(node: Node, axis: Axis, parentDir: 'h' | 'v'): boolean {

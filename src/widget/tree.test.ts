@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MonthData } from './scene';
 import { widgetSize, type Family } from './sizes';
-import { estimateWidth, strike } from './text';
+import { estimateWidth } from './text';
 import { PALETTES, dayBackground } from './theme';
 import { buildTree, messageTree, type Dyn, type Node, type StackNode, type TextNode, type Tree } from './tree';
 
@@ -88,9 +88,9 @@ describe('buildTree large', () => {
     expect(((cellOf(c, 14).children[0] as StackNode).children[0] as TextNode).color).toEqual(pair('sat')); // 토요일
   });
 
-  it('완료 줄은 취소선, 메모는 글 하나에 줄바꿈으로 이어 붙인다', () => {
+  it('완료 줄은 체크 표시, 메모는 글 하나에 줄바꿈으로 이어 붙인다', () => {
     const c = build('large', month({ '14': { text: '회의\n[+]장보기', color: '' } }));
-    expect(memoOf(cellOf(c, 14))).toMatchObject({ text: `회의\n${strike('장보기')}`, lines: 2, size: 9, weight: 'regular', color: pair('ink') });
+    expect(memoOf(cellOf(c, 14))).toMatchObject({ text: '회의\n\u2713 장보기', lines: 2, size: 9, weight: 'regular', color: pair('ink') });
   });
 
   it('줄이 넘치면 마지막 줄이 +N이고 줄 수가 칸의 수용량과 같다', () => {
@@ -106,7 +106,7 @@ describe('buildTree large', () => {
 
   it('긴 줄은 칸 폭에 맞게 잘린다', () => {
     const size = widgetSize(SCREEN, 'large');
-    const inner = (size.width - 24 - 6) / 7 - 6 - 2;
+    const inner = (size.width - 24 - 6) / 7 - 4;
     const c = build('large', month({ '14': { text: '아주아주아주 긴 한국어 메모\nlong english memo line that overflows\n[+]완료된 아주 긴 한국어 줄', color: '' } }));
     const memo = memoOf(cellOf(c, 14))!;
     for (const line of memo.text.split('\n')) expect(estimateWidth(line, 9)).toBeLessThanOrEqual(inner + 1e-9);
@@ -194,7 +194,7 @@ describe('buildTree small', () => {
   it('여섯 줄이 넘으면 +N으로 줄이고, 완료 줄은 취소선과 흐림', () => {
     const t = small(month({ '13': { text: '[+]하나\n둘\n셋\n넷\n다섯\n여섯\n일곱\n여덟', color: '' } }));
     const rows = memoRows(t);
-    expect(rows.map((r) => r.text)).toEqual([strike('하나'), '둘', '셋', '넷', '다섯', '+3']);
+    expect(rows.map((r) => r.text)).toEqual(['\u2713 하나', '둘', '셋', '넷', '다섯', '+3']);
     expect(rows[0].opacity).toBe(0.55);
     expect(rows[1].opacity).toBeUndefined();
     expect(rows[5].color).toEqual(pair('muted'));
@@ -243,5 +243,30 @@ describe('messageTree', () => {
     expect(t.children[1]).toEqual({ kind: 'spacer', length: 6 });
     expect(t.children.slice(2, 4)).toMatchObject([{ text: '첫째', size: 12, color: pair('muted'), lines: 0 }, { text: '둘째', lines: 0 }]);
     expect(isFlex(t.children.at(-1))).toBe(true);
+  });
+});
+
+describe('칸 폭과 수용량', () => {
+  it('402x874 화면의 큰 위젯에서 `가족 모임`은 잘리지 않고 한글 여섯 글자는 잘린다', () => {
+    const size = widgetSize({ width: 402, height: 874 }, 'large');
+    const t = buildTree({ family: 'large', size, today: TODAY, month: month({ '14': { text: '가족 모임\n가나다라마바', color: '' } }), offline: false });
+    expect(memoOf(cellOf(t, 14))!.text.split('\n')).toEqual(['가족 모임', '가나다라']);
+  });
+
+  const ten = Array.from({ length: 10 }, (_, i) => `줄${i}`).join('\n');
+  const jan = (height: number): Tree =>
+    buildTree({ family: 'large', size: { width: 338, height }, today: '2027-01-09', month: month({ '10': { text: ten, color: '' } }, '2027-01'), offline: false });
+  const cell10 = (t: Tree): StackNode => (weeks(t)[2].children[0] as StackNode); // 2027-01-10은 일요일, 셋째 주 첫 칸
+
+  it('수용량이 0이면 메모가 없다(+N도 없다)', () => {
+    const c = cell10(jan(150));
+    expect(c.children).toHaveLength(2);
+    expect(memoOf(c)).toBeUndefined();
+  });
+
+  it('수용량이 1이고 줄이 더 있으면 +N만 보인다', () => {
+    const memo = memoOf(cell10(jan(282)))!;
+    expect(memo.text).toBe('+10');
+    expect(memo.lines).toBe(1);
   });
 });

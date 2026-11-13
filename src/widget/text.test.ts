@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capLines, estimateWidth, fitText, memoLines, strike, wrapText } from './text';
+import { capLines, estimateWidth, fitText, memoLines, wrapText } from './text';
 
 describe('estimateWidth', () => {
   it('is 0 for an empty string', () => expect(estimateWidth('', 10)).toBe(0));
@@ -7,6 +7,11 @@ describe('estimateWidth', () => {
     expect(estimateWidth('가나', 10)).toBe(20);
     expect(estimateWidth('ab', 10)).toBeCloseTo(12);
     expect(estimateWidth('회의a', 10)).toBeCloseTo(26);
+  });
+  it('counts a space as 0.3 of the size', () => {
+    expect(estimateWidth(' ', 10)).toBeCloseTo(3);
+    expect(estimateWidth('가 나', 10)).toBeCloseTo(23);
+    expect(estimateWidth('a b', 10)).toBeCloseTo(15);
   });
   it('counts CJK and full-width forms as full width', () => {
     expect(estimateWidth('日本', 10)).toBe(20);
@@ -54,19 +59,5 @@ describe('wrapText', () => {
   it('stops when not even one character fits', () => expect(wrapText('가나', 10, 5)).toEqual([]));
   it('fits every piece', () => {
     for (const piece of wrapText('이 스크립트를 한 번 실행해 Scriptable', 12, 60)) expect(estimateWidth(piece, 12)).toBeLessThanOrEqual(60);
-  });
-});
-
-describe('strike', () => {
-  it('puts U+0336 after every character', () => {
-    const s = strike('장보기');
-    expect(s.length).toBe(6);
-    expect([...s].filter((_, i) => i % 2 === 1).every((c) => c === '\u0336')).toBe(true);
-    expect([...s].filter((_, i) => i % 2 === 0).join('')).toBe('장보기');
-  });
-  it('leaves spaces unstruck', () => expect(strike('a b')).toBe('a\u0336 b\u0336'));
-  it('does not change the estimated width or the cut', () => {
-    expect(estimateWidth(strike('abc'), 10)).toBe(estimateWidth('abc', 10));
-    expect(estimateWidth(strike('가나'), 10)).toBe(20);
   });
 });

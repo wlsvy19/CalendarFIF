@@ -10,16 +10,9 @@ function isWide(cp: number): boolean {
   );
 }
 
-const STRIKE = '̶';
+const charWidth = (ch: string, size: number): number => size * (ch === ' ' ? 0.3 : isWide(ch.codePointAt(0)!) ? 1 : 0.6);
 
-const charWidth = (ch: string, size: number): number => (ch === STRIKE ? 0 : size * (isWide(ch.codePointAt(0)!) ? 1 : 0.6));
-
-/** 취소선: 글자마다 U+0336(결합 긴 줄)을 붙인다. 위젯의 글자에는 취소선 속성이 없다. */
-export function strike(text: string): string {
-  return [...text].map((ch) => (ch === ' ' ? ch : ch + STRIKE)).join('');
-}
-
-/** 글자 폭 어림(pt). 한글·한자·가나·전각 문자는 size x 1.0, 그 밖은 size x 0.6. */
+/** 글자 폭 어림(pt). 한글·한자·가나·전각 문자는 size x 1.0, 공백은 size x 0.3, 그 밖은 size x 0.6. */
 export function estimateWidth(text: string, size: number): number {
   let total = 0;
   for (const ch of text) total += charWidth(ch, size);
