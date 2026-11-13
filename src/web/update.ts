@@ -10,6 +10,12 @@ export type UpdateDeps = {
   every(ms: number, fn: () => void): () => void; // setInterval, returns the stop function
 };
 
+/** 지금 다시 읽으면 안 되는가: 시트가 열려 있거나, 글자를 입력하는 중이거나, 저장되지 않은 편집이 메모리에만 있다. */
+export function isBusy(doc: Document, unsavedOnlyInMemory: boolean): boolean {
+  const tag = doc.activeElement?.tagName;
+  return doc.documentElement.classList.contains('sheet-open') || tag === 'INPUT' || tag === 'TEXTAREA' || unsavedOnlyInMemory;
+}
+
 const KEY = 'calfif.reloadedAt';
 const LOOP_GUARD_MS = 60_000;
 const RETRY_MS = 1000;

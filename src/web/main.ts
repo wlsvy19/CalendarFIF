@@ -17,7 +17,7 @@ import { playDoneTone } from './desktop/tone';
 import { mountCalendar } from './ui/calendar';
 import { mountEditor } from './ui/editor';
 import { mountSettings } from './ui/settings';
-import { reloadOnUpdate } from './update';
+import { isBusy, reloadOnUpdate } from './update';
 import { parseHash } from './router';
 import { openStorage } from './storage';
 import { splitDateKey, todayKey } from '../core/dates';
@@ -294,7 +294,7 @@ if (!DESKTOP) {
   if ('serviceWorker' in navigator) {
     reloadOnUpdate({
       container: navigator.serviceWorker,
-      busy: () => document.documentElement.classList.contains('sheet-open') || unsavedOnlyInMemory(),
+      busy: () => isBusy(document, unsavedOnlyInMemory()),
       reload: () => location.reload(),
       // sessionStorage에 닿는 것만으로도 던질 수 있으므로, 쓸 때 닿게 해서 update.ts가 잡게 한다.
       session: { getItem: (k) => sessionStorage.getItem(k), setItem: (k, v) => sessionStorage.setItem(k, v) },

@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { reloadOnUpdate, type UpdateDeps } from './update';
+import { isBusy, reloadOnUpdate, type UpdateDeps } from './update';
 
 function setup(over: Partial<UpdateDeps> & { stored?: string | null } = {}) {
   let change: () => void = () => {};
@@ -74,4 +74,34 @@ it('쓰기만 오류를 내도 다시 읽지 않는다', () => {
   });
   s.change();
   expect(s.reload).not.toHaveBeenCalled();
+});
+it('기다리는 중에 controllerchange가 또 와도 다시 읽기는 한 번이다', () => {
+  let busy = true;
+  const s = setup({ busy: () => busy });
+  s.change();
+  s.change();
+  busy = false;
+  s.tick();
+  s.tick();
+  expect(s.reload).toHaveBeenCalledTimes(1);
+});
+
+it('isBusy: 시트, 입력칸, 글상자, 메모리에만 있는 편집은 바쁘고 단추는 아니다', () => {
+  const html = document.documentElement;
+  document.body.innerHTML = '<input id="i"><textarea id="t"></textarea><button id="b"></button>';
+  const focus = (id: string) => (document.getElementById(id) as HTMLElement).focus();
+  (document.activeElement as HTMLElement | null)?.blur();
+  expect(isBusy(document, false)).toBe(false);
+  focus('b');
+  expect(isBusy(document, false)).toBe(false);
+  focus('i');
+  expect(isBusy(document, false)).toBe(true);
+  focus('t');
+  expect(isBusy(document, false)).toBe(true);
+  focus('b');
+  expect(isBusy(document, true)).toBe(true);
+  html.classList.add('sheet-open');
+  expect(isBusy(document, false)).toBe(true);
+  html.classList.remove('sheet-open');
+  document.body.innerHTML = '';
 });
