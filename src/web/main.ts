@@ -6,9 +6,11 @@ import { initFirebase } from './firebase';
 import { CalendarStore } from './state';
 import { startAutoFlush } from './autoFlush';
 import { deviceLabel } from './device';
-import { loadAppearance, applyAppearance } from './appearance';
+import { loadAppearance, saveAppearance, applyAppearance, type Appearance } from './appearance';
+import type { SettingsPage } from '../desktop/api';
 import { getBridge } from './desktop/bridge';
 import { mountAdjust } from './desktop/adjust';
+import { mountDesktopSettings } from './desktop/settingsPages';
 import { mountCellMenu } from './desktop/cellMenu';
 import { Interactivity } from './desktop/interactive';
 import { playDoneTone } from './desktop/tone';
@@ -30,13 +32,13 @@ const DESKTOP = import.meta.env.VITE_DESKTOP === '1';
 const bridge = DESKTOP ? getBridge() : null;
 const interactivity = new Interactivity((on) => bridge?.setInteractive(on));
 // 로그인 뒤 화면이 열려 있는 동안 메인 프로세스의 명령을 받는 동작들. 로그인 전에는 null이라 명령을 무시한다.
-let deskActions: { goToday(): void; openSettings(): void; signOut(): void } | null = null;
+let deskActions: { goToday(): void; openSettings(page?: SettingsPage): void; signOut(): void } | null = null;
 
 function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
   const editedBy = deviceLabel(navigator.userAgent);
   const source = new FirestoreMonthStore(db, session.uid);
   const storage = openStorage();
-  const appearance = DESKTOP ? loadAppearance(storage.store) : undefined;
+  let appearance: Appearance | undefined = DESKTOP ? loadAppearance(storage.store) : undefined;
   if (appearance) applyAppearance(document.documentElement, appearance);
   const outbox = new Outbox(storage.store, session.uid);
   const engine = new SyncEngine({ store: source, outbox, editedBy });
@@ -66,7 +68,7 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
     editor = null;
     interactivity.end('editor');
   };
-  let settings: { destroy(): void } | null = null;
+  let settings: { destroy(): void; showPage?(page: SettingsPage): void } | null = null;
   const closeSettings = (): void => {
     settings?.destroy();
     settings = null;
@@ -77,18 +79,35 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
     history.replaceState(null, '', location.pathname + location.search); // 다시 로그인했을 때 설정이 열리지 않게 한다
     void signOut(auth);
   };
+  let settingsPage: SettingsPage | undefined;
+  // 설정에서 바꾼 모양은 바로 달력과 <html>에 반영하고 이 기기에 저장한다. 저장하지 못하면 false(값은 화면에 그대로 둔다).
+  const changeAppearance = (next: Appearance): boolean => {
+    appearance = next;
+    applyAppearance(document.documentElement, next);
+    calendar.setAppearance(next);
+    try {
+      saveAppearance(storage.store, next);
+      return storage.persistent;
+    } catch {
+      return false;
+    }
+  };
   const openSettings = (): void => {
-    settings = mountSettings(root, {
+    const account = {
       email: session.email,
       pending: engine.status().pending,
       storageOk: storage.persistent && outbox.persistent,
       corruptFound: outbox.corruptDetected,
-      onClose: () => {
-        closeSettings(); // 주소가 바뀌기를 기다리지 않고 바로 닫는다
-        backToCalendar();
-      },
       onSignOut: signOutNow,
-    });
+    };
+    const onClose = (): void => {
+      closeSettings(); // 주소가 바뀌기를 기다리지 않고 바로 닫는다
+      backToCalendar();
+    };
+    settings = appearance
+      ? mountDesktopSettings(root, { appearance, onAppearance: changeAppearance, bridge, account, page: settingsPage, onClose })
+      : mountSettings(root, { ...account, onClose });
+    settingsPage = undefined;
     interactivity.begin('settings');
   };
   const backToCalendar = (): void => {
@@ -191,9 +210,14 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
     desktop: DESKTOP ? { onDayMenu: openCellMenu, onOpenMenu: (at) => bridge?.showMenu(at) } : undefined,
   });
   // 앱 메뉴의 명령으로 여는 설정은 열려 있던 편집 화면을 먼저 닫고, 닫으면 늘 달력으로 간다(앞 기록의 날짜 주소로 돌아가지 않는다).
-  const openSettingsFromCommand = (): void => {
+  const openSettingsFromCommand = (page?: SettingsPage): void => {
     closeEditor();
     pushedByApp = false;
+    if (settings) {
+      if (page) settings.showPage?.(page); // 이미 열려 있으면 쪽만 옮긴다
+      return;
+    }
+    settingsPage = page;
     location.hash = 'settings';
   };
   if (DESKTOP) {
@@ -201,7 +225,7 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
       goToday: () => calendar.goToday(),
       openSettings: openSettingsFromCommand,
       // 보내지 못한 편집이 남아 있으면 로그아웃으로 잃지 않도록 설정 화면(대기 건수 안내)을 연다.
-      signOut: () => (engine.status().pending === 0 ? signOutNow() : openSettingsFromCommand()),
+      signOut: () => (engine.status().pending === 0 ? signOutNow() : openSettingsFromCommand('account')),
     };
   }
   syncRoute();
@@ -229,7 +253,7 @@ bridge?.onCommand((c) => {
       deskActions?.goToday();
       break;
     case 'openSettings':
-      deskActions?.openSettings();
+      deskActions?.openSettings(c.page);
       break;
     case 'signOut':
       deskActions?.signOut();

@@ -1,3 +1,4 @@
+import { normalizeAccelerator } from '../core/accelerator';
 import type { DragKind, Hotkey, Point, SystemPatch } from './api';
 
 export function parseBool(v: unknown): boolean | null {
@@ -26,7 +27,8 @@ function parseHotkey(v: unknown): Hotkey | null {
   if (!isObject(v)) return null;
   const { accelerator, enabled } = v;
   if (typeof accelerator !== 'string' || accelerator.length < 1 || accelerator.length > 40 || typeof enabled !== 'boolean') return null;
-  return { accelerator, enabled };
+  const normalized = normalizeAccelerator(accelerator); // 저장하는 것은 등록에 쓰는 바른 모양이고, 등록할 수 없는 조합은 받지 않는다
+  return normalized === null ? null : { accelerator: normalized, enabled };
 }
 
 // 설정 바꾸기 요청: 객체가 아니면 통째로 거절하고, 아는 칸 중 맞는 것만 남긴다.

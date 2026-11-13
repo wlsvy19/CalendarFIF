@@ -9,6 +9,10 @@ it('화면에서 온 값을 검사한다', () => {
 it('끌기 값을 검사한다', () => {
   expect([parseDrag('se', 10, -5), parseDrag('up', 10, 0), parseDrag('move', NaN, 0), parseDrag('move', 200000, 0)]).toEqual([{ kind: 'se', dx: 10, dy: -5 }, null, null, null]);
 });
+it('단축키는 바른 모양으로 고쳐 받고, 등록할 수 없는 조합은 받지 않는다', () => {
+  expect(parseSystemPatch({ contentHotkey: { accelerator: 'shift + ctrl + k', enabled: false } })).toEqual({ contentHotkey: { accelerator: 'Ctrl+Shift+K', enabled: false } });
+  expect(['Win+K', 'Ctrl', 'K', 'Alt+F4', 'Ctrl+Alt+K+L'].map((accelerator) => parseSystemPatch({ hideHotkey: { accelerator, enabled: true } }))).toEqual([{}, {}, {}, {}, {}]);
+});
 it('설정 바꾸기 요청은 아는 칸만 받는다', () => {
   expect(parseSystemPatch({ hideHotkey: { accelerator: 'Ctrl+Alt+K', enabled: true } })).toEqual({ hideHotkey: { accelerator: 'Ctrl+Alt+K', enabled: true } });
   expect(parseSystemPatch({ startWithWindows: true, other: 1 })).toEqual({ startWithWindows: true });

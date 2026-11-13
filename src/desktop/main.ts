@@ -6,7 +6,7 @@ import { parseBool, parseDrag, parsePoint, parseSystemPatch } from './ipc';
 import type { MenuAction, MenuState } from './menu';
 import { resolveRuntime } from './runtime';
 import { guardLoginItem, runSmoke } from './smoke';
-import { startupAction } from './startup';
+import { startupAction, tryLoginItem } from './startup';
 import { buildMenu, createTray, destroyTray, refreshTray } from './tray';
 import {
   beginDrag, dragTo, events, finishAdjust, getSettings, getWindow, installSecurity, isFromWindow, isHidden, keepBottom, markQuitting, registerAppProtocol,
@@ -35,10 +35,16 @@ const hotkeys = new HotkeyManager({
 let hotkeyState: SystemState['hotkeys'] = { hide: 'off', content: 'off' };
 
 // Windows 시작 시 실행은 꾸린 앱의 실제 실행에서만 건다.
-function setLoginItem(openAtLogin: boolean): void {
-  if (rt.manageLoginItem) app.setLoginItemSettings({ openAtLogin });
+// 던지면 적용하지 못한 것으로 보고 false를 돌려준다.
+const setLoginItem = (openAtLogin: boolean): boolean => !rt.manageLoginItem || tryLoginItem((v) => app.setLoginItemSettings({ openAtLogin: v }), openAtLogin);
+function loginItemOn(): boolean | null {
+  if (!rt.manageLoginItem) return getSettings().startWithWindows;
+  try {
+    return app.getLoginItemSettings().openAtLogin;
+  } catch {
+    return getSettings().startWithWindows;
+  }
 }
-const loginItemOn = (): boolean | null => (rt.manageLoginItem ? app.getLoginItemSettings().openAtLogin : getSettings().startWithWindows);
 
 const menuState = (): MenuState => ({
   hidden: isHidden(), contentHidden: getSettings().contentHidden, alwaysOnTop: getSettings().alwaysOnTop,
@@ -89,10 +95,8 @@ function applySystem(patch: SystemPatch): SystemState {
   const next: Parameters<typeof updateSettings>[0] = {};
   if (patch.hideHotkey) next.hideHotkey = patch.hideHotkey;
   if (patch.contentHotkey) next.contentHotkey = patch.contentHotkey;
-  if (patch.startWithWindows !== undefined && rt.manageLoginItem) {
-    setLoginItem(patch.startWithWindows);
-    next.startWithWindows = patch.startWithWindows;
-  }
+  // 걸지 못하면 저장하지 않는다. 돌려주는 상태의 값이 요청과 다르므로 화면이 알 수 있다.
+  if (patch.startWithWindows !== undefined && rt.manageLoginItem && setLoginItem(patch.startWithWindows)) next.startWithWindows = patch.startWithWindows;
   updateSettings(next);
   applyHotkeys();
   refresh();
@@ -153,8 +157,10 @@ if (!app.requestSingleInstanceLock()) {
     });
     startDesktopWindow(rt, join(__dirname, 'preload.cjs'));
     const startup = startupAction({ manage: rt.manageLoginItem, saved: getSettings().startWithWindows });
-    if (startup.register !== null) setLoginItem(startup.register);
-    if (startup.save !== null) updateSettings({ startWithWindows: startup.save });
+    // 걸지 못하면 저장하지 않아 다음 시작에 다시 시도한다.
+    if (startup.register === null || setLoginItem(startup.register)) {
+      if (startup.save !== null) updateSettings({ startWithWindows: startup.save });
+    }
     applyHotkeys();
     events.onChange = refresh;
     createTray(rt.rendererDir, menuState, runAction, () => {

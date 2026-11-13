@@ -10,7 +10,7 @@ import { isAtBottom } from './policy';
 import type { Runtime, Scenario } from './runtime';
 import { loadDesktopSettings } from './settings';
 import { getExStyle, getOwner, windowsBelow } from './win32';
-import { blocked, displayInfos, getHwnd, getMode, getProgman, getWindow, signals, startAdjust, windowState, windowsCreated } from './window';
+import { blocked, displayInfos, getHwnd, getMode, getProgman, getSettings, getWindow, sendCommand, signals, startAdjust, windowState, windowsCreated } from './window';
 
 // main.ts가 메뉴 항목과 단축키가 부르는 길을 시험 실행에 건넨다.
 export type Desk = { runAction(a: MenuAction): void; applySystem(p: SystemPatch): SystemState };
@@ -289,7 +289,60 @@ async function tray(rt: Runtime, desk: Desk): Promise<Result> {
   return { fields, checks };
 }
 
-const SCENARIOS: Partial<Record<Scenario, (rt: Runtime, desk: Desk) => Promise<Result>>> = { attach, bounds, tray };
+// 설정 화면을 앱 안의 길(openSettings 명령, 화면의 입력 이벤트, 다리)로 열어 보고 닫는다. 단축키는 끝날 때 모두 푼다.
+async function settings(_rt: Runtime, desk: Desk): Promise<Result> {
+  const win = getWindow();
+  if (!win) return { fields: {}, checks: { window: false } };
+  await until(() => getMode() !== null, 10000);
+  await until(async () => (await js(win, RENDERED)) === 'calendar', 15000);
+  await until(() => !win.isFocusable(), 3000);
+  const bottom = () => isAtBottom(windowsBelow(getHwnd(), getProgman()), getProgman());
+  const sheet = async (open: boolean) => until(async () => ((await js(win, "!!document.querySelector('.desk-settings')")) as boolean) === open, 5000);
+  const clickTab = (name: string) => js(win, `[...document.querySelectorAll('[role="tab"]')].find((t) => t.textContent === '${name}').click()`);
+  const rowOf = (label: string) => `[...document.querySelectorAll('.srow')].find((r) => r.querySelector('.srow-label').textContent === '${label}')`;
+
+  sendCommand({ type: 'openSettings' });
+  const opened = await sheet(true);
+  const tabs = (await js(win, "[...document.querySelectorAll('[role=\"tab\"]')].map((t) => t.textContent)")) as string[];
+  const interactiveWhileOpen = await until(() => win.isFocusable(), 3000);
+
+  await clickTab('글꼴 및 색상');
+  await js(win, `(() => { const i = ${rowOf('투명도')}.querySelector('input[type="range"]'); i.value = '30'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  const cellBg = (await js(win, "document.documentElement.style.getPropertyValue('--desk-cell-bg')")) as string;
+  const savedTransparency = (await js(win, "JSON.parse(localStorage.getItem('calfif.appearance')).transparency")) as number;
+
+  await clickTab('고급');
+  const hideRow = rowOf('캘린더 숨기기 단축키');
+  await until(async () => ((await js(win, `${hideRow}.querySelector('input.hotkey').disabled`)) as boolean) === false, 5000);
+  await js(win, `${hideRow}.querySelector('input.hotkey').dispatchEvent(new KeyboardEvent('keydown', { code: 'F9', key: 'F9', ctrlKey: true, altKey: true, shiftKey: true, bubbles: true }))`);
+  await js(win, `${hideRow}.querySelector('input[role="switch"]').click()`);
+  await until(() => globalShortcut.isRegistered(HIDE_KEY), 3000);
+  const saved = getSettings().hideHotkey;
+  const hotkeyState = desk.applySystem({}).hotkeys.hide;
+  const hotkey = { accelerator: saved.accelerator, state: hotkeyState, registered: globalShortcut.isRegistered(HIDE_KEY) };
+  const startSwitchDisabled = (await js(win, `${rowOf('Windows 시작 시 실행')}.querySelector('input[role="switch"]').disabled`)) as boolean;
+
+  // 시험이 끝나면 단축키를 풀고 설정도 되돌린다.
+  desk.applySystem({ hideHotkey: { accelerator: HIDE_KEY, enabled: false } });
+  const noneRegistered = !globalShortcut.isRegistered(HIDE_KEY);
+
+  await js(win, "[...document.querySelectorAll('.desk-settings .textbtn')].find((b) => b.textContent === '닫기').click()");
+  const closed = await sheet(false);
+  await until(() => !win.isFocusable(), 3000);
+  const interactiveAfterClose = win.isFocusable();
+  const atBottomAfterClose = await until(bottom, 3000);
+
+  const fields = { opened, tabs, interactiveWhileOpen, cellBg, savedTransparency, hotkey, startSwitchDisabled, noneRegistered, closed, interactiveAfterClose, atBottomAfterClose, loginItemCalls };
+  const checks = {
+    opened, tabs: JSON.stringify(tabs) === JSON.stringify(['캘린더', '셀', '글꼴 및 색상', '고급', '계정']), interactiveWhileOpen,
+    cellBg: cellBg === 'rgba(20, 24, 32, 0.7)', savedTransparency: savedTransparency === 30,
+    hotkey: hotkey.accelerator === HIDE_KEY && hotkey.state === 'ok' && hotkey.registered, startSwitchDisabled, noneRegistered, closed,
+    interactiveAfterClose: interactiveAfterClose === false, atBottomAfterClose, loginItemCalls: loginItemCalls === 0,
+  };
+  return { fields, checks };
+}
+
+const SCENARIOS: Partial<Record<Scenario, (rt: Runtime, desk: Desk) => Promise<Result>>> = { attach, bounds, tray, settings };
 
 export async function runSmoke(rt: Runtime, desk: Desk): Promise<void> {
   const scenario = rt.smoke as Scenario;

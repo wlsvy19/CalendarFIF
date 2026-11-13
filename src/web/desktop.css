@@ -188,3 +188,108 @@
 :root.desk .adjust-handle[data-kind="sw"] { bottom: 0; left: 0; width: 16px; height: 16px; cursor: nesw-resize; }
 :root.desk .adjust-handle[data-kind="nw"] { top: 0; left: 0; width: 16px; height: 16px; cursor: nwse-resize; }
 :root.desk .adjust-handle[data-kind="se"] { bottom: 0; right: 0; width: 16px; height: 16px; cursor: nwse-resize; }
+
+/* PC 앱 설정 화면(settingsPages.ts): 위에 탭, 아래에 한 쪽씩. 시트 높이는 고정하고 쪽만 스크롤한다. */
+:root.desk .desk-settings { height: min(640px, calc(100vh - 48px)); gap: 8px; overflow: hidden; }
+:root.desk .desk-tabs { flex: none; display: flex; gap: 2px; overflow-x: auto; border-bottom: 1px solid var(--hairline); }
+:root.desk .desk-tab {
+  flex: none;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+:root.desk .desk-tab[aria-selected="true"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
+:root.desk .desk-notice { flex: none; }
+:root.desk .desk-panel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; padding-right: 4px; }
+:root.desk .desk-panel .field { margin-bottom: 16px; }
+
+:root.desk .srow {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 14px;
+}
+:root.desk .srow-label { flex: 1 1 170px; min-width: 0; overflow-wrap: anywhere; }
+:root.desk .srow-ctl { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+:root.desk .srow-help,
+:root.desk .srow-error { flex-basis: 100%; margin: 0; font-size: 12px; line-height: 1.4; }
+:root.desk .srow-help { color: var(--muted); }
+:root.desk .srow-error { color: var(--sun); }
+:root.desk .srow-choices { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+:root.desk .srow-choice { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+:root.desk .srow-value { min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
+:root.desk .srow-end { font-size: 12px; color: var(--muted); }
+:root.desk .srow select,
+:root.desk .srow input.hotkey,
+:root.desk .srow input.hex {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+}
+:root.desk .srow select:disabled,
+:root.desk .srow input:disabled { opacity: 0.5; }
+:root.desk .srow input.hotkey { width: 150px; }
+:root.desk .srow input.hex { width: 96px; text-transform: uppercase; }
+:root.desk .srow input[type="range"] { width: 120px; accent-color: var(--accent); }
+:root.desk .srow input[type="checkbox"][role="switch"] {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 24px;
+  margin: 0;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--muted) 45%, var(--surface));
+  cursor: pointer;
+}
+:root.desk .srow input[type="checkbox"][role="switch"]::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface);
+  transition: transform 0.12s;
+}
+:root.desk .srow input[type="checkbox"][role="switch"]:checked { background: var(--accent); }
+:root.desk .srow input[type="checkbox"][role="switch"]:checked::after { transform: translateX(16px); }
+:root.desk .srow input:focus-visible,
+:root.desk .srow select:focus-visible,
+:root.desk .color-btn:focus-visible,
+:root.desk .desk-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:root.desk .color-btn {
+  width: 40px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--sw, var(--surface));
+  cursor: pointer;
+}
+:root.desk .color-btn.none {
+  background:
+    linear-gradient(to top right, transparent calc(50% - 1px), var(--sun) calc(50% - 1px), var(--sun) calc(50% + 1px), transparent calc(50% + 1px)),
+    var(--surface);
+}
+:root.desk .srow-picker { flex-basis: 100%; display: grid; gap: 10px; padding: 8px 0 4px; }
+:root.desk .srow-picker .swatches { gap: 8px; }
+:root.desk .srow-picker .swatch { width: 28px; height: 28px; }
+:root.desk .srow-hex { display: flex; align-items: center; gap: 8px; }
