@@ -108,7 +108,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     interactivity.end('editor');
     if (wasOpen) ctx.onRelease();
   };
-  let settings: { destroy(): void; showPage?(page: SettingsPage): void } | null = null;
+  let settings: { destroy(): void; showPage?(page: SettingsPage): void; setManageUsers(onManage: (() => void) | undefined): void } | null = null;
   let passwordBusy = false;
   const closeSettings = (): void => {
     settings?.destroy();
@@ -151,7 +151,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       corruptFound: outbox.corruptDetected,
       onSignOut: signOutNow,
       onChangePassword: changeMyPassword,
-      // 관리자인지는 설정을 여는 순간의 접근 상태로 정한다.
+      // 여는 순간의 접근 상태로 정하고, 열려 있는 동안 바뀌면 accessChanged가 고친다.
       onManageUsers: getAccess() === 'admin' ? manageUsers : undefined,
       onPasswordBusy: (busy: boolean) => {
         passwordBusy = busy;
@@ -329,6 +329,8 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   syncRoute();
   return {
     accessChanged() {
+      // 확인 중에 연 설정에도 관리자로 확인되면 "사용자 관리"를 더한다(다른 칸은 그대로).
+      settings?.setManageUsers(getAccess() === 'admin' ? manageUsers : undefined);
       if (parseHash(location.hash).name === 'users') showUsers();
     },
     holding: () => editor !== null || passwordBusy,

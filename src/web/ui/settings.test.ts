@@ -66,6 +66,25 @@ it('사용자와 비밀번호 칸은 동기화 뒤, 위젯 앞에 있다', () =>
   expect(labels).toEqual(['계정', '동기화', '사용자', '비밀번호', '위젯']);
 });
 
+it('열린 뒤에 관리자로 확인되면 사용자 관리 단추가 제자리에 생기고, 적던 비밀번호는 그대로다', () => {
+  const { root, button, handle } = mount({ onChangePassword: vi.fn() });
+  expect(button('사용자 관리')).toBeUndefined();
+  button('비밀번호 변경').click();
+  const current = root.querySelector<HTMLInputElement>('input[name="current"]')!;
+  current.value = '적던 비밀번호';
+  current.focus();
+  const onManage = vi.fn();
+  handle.setManageUsers(onManage);
+  handle.setManageUsers(onManage);
+  expect([...root.querySelectorAll('.field-label')].map((l) => l.textContent)).toEqual(['계정', '동기화', '사용자', '비밀번호', '위젯']);
+  expect([root.querySelector('input[name="current"]') === current, current.value, document.activeElement === current]).toEqual([true, '적던 비밀번호', true]);
+  button('사용자 관리').click();
+  expect(onManage).toHaveBeenCalledTimes(1);
+  handle.setManageUsers(undefined);
+  expect(button('사용자 관리')).toBeUndefined();
+  expect(root.querySelector('input[name="current"]')).toBe(current);
+});
+
 function pwSetup(onChangePassword: (c: string, n: string) => Promise<{ ok: boolean; message: string }>) {
   const m = mount({ onChangePassword });
   const input = (name: string) => m.root.querySelector<HTMLInputElement>(`input[name="${name}"]`)!;

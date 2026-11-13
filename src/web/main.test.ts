@@ -441,3 +441,32 @@ it('로그아웃하고 다른 계정으로 로그인하면 앞 계정의 접근 
   expect(second.root.querySelector<HTMLElement>('.blocked-pending')!.hidden).toBe(true);
   expect(localStorage.getItem('calfif.outbox.first-acct')).toContain('앞 계정의 메모');
 });
+
+it('확인 중에 연 설정에도 관리자로 확인되면 사용자 관리가 생기고(적던 비밀번호는 그대로), 누르면 열린다', async () => {
+  const { root, button } = await start('late-admin');
+  bridge.emit({ type: 'openSettings', page: 'account' });
+  await vi.waitFor(() => expect(root.querySelector('.sheet.settings')).not.toBeNull());
+  const sheet = root.querySelector('.sheet.settings');
+  expect(button('사용자 관리')).toBeUndefined();
+  button('비밀번호 변경').click();
+  const current = root.querySelector<HTMLInputElement>('input[name="current"]')!;
+  current.value = 'old-pass';
+  current.dispatchEvent(new Event('input', { bubbles: true }));
+
+  access.emit!(server(accessDoc({ role: 'admin' })));
+  expect(root.querySelector('.sheet.settings')).toBe(sheet);
+  expect([root.querySelector('input[name="current"]') === current, current.value]).toEqual([true, 'old-pass']);
+  button('취소').click();
+  button('사용자 관리').click();
+  await vi.waitFor(() => expect(root.querySelector('.sheet.users')).not.toBeNull());
+  expect(root.querySelector('.sheet.settings')).toBeNull();
+});
+
+it('확인 중에 연 설정은 사용자로 확인되면 사용자 관리를 보이지 않는다', async () => {
+  const { root, button } = await start('late-user');
+  location.hash = 'settings';
+  await vi.waitFor(() => expect(root.querySelector('.sheet.settings')).not.toBeNull());
+  access.emit!(server(accessDoc()));
+  await tick();
+  expect([root.querySelector('.sheet.settings') !== null, button('사용자 관리')]).toEqual([true, undefined]);
+});

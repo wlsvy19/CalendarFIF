@@ -208,3 +208,18 @@ it('PC 앱의 설정 상자는 제목 줄을 끌어 옮길 수 있다', () => {
   const { root } = mount();
   expect(root.querySelector('.sheet-bar')!.classList.contains('drag-handle')).toBe(true);
 });
+it('계정 쪽의 사용자 관리 단추는 상자가 열린 뒤에도 생기고 없어진다', () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const handle = mountDesktopSettings(root, { appearance: DEFAULT_APPEARANCE, onAppearance: vi.fn(), bridge: new FakeBridge(), onClose: vi.fn(), page: 'account',
+    account: { email: 'test@example.com', pending: 0, storageOk: true, corruptFound: false, onSignOut: vi.fn() } });
+  const manage = () => [...root.querySelectorAll<HTMLButtonElement>('#settings-panel-account button')].find((b) => b.textContent === '사용자 관리');
+  expect(manage()).toBeUndefined();
+  const onManage = vi.fn();
+  handle.setManageUsers(onManage);
+  manage()!.click();
+  expect(onManage).toHaveBeenCalledTimes(1);
+  handle.setManageUsers(undefined);
+  expect(manage()).toBeUndefined();
+  handle.destroy();
+});
