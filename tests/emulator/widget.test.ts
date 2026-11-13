@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { readMonth, refreshSession, signIn, type ApiError, type Config } from '../../src/widget/api';
-import { drawnTexts, makeFakeHost, type FakeHost } from '../../src/widget/fakeHost';
+import { drawnTexts, makeFakeHost, nativeTexts, type FakeHost } from '../../src/widget/fakeHost';
 import { run } from '../../src/widget/main';
 import { OWNER } from './env';
 
@@ -77,23 +77,24 @@ describe('위젯의 REST 호출 (에뮬레이터)', () => {
   });
 });
 
-describe('run 전체 (에뮬레이터)', () => {
+describe.each([['기본 부품 위젯', null], ['그림 위젯(매개변수 image)', 'image']])('run 전체 (에뮬레이터), %s', (_name, widgetParameter) => {
+  const drawn = (h: FakeHost): string[] => (widgetParameter === null ? nativeTexts(h) : drawnTexts(h));
   it('앱에서 로그인하고, 위젯으로 읽고, 연결이 끊기면 보관본을 오프라인으로 그린다', async () => {
-    const app = makeFakeHost({ runsInApp: true, alerts: [{ button: 0, fields: [account.email, account.password] }] });
+    const app = makeFakeHost({ widgetParameter, runsInApp: true, alerts: [{ button: 0, fields: [account.email, account.password] }] });
     await run(app, cfg, () => now);
     expect(app.state.widgets.at(-1)!.presented).toBe('large');
-    expect(drawnTexts(app)).toContain('리뷰');
+    expect(drawn(app)).toContain('리뷰');
 
     const carry = (h: FakeHost) => ({ keychain: Object.fromEntries(h.state.keychain), files: Object.fromEntries(h.state.files) });
-    const widget = makeFakeHost({ ...carry(app) });
+    const widget = makeFakeHost({ widgetParameter, ...carry(app) });
     await run(widget, cfg, () => now);
     expect(widget.state.alerts).toEqual([]);
     expect(widget.state.setWidgets).toHaveLength(1);
-    expect(drawnTexts(widget)).toContain('리뷰');
-    expect(drawnTexts(widget)).not.toContain('오프라인');
+    expect(drawn(widget)).toContain('리뷰');
+    expect(drawn(widget)).not.toContain('오프라인');
 
-    const offline = makeFakeHost({ ...carry(widget) });
+    const offline = makeFakeHost({ widgetParameter, ...carry(widget) });
     await run(offline, { ...cfg, firestoreBase: 'http://127.0.0.1:1' }, () => now);
-    expect(drawnTexts(offline)).toEqual(expect.arrayContaining(['리뷰', '오프라인']));
+    expect(drawn(offline)).toEqual(expect.arrayContaining(['리뷰', '오프라인']));
   });
 });

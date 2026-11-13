@@ -3,15 +3,19 @@ import type { DayValue } from '../core/types';
 import { isApiError, readMonth, refreshSession, signIn, type Config } from './api';
 import type { Host, ListWidgetLike } from './host';
 import { makeWidget } from './render';
+import { renderTree } from './renderTree';
 import { buildScene, messageScene, type MonthData, type Scene } from './scene';
 import { widgetSize, type Family, type Size } from './sizes';
 import type { Theme } from './theme';
+import { buildTree, messageTree, type Tree } from './tree';
 
 const REFRESH_KEY = 'calendarfif.refreshToken';
 const UID_KEY = 'calendarfif.uid';
 const CACHE_FILE = 'calendarfif-cache.json';
 
-type Env = { family: Family; theme: Theme; size: Size; today: string };
+/** 위젯에 놓을 것: 기본은 기본 부품의 나무, 위젯 매개변수에 image가 있으면 그림 장면. */
+type View = { tree: Tree } | { scene: Scene };
+type Env = { family: Family; image: boolean; theme: Theme; size: Size; today: string };
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 const localDate = (d: Date): string => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -20,11 +24,35 @@ function pickFamily(raw: string | null): Family {
   return raw === 'small' || raw === 'medium' ? raw : 'large';
 }
 
-function makeEnv(host: Host, family: Family, now: Date): Env {
-  const param = typeof host.args.widgetParameter === 'string' ? host.args.widgetParameter.trim().toLowerCase() : '';
-  const theme: Theme = param === 'light' || param === 'dark' ? param : host.Device.isUsingDarkAppearance() ? 'dark' : 'light';
-  return { family, theme, size: widgetSize(host.Device.screenSize(), family), today: localDate(now) };
+/** 위젯 매개변수를 낱말로 나눈다(소문자, 공백과 쉼표로). */
+function paramWords(host: Host): string[] {
+  const raw = host.args.widgetParameter;
+  return typeof raw === 'string' ? raw.toLowerCase().split(/[\s,]+/).filter((w) => w !== '') : [];
 }
+
+function systemIsDark(host: Host): boolean {
+  try {
+    return host.Device.isUsingDarkAppearance();
+  } catch {
+    return false; // 위젯 안에서는 이 질문이 지원되지 않아 던질 수 있다
+  }
+}
+
+function makeEnv(host: Host, family: Family, now: Date): Env {
+  const words = paramWords(host);
+  const image = words.includes('image') || words.includes('그림');
+  // 밝기는 그림에서만 정한다. 기본 부품의 위젯은 색이 화면 밝기를 스스로 따른다.
+  const theme: Theme = !image ? 'light' : words.includes('dark') ? 'dark' : words.includes('light') ? 'light' : systemIsDark(host) ? 'dark' : 'light';
+  return { family, image, theme, size: widgetSize(host.Device.screenSize(), family), today: localDate(now) };
+}
+
+function monthView(env: Env, month: MonthData, offline: boolean): View {
+  const input = { family: env.family, size: env.size, today: env.today, month, offline };
+  return env.image ? { scene: buildScene({ ...input, theme: env.theme }) } : { tree: buildTree(input) };
+}
+
+const toWidget = (host: Host, view: View, appUrl: string, now: Date): ListWidgetLike =>
+  'tree' in view ? renderTree(host, view.tree, appUrl, now) : makeWidget(host, view.scene, appUrl, now);
 
 // 보관해 둔 달: 네트워크가 안 될 때 마지막으로 읽은 것을 그린다.
 const cachePath = (host: Host): string => {
@@ -77,17 +105,18 @@ function storeLogin(host: Host, refreshToken: string, uid: string): void {
   host.Keychain.set(UID_KEY, uid);
 }
 
-const message = (env: Env, title: string, lines: string[]): Scene => messageScene({ theme: env.theme, size: env.size, title, lines });
-const loginHint = (env: Env): Scene => message(env, '로그인이 필요합니다', ['Scriptable 앱에서', '이 스크립트를 한 번 실행해', '로그인하세요.']);
+const message = (env: Env, title: string, lines: string[]): View =>
+  env.image ? { scene: messageScene({ theme: env.theme, size: env.size, title, lines }) } : { tree: messageTree({ title, lines }) };
+const loginHint = (env: Env): View => message(env, '로그인이 필요합니다', ['Scriptable 앱에서', '이 스크립트를 한 번 실행해', '로그인하세요.']);
 
-/** 이번 달 장면을 만든다. 읽지 못하는 까닭이 있으면 그 까닭을 알리는 장면을 돌려준다. */
-async function load(host: Host, cfg: Config, env: Env, now: Date): Promise<Scene> {
+/** 이번 달 위젯에 놓을 것을 만든다. 읽지 못하는 까닭이 있으면 그 까닭을 알리는 것을 돌려준다. */
+async function load(host: Host, cfg: Config, env: Env, now: Date): Promise<View> {
   const token = host.Keychain.contains(REFRESH_KEY) ? host.Keychain.get(REFRESH_KEY) : '';
   if (token === '') return loginHint(env);
   const monthId = env.today.slice(0, 7);
-  const fromCache = (code: string | null): Scene => {
+  const fromCache = (code: string | null): View => {
     const cached = readCache(host, monthId);
-    if (cached) return buildScene({ family: env.family, theme: env.theme, size: env.size, today: env.today, month: cached, offline: true });
+    if (cached) return monthView(env, cached, true);
     return code === null
       ? message(env, '불러오지 못했습니다', ['네트워크를 확인하세요.'])
       : message(env, '불러오지 못했습니다', ['잠시 뒤 다시 시도합니다.', `(${Array.from(code).slice(0, 40).join('')})`]);
@@ -98,7 +127,7 @@ async function load(host: Host, cfg: Config, env: Env, now: Date): Promise<Scene
     const days = await readMonth(host, cfg, session, monthId);
     const month: MonthData = { monthId, days };
     writeCache(host, month, now);
-    return buildScene({ family: env.family, theme: env.theme, size: env.size, today: env.today, month, offline: false });
+    return monthView(env, month, false);
   } catch (e) {
     if (!isApiError(e)) throw e;
     if (e.kind === 'network') return fromCache(null);
@@ -135,8 +164,12 @@ async function askLogin(host: Host, cfg: Config): Promise<boolean> {
     try {
       const session = await signIn(host, cfg, email, password);
       storeLogin(host, session.refreshToken, session.uid);
-      const fm = host.FileManager.local();
-      if (fm.fileExists(cachePath(host))) fm.remove(cachePath(host)); // 다른 계정의 것일 수 있다
+      try {
+        const fm = host.FileManager.local();
+        if (fm.fileExists(cachePath(host))) fm.remove(cachePath(host)); // 다른 계정의 것일 수 있다
+      } catch {
+        // 지우지 못해도 로그인은 저장됐다.
+      }
       return true;
     } catch (e) {
       if (!isApiError(e)) throw e;
@@ -160,8 +193,8 @@ async function notify(host: Host, title: string, text: string): Promise<void> {
 async function runInApp(host: Host, cfg: Config, now: () => Date): Promise<void> {
   const show = async (): Promise<void> => {
     const at = now();
-    const scene = await load(host, cfg, makeEnv(host, 'large', at), at);
-    await makeWidget(host, scene, cfg.appUrl, at).presentLarge();
+    const view = await load(host, cfg, makeEnv(host, 'large', at), at);
+    await toWidget(host, view, cfg.appUrl, at).presentLarge();
   };
   if (!host.Keychain.contains(REFRESH_KEY)) {
     if (await askLogin(host, cfg)) await show();
@@ -188,7 +221,7 @@ const errorLines = (e: unknown): string[] => {
   return lines;
 };
 
-/** 마지막 수단: 오류 위젯을 둔다. 이것마저 그리지 못하면 빈 위젯을 둔다. 절대 던지지 않는다. */
+/** 마지막 수단: 오류 위젯을 둔다. 이것마저 그리지 못하면 '오류' 글자만 있는 위젯을 둔다. 절대 던지지 않는다. */
 async function deliverError(host: Host, cfg: Config, now: () => Date, error: unknown): Promise<void> {
   const inApp = host.config.runsInApp;
   try {
@@ -196,13 +229,18 @@ async function deliverError(host: Host, cfg: Config, now: () => Date, error: unk
     try {
       const at = now();
       const env = makeEnv(host, inApp ? 'large' : pickFamily(host.config.widgetFamily), at);
-      widget = makeWidget(host, message(env, '오류', errorLines(error)), cfg.appUrl, at);
+      widget = toWidget(host, message(env, '오류', errorLines(error)), cfg.appUrl, at);
     } catch {
       widget = new host.ListWidget();
       try {
         widget.url = cfg.appUrl;
       } catch {
-        // 주소가 안 들어가도 빈 위젯은 둔다.
+        // 주소가 안 들어가도 위젯은 둔다.
+      }
+      try {
+        widget.addText('오류');
+      } catch {
+        // 글자가 안 들어가도 빈 위젯은 둔다.
       }
     }
     if (inApp) await widget.presentLarge();
@@ -220,7 +258,7 @@ export async function run(host: Host, cfg: Config, now: () => Date = () => new D
     } else {
       const at = now();
       const env = makeEnv(host, pickFamily(host.config.widgetFamily), at);
-      host.Script.setWidget(makeWidget(host, await load(host, cfg, env, at), cfg.appUrl, at));
+      host.Script.setWidget(toWidget(host, await load(host, cfg, env, at), cfg.appUrl, at));
     }
   } catch (e) {
     await deliverError(host, cfg, now, e);

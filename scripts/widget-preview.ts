@@ -1,4 +1,5 @@
-// 위젯이 그릴 장면(src/widget/scene.ts)을 헤드리스 Edge의 canvas에 그려서 build/shots/에 PNG로 저장한다.
+// 위젯 그림(src/widget/scene.ts)을 헤드리스 Edge의 canvas에 그리고, 기본 부품 위젯(src/widget/tree.ts)은 HTML 배치로 보여 주어 build/shots/에 PNG로 저장한다.
+// 기본 부품 쪽은 HTML의 배치라서 iOS의 마지막 픽셀이 아니라 구조와 비율을 보여 준다.
 // 지어낸 자료만 쓴다. 사용법: npx tsx scripts/widget-preview.ts
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -6,9 +7,11 @@ import { launchEdge } from './cdp';
 import { buildScene, messageScene, type MonthData, type Scene } from '../src/widget/scene';
 import { widgetSize, type Family } from '../src/widget/sizes';
 import type { Theme } from '../src/widget/theme';
+import { buildTree, messageTree, type Node, type StackNode, type Tree } from '../src/widget/tree';
 
 const SCREEN = { width: 402, height: 874 };
 const SCALE = 3;
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 const november: MonthData = {
   monthId: '2026-11',
@@ -58,6 +61,76 @@ const shots: Shot[] = [
     scene: messageScene({ theme: 'light', size: widgetSize(SCREEN, 'small'), title: 'CalendarFIF', lines: ['Scriptable 앱에서', '이 스크립트를 한 번 실행해', '로그인하세요.'] }),
   },
 ];
+
+type NativeShot = { name: string; tree: Tree; theme: Theme; width: number; height: number };
+const tree = (family: Family, month: MonthData, today: string, offline = false): Tree =>
+  buildTree({ family, size: widgetSize(SCREEN, family), today, month, offline });
+const sizeOf = (family: Family) => widgetSize(SCREEN, family);
+
+const nativeShots: NativeShot[] = [
+  { name: 'widget-native-large-light', tree: tree('large', november, '2026-11-13'), theme: 'light', ...sizeOf('large') },
+  { name: 'widget-native-large-dark', tree: tree('large', november, '2026-11-13'), theme: 'dark', ...sizeOf('large') },
+  { name: 'widget-native-large-6rows-light', tree: tree('large', january, '2027-01-09'), theme: 'light', ...sizeOf('large') },
+  { name: 'widget-native-large-offline-dark', tree: tree('large', november, '2026-11-13', true), theme: 'dark', ...sizeOf('large') },
+  { name: 'widget-native-medium-light', tree: tree('medium', november, '2026-11-13'), theme: 'light', ...sizeOf('medium') },
+  { name: 'widget-native-medium-dark', tree: tree('medium', november, '2026-11-13'), theme: 'dark', ...sizeOf('medium') },
+  { name: 'widget-native-small-light', tree: tree('small', november, '2026-11-13'), theme: 'light', ...sizeOf('small') },
+  { name: 'widget-native-small-dark', tree: tree('small', november, '2026-11-13'), theme: 'dark', ...sizeOf('small') },
+  { name: 'widget-native-message-light', tree: messageTree({ title: 'CalendarFIF', lines: ['Scriptable 앱에서', '이 스크립트를 한 번 실행해', '로그인하세요.'] }), theme: 'light', ...sizeOf('small') },
+];
+
+// 나무를 HTML로 바꾼다. iOS와 같은 규칙: 남는 곳 채우기(spacer)가 든 상자는 그 방향으로 늘어나고,
+// 늘어나는 형제들은 남는 길이를 똑같이 나눈다. 상자는 자식 중 하나라도 늘어나면 늘어난다.
+// 취소선 글자(U+0336)는 이 PC의 글꼴이 한글 위에 그리지 못하고 네모로 보이므로, 미리 보기에서는 줄 긋기로 바꿔 그린다.
+// 실제 iOS에서 어떻게 보이는지는 폰에서 확인해야 한다.
+const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/(.)̶/gu, '<s>$1</s>');
+type Axis = 'x' | 'y';
+const mainAxis = (dir: 'h' | 'v'): Axis => (dir === 'h' ? 'x' : 'y');
+function flexes(node: Node, axis: Axis, parentDir: 'h' | 'v'): boolean {
+  if (node.kind === 'spacer') return node.length === null && mainAxis(parentDir) === axis;
+  if (node.kind === 'text') return false;
+  return node.children.some((c) => flexes(c, axis, node.dir));
+}
+const WEIGHTS = { regular: 400, medium: 500, semibold: 600, bold: 700 };
+
+function nodeHtml(node: Node, parentDir: 'h' | 'v', theme: Theme): string {
+  if (node.kind === 'spacer') {
+    if (node.length === null) return '<div style="flex:1 1 0;min-width:0;min-height:0"></div>';
+    return `<div style="flex:none;${parentDir === 'h' ? 'width' : 'height'}:${node.length}px"></div>`;
+  }
+  const main = mainAxis(parentDir);
+  const cross: Axis = main === 'x' ? 'y' : 'x';
+  const placement = [
+    flexes(node, main, parentDir) ? 'flex:1 1 0;min-width:0;min-height:0' : 'flex:none',
+    flexes(node, cross, parentDir) ? 'align-self:stretch' : '',
+  ].filter(Boolean).join(';');
+  if (node.kind === 'stack') return stackHtml(node, theme, placement);
+  const clamp = node.lines > 0 ? `display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${node.lines};overflow:hidden;` : '';
+  const opacity = node.opacity !== undefined ? `opacity:${node.opacity};` : '';
+  const style = `${placement};font-size:${node.size}px;font-weight:${WEIGHTS[node.weight]};color:${node.color[theme]};${opacity}white-space:pre-line;line-height:1.22;${clamp}`;
+  return `<div style="${style}">${esc(node.text)}</div>`;
+}
+
+function stackHtml(s: StackNode, theme: Theme, placement: string): string {
+  const align = s.dir === 'h' ? { top: 'flex-start', center: 'center', bottom: 'flex-end' }[s.align ?? 'top'] : 'flex-start';
+  const style = [
+    placement,
+    'display:flex', `flex-direction:${s.dir === 'h' ? 'row' : 'column'}`, `align-items:${align}`, 'box-sizing:border-box',
+    s.spacing ? `gap:${s.spacing}px` : '',
+    s.padding ? `padding:${s.padding[0]}px ${s.padding[3]}px ${s.padding[2]}px ${s.padding[1]}px` : '',
+    s.background ? `background:${s.background[theme]}` : '',
+    s.radius !== undefined ? `border-radius:${s.radius}px` : '',
+  ].filter(Boolean).join(';');
+  return `<div style="${style}">${s.children.map((c) => nodeHtml(c, s.dir, theme)).join('')}</div>`;
+}
+
+/** 위젯 한 개: ListWidget은 세로로 쌓는 상자다. */
+function widgetHtml(shot: NativeShot): string {
+  const t = shot.tree;
+  const root: StackNode = { kind: 'stack', dir: 'v', children: t.children, spacing: t.spacing, padding: t.padding, background: t.background };
+  const box = stackHtml(root, shot.theme, `width:${shot.width}px;height:${shot.height}px;overflow:hidden;border-radius:22px`);
+  return `<!doctype html><meta charset="utf-8"><title>${shot.name}</title><body style="margin:0;background:#8a8f98;font-family:-apple-system,'Malgun Gothic',sans-serif">${box}</body>`;
+}
 
 // 브라우저 쪽: 장면 하나를 canvas에 그린다(Scriptable의 DrawContext가 하는 일과 같다).
 const PAINT = `
@@ -117,6 +190,18 @@ async function main(): Promise<void> {
       const file = resolve(outDir, `${name}.png`);
       writeFileSync(file, Buffer.from(url.replace(/^data:image\/png;base64,/, ''), 'base64'));
       console.log(`${name}.png  ${scene.width}x${scene.height}pt  ${scene.draws.length} commands`);
+    }
+    await cdp.send('Page.enable');
+    for (const shot of nativeShots) {
+      const htmlFile = resolve('build', `${shot.name}.html`);
+      writeFileSync(htmlFile, widgetHtml(shot));
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width: shot.width, height: shot.height, deviceScaleFactor: SCALE, mobile: false });
+      await cdp.send('Page.navigate', { url: `file:///${htmlFile.replace(/\\/g, '/')}` });
+      await sleep(400);
+      await cdp.evaluate('document.fonts.ready.then(() => true)');
+      const png = await cdp.send('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: shot.width, height: shot.height, scale: 1 } });
+      writeFileSync(resolve(outDir, `${shot.name}.png`), Buffer.from(png.data, 'base64'));
+      console.log(`${shot.name}.png  ${shot.width}x${shot.height}pt  native`);
     }
   } finally {
     cdp.close();

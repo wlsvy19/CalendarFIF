@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Config } from './api';
-import { drawnTexts, makeFakeHost, widgetRecord, type FakeAnswer, type FakeHost, type FakeOptions, type FakeRequest } from './fakeHost';
+import { drawnTexts, makeFakeHost, nativeTexts, widgetRecord, type FakeAnswer, type FakeNode, type FakeHost, type FakeOptions, type FakeRequest } from './fakeHost';
 import { readCache, run } from './main';
 
 const cfg: Config = { projectId: 'demo-calfif', apiKey: 'demo-key', appUrl: 'https://example.test/' };
@@ -20,7 +20,9 @@ function backend(b: Backend = {}): (req: FakeRequest) => FakeAnswer {
     return (b.read ?? (() => ({ body: memoDoc })))(req);
   };
 }
-const make = (o: FakeOptions, b?: Backend): FakeHost => makeFakeHost({ handler: backend(b), ...o });
+// 기본 부품 위젯이 기본이다. 이 파일의 앞쪽 시험은 그림 위젯을 보므로 매개변수 image를 기본으로 준다.
+const make = (o: FakeOptions, b?: Backend): FakeHost => makeFakeHost({ handler: backend(b), widgetParameter: 'image', ...o });
+const makeNative = (o: FakeOptions, b?: Backend): FakeHost => makeFakeHost({ handler: backend(b), ...o });
 const loggedIn = { [REFRESH]: 'RT1', [UID]: 'owner-test-uid' };
 const lastWidget = (h: FakeHost) => widgetRecord(h.state.setWidgets.at(-1));
 
@@ -144,16 +146,16 @@ describe('위젯 크기와 색', () => {
   });
 
   it('위젯 매개변수가 기기 설정보다 먼저다', async () => {
-    const dark = make({ keychain: loggedIn, widgetParameter: ' Dark ', dark: false });
+    const dark = make({ keychain: loggedIn, widgetParameter: ' image  Dark ', dark: false });
     await run(dark, cfg, now);
     expect(dark.state.contexts[0].calls[0]).toEqual(['setFillColor', { hex: '#161B22', alpha: 1 }]);
-    const light = make({ keychain: loggedIn, widgetParameter: 'LIGHT', dark: true });
+    const light = make({ keychain: loggedIn, widgetParameter: 'IMAGE,LIGHT', dark: true });
     await run(light, cfg, now);
     expect(light.state.contexts[0].calls[0]).toEqual(['setFillColor', { hex: '#FFFFFF', alpha: 1 }]);
   });
 
   it('매개변수가 없거나 이상하면 기기 설정을 따른다', async () => {
-    const a = make({ keychain: loggedIn, widgetParameter: 'blue', dark: true });
+    const a = make({ keychain: loggedIn, widgetParameter: 'image blue', dark: true });
     await run(a, cfg, now);
     expect(a.state.contexts[0].calls[0]).toEqual(['setFillColor', { hex: '#161B22', alpha: 1 }]);
     const b = make({ keychain: loggedIn, dark: false });
@@ -341,5 +343,155 @@ describe('비밀이 새지 않는다', () => {
     expect(texts).toContain('오류');
     for (const t of tokens) expect(texts.join('\n')).not.toContain(t);
     for (const t of ['pw-secret']) expect(JSON.stringify([...host.state.files])).not.toContain(t);
+  });
+});
+
+describe('기본 부품 위젯(기본)', () => {
+  const kinds = (nodes: FakeNode[]): string[] => nodes.flatMap((n) => (n.kind === 'stack' ? ['stack', ...kinds(n.children)] : [n.kind]));
+
+  it('매개변수가 없으면 기본 부품으로 만들고 그림은 쓰지 않는다', async () => {
+    const host = makeNative({ keychain: loggedIn });
+    await run(host, cfg, now);
+    expect(host.state.contexts).toEqual([]);
+    expect(host.state.setWidgets).toHaveLength(1);
+    const rec = lastWidget(host);
+    expect(rec.props.backgroundImage).toBeNull();
+    expect(rec.props.url).toBe('https://example.test/');
+    expect(kinds(rec.children)).toEqual(expect.arrayContaining(['stack', 'text', 'spacer']));
+    expect(nativeTexts(host)).toEqual(expect.arrayContaining(['2026년 11월', '리뷰']));
+    expect(nativeTexts(host)).not.toContain('오프라인');
+  });
+
+  it('light와 dark는 기본 부품 위젯에서는 무시한다(색이 스스로 따른다)', async () => {
+    const plain = makeNative({ keychain: loggedIn });
+    await run(plain, cfg, now);
+    for (const parameter of ['dark', 'light', 'Dark, light']) {
+      const host = makeNative({ keychain: loggedIn, widgetParameter: parameter, dark: true });
+      await run(host, cfg, now);
+      expect(lastWidget(host)).toEqual(lastWidget(plain));
+    }
+  });
+
+  it('작은 위젯은 오늘 하나만 보여 준다', async () => {
+    const small = makeNative({ keychain: loggedIn, widgetFamily: 'small' });
+    await run(small, cfg, now);
+    expect(nativeTexts(small)).toEqual(expect.arrayContaining(['13', '11월', '금요일', '리뷰']));
+  });
+
+  it('보관본으로 그리면 오프라인 글자가 있다', async () => {
+    const files = { [CACHE]: JSON.stringify({ monthId: '2026-11', days: { '13': { text: '보관', color: '' } }, savedAt: 1 }) };
+    const host = makeNative({ keychain: loggedIn, files }, { refresh: () => { throw new Error('offline'); } });
+    await run(host, cfg, now);
+    expect(nativeTexts(host)).toEqual(expect.arrayContaining(['보관', '오프라인']));
+  });
+
+  it('메시지 위젯: 로그인 안내와 권한 안내', async () => {
+    const hint = makeNative({});
+    await run(hint, cfg, now);
+    expect(nativeTexts(hint)).toEqual(['로그인이 필요합니다', 'Scriptable 앱에서', '이 스크립트를 한 번 실행해', '로그인하세요.']);
+    const denied = makeNative({ keychain: loggedIn }, { read: () => err(403, 'PERMISSION_DENIED') });
+    await run(denied, cfg, now);
+    expect(nativeTexts(denied)).toContain('권한이 없습니다');
+  });
+
+  it('오류가 나면 오류 위젯, 메시지는 28자씩 3줄까지', async () => {
+    const host = makeNative({ keychain: loggedIn });
+    host.Keychain.get = () => { throw new Error('나'.repeat(120)); };
+    await run(host, cfg, now);
+    const texts = nativeTexts(host);
+    expect(texts[0]).toBe('오류');
+    expect(texts.slice(1).join('')).toBe('나'.repeat(84));
+  });
+
+  it('앱에서의 미리 보기도 기본 부품 위젯', async () => {
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [{ button: 0 }], widgetFamily: 'small' });
+    await run(host, cfg, now);
+    expect(host.state.widgets.at(-1)!.presented).toBe('large');
+    expect(host.state.contexts).toEqual([]);
+    expect(nativeTexts(host)).toEqual(expect.arrayContaining(['2026년 11월', '리뷰']));
+  });
+
+  it('로그인 뒤 보관 파일을 지우다 던져도 로그인은 저장되고 위젯을 보여 준다', async () => {
+    const old = JSON.stringify({ monthId: '2026-11', days: {}, savedAt: 1 });
+    const host = makeNative({ runsInApp: true, files: { [CACHE]: old }, alerts: [{ button: 0, fields: ['a@example.com', 'pw'] }] });
+    const local = host.FileManager.local();
+    host.FileManager.local = () => ({ ...local, remove: () => { throw new Error('지우기 시험 오류'); } });
+    await run(host, cfg, now);
+    expect(host.state.alerts).toHaveLength(1); // 오류 알림이 없다
+    expect(host.state.keychain.get(REFRESH)).toBe('RT1');
+    expect(host.state.widgets.at(-1)!.presented).toBe('large');
+    expect(nativeTexts(host)).not.toContain('오류');
+    expect(nativeTexts(host)).toContain('리뷰');
+  });
+});
+
+describe('그림 위젯(매개변수 image)', () => {
+  const firstFill = (h: FakeHost) => h.state.contexts[0].calls[0];
+
+  it.each([
+    ['image dark', '#161B22'],
+    ['Image,Light', '#FFFFFF'],
+    ['그림 dark', '#161B22'],
+    [' IMAGE   LIGHT ', '#FFFFFF'],
+  ])('%s: 그림으로 그리고 밝기를 정한다', async (parameter, hex) => {
+    // 기기가 반대 밝기여도 매개변수가 먼저다.
+    const host = makeNative({ keychain: loggedIn, widgetParameter: parameter, dark: !parameter.toLowerCase().includes('dark') });
+    await run(host, cfg, now);
+    expect(firstFill(host)).toEqual(['setFillColor', { hex, alpha: 1 }]);
+    expect(lastWidget(host).props.backgroundImage).not.toBeNull();
+    expect(lastWidget(host).children).toEqual([]);
+  });
+
+  it('image만 있으면 기기의 밝기를 따르고, 그 질문이 던져도 밝게 그린다', async () => {
+    const dark = makeNative({ keychain: loggedIn, widgetParameter: 'image', dark: true });
+    await run(dark, cfg, now);
+    expect(firstFill(dark)).toEqual(['setFillColor', { hex: '#161B22', alpha: 1 }]);
+    const throwing = makeNative({ keychain: loggedIn, widgetParameter: 'image' });
+    throwing.Device.isUsingDarkAppearance = () => { throw new Error('위젯에서는 지원하지 않는다'); };
+    await run(throwing, cfg, now);
+    expect(firstFill(throwing)).toEqual(['setFillColor', { hex: '#FFFFFF', alpha: 1 }]);
+    expect(drawnTexts(throwing)).toContain('리뷰');
+  });
+
+  it('메시지 위젯도 그림', async () => {
+    const host = makeNative({ widgetParameter: 'image' });
+    await run(host, cfg, now);
+    expect(drawnTexts(host)).toContain('로그인이 필요합니다');
+    expect(nativeTexts(host)).toEqual([]);
+  });
+});
+
+describe('마지막 수단(기본 부품)', () => {
+  it('위젯을 못 만들면 빈 위젯에 오류 글자를 둔다', async () => {
+    const host = makeNative({ keychain: loggedIn, failWidgets: 2 });
+    await expect(run(host, cfg, now)).resolves.toBeUndefined();
+    expect(host.state.setWidgets).toHaveLength(1);
+    expect(nativeTexts(host)).toEqual(['오류']);
+    expect(lastWidget(host).props.url).toBe('https://example.test/');
+  });
+
+  it('글자도 안 들어가면 주소만 있는 빈 위젯, 아무것도 못 만들면 아무것도 두지 않는다', async () => {
+    const noText = makeNative({ keychain: loggedIn, failWidgets: 2 });
+    const Base = noText.ListWidget;
+    noText.ListWidget = class extends Base {
+      constructor() {
+        super();
+        this.addText = () => { throw new Error('글자 시험 오류'); };
+      }
+    };
+    await run(noText, cfg, now);
+    expect(noText.state.setWidgets).toHaveLength(1);
+    expect(nativeTexts(noText)).toEqual([]);
+    expect(lastWidget(noText).props.url).toBe('https://example.test/');
+    const none = makeNative({ keychain: loggedIn, failWidgets: 99 });
+    await expect(run(none, cfg, now)).resolves.toBeUndefined();
+    expect(none.state.setWidgets).toEqual([]);
+  });
+
+  it('앱에서도 오류 글자 위젯을 보여 준다', async () => {
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [{ button: 0 }], failWidgets: 2 });
+    await expect(run(host, cfg, now)).resolves.toBeUndefined();
+    expect(host.state.widgets.at(-1)!.presented).toBe('large');
+    expect(nativeTexts(host)).toEqual(['오류']);
   });
 });

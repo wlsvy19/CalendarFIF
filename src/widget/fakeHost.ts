@@ -1,5 +1,5 @@
 // 시험용 가짜 Scriptable. 묶음(번들)에는 들어가지 않는다.
-import type { DrawContextLike, Host, ListWidgetLike } from './host';
+import type { DrawContextLike, Host, ListWidgetLike, WidgetStackLike, WidgetTextLike } from './host';
 
 /** 묶음 파일에 이 파일의 코드가 섞여 들어가지 않았는지 찾아볼 표지. */
 export const FAKE_HOST_MARKER = 'calfif-fake-host-marker';
@@ -8,7 +8,12 @@ export type FakeRequest = { url: string; method: string; headers: Record<string,
 export type FakeAnswer = { status?: number; body?: unknown };
 export type FakeAlertRecord = { title: string; message: string; fields: { kind: 'text' | 'secure'; placeholder: string; text: string }[]; actions: string[]; cancel: string | null };
 export type FakeContextRecord = { size: unknown; opaque: boolean; respectScreenScale: boolean; calls: [string, ...unknown[]][] };
-export type FakeWidgetRecord = { props: Record<string, unknown>; padding: number[] | null; presented: 'small' | 'medium' | 'large' | null };
+/** 위젯 안에 놓인 것의 기록. 나무와 같은 모양으로 겹쳐 있어 시험이 나무와 견줄 수 있다. */
+export type FakeNode =
+  | { kind: 'text'; text: string; font?: unknown; textColor?: unknown; textOpacity?: number; lineLimit?: number; minimumScaleFactor?: number }
+  | { kind: 'spacer'; length: number | null }
+  | { kind: 'stack'; layout: 'h' | 'v' | null; spacing?: number; padding?: number[]; backgroundColor?: unknown; cornerRadius?: number; align?: 'top' | 'center' | 'bottom'; children: FakeNode[] };
+export type FakeWidgetRecord = { props: Record<string, unknown>; padding: number[] | null; presented: 'small' | 'medium' | 'large' | null; children: FakeNode[] };
 
 export type FakeOptions = {
   /** 없으면 전역 fetch로 보낸다. 던지면 연결 오류로 본다. */
@@ -23,6 +28,8 @@ export type FakeOptions = {
   files?: Record<string, string>;
   /** 처음 이만큼의 DrawContext는 만들 때 오류를 낸다. */
   failDrawing?: number;
+  /** 처음 이만큼의 ListWidget은 만들 때 오류를 낸다. */
+  failWidgets?: number;
 };
 
 export type FakeState = {
@@ -47,11 +54,15 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
   };
   const answers = [...(opts.alerts ?? [])];
   let failures = opts.failDrawing ?? 0;
+  let widgetFailures = opts.failWidgets ?? 0;
 
   class Size { constructor(public width: number, public height: number) {} }
   class Rect { constructor(public x: number, public y: number, public width: number, public height: number) {} }
   class Point { constructor(public x: number, public y: number) {} }
-  class Color { constructor(public hex: string, public alpha: number = 1) {} }
+  class Color {
+    constructor(public hex: string, public alpha: number = 1) {}
+    static dynamic(light: unknown, dark: unknown): unknown { return { dynamic: { light, dark } }; }
+  }
   class Path {
     ops: unknown[][] = [];
     move(p: unknown): void { this.ops.push(['move', p]); }
@@ -138,15 +149,66 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
     getImage(): unknown { return { image: state.contexts.indexOf(this.rec) }; }
   }
 
+  /** 위젯과 상자가 같이 쓰는 "안에 넣기": 기록의 children에 쌓는다. */
+  const adders = (children: FakeNode[]) => ({
+    addText(text: string): WidgetTextLike {
+      const node: Extract<FakeNode, { kind: 'text' }> = { kind: 'text', text };
+      children.push(node);
+      return node as unknown as WidgetTextLike;
+    },
+    addStack(): WidgetStackLike {
+      const node: Extract<FakeNode, { kind: 'stack' }> = { kind: 'stack', layout: null, children: [] };
+      children.push(node);
+      return new FakeStack(node);
+    },
+    addSpacer(length: number | null): unknown {
+      const node: FakeNode = { kind: 'spacer', length };
+      children.push(node);
+      return node;
+    },
+  });
+
+  class FakeStack implements WidgetStackLike {
+    constructor(private rec: Extract<FakeNode, { kind: 'stack' }>) {
+      Object.assign(this, adders(rec.children));
+    }
+    declare addText: WidgetStackLike['addText'];
+    declare addStack: WidgetStackLike['addStack'];
+    declare addSpacer: WidgetStackLike['addSpacer'];
+    get spacing(): number { return this.rec.spacing ?? 0; }
+    set spacing(v: number) { this.rec.spacing = v; }
+    get backgroundColor(): unknown { return this.rec.backgroundColor; }
+    set backgroundColor(v: unknown) { this.rec.backgroundColor = v; }
+    get cornerRadius(): number { return this.rec.cornerRadius ?? 0; }
+    set cornerRadius(v: number) { this.rec.cornerRadius = v; }
+    setPadding(t: number, l: number, b: number, r: number): void { this.rec.padding = [t, l, b, r]; }
+    layoutVertically(): void { this.rec.layout = 'v'; }
+    layoutHorizontally(): void { this.rec.layout = 'h'; }
+    topAlignContent(): void { this.rec.align = 'top'; }
+    centerAlignContent(): void { this.rec.align = 'center'; }
+    bottomAlignContent(): void { this.rec.align = 'bottom'; }
+  }
+
   class ListWidget implements ListWidgetLike {
     backgroundColor: unknown = null;
+    spacing = 0;
     backgroundImage: unknown = null;
     url = '';
     refreshAfterDate: Date = new Date(0);
-    private rec: FakeWidgetRecord = { props: {}, padding: null, presented: null };
-    constructor() { state.widgets.push(this.rec); }
+    private rec: FakeWidgetRecord = { props: {}, padding: null, presented: null, children: [] };
+    constructor() {
+      if (widgetFailures > 0) {
+        widgetFailures -= 1;
+        throw new Error('위젯 시험 오류');
+      }
+      state.widgets.push(this.rec);
+      Object.assign(this, adders(this.rec.children));
+    }
+    declare addText: ListWidgetLike['addText'];
+    declare addStack: ListWidgetLike['addStack'];
+    declare addSpacer: ListWidgetLike['addSpacer'];
     get record(): FakeWidgetRecord {
-      this.rec.props = { backgroundColor: this.backgroundColor, backgroundImage: this.backgroundImage, url: this.url, refreshAfterDate: this.refreshAfterDate };
+      this.rec.props = { backgroundColor: this.backgroundColor, spacing: this.spacing, backgroundImage: this.backgroundImage, url: this.url, refreshAfterDate: this.refreshAfterDate };
       return this.rec;
     }
     setPadding(t: number, l: number, b: number, r: number): void { this.rec.padding = [t, l, b, r]; }
@@ -188,7 +250,7 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
     args: { widgetParameter: opts.widgetParameter ?? null },
     Device: { screenSize: () => opts.screen ?? { width: 390, height: 844 }, isUsingDarkAppearance: () => opts.dark ?? false },
     Color, Size, Rect, Point, Path,
-    Font: { systemFont: font('system'), semiboldSystemFont: font('semibold'), boldSystemFont: font('bold') },
+    Font: { systemFont: font('system'), mediumSystemFont: font('medium'), semiboldSystemFont: font('semibold'), boldSystemFont: font('bold') },
   };
 }
 
@@ -200,4 +262,17 @@ export function drawnTexts(host: FakeHost): string[] {
 /** 위젯의 기록. 속성은 마지막으로 넣은 값이다. */
 export function widgetRecord(widget: unknown): FakeWidgetRecord {
   return (widget as { record: FakeWidgetRecord }).record;
+}
+
+/** 위젯 안에 놓인 모든 글자(놓은 차례대로, 상자 안까지). */
+export function nativeTexts(host: FakeHost): string[] {
+  const out: string[] = [];
+  const walk = (nodes: FakeNode[]): void => {
+    for (const n of nodes) {
+      if (n.kind === 'text') out.push(n.text);
+      else if (n.kind === 'stack') walk(n.children);
+    }
+  };
+  for (const w of host.state.widgets) walk(w.children);
+  return out;
 }

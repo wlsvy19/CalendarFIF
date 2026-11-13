@@ -1,0 +1,69 @@
+import { describe, expect, it } from 'vitest';
+import { makeFakeHost, widgetRecord, type FakeNode } from './fakeHost';
+import { renderTree } from './renderTree';
+import { widgetSize } from './sizes';
+import { buildTree, type Dyn, type Node, type Tree } from './tree';
+
+const now = new Date(2026, 10, 13, 9, 0, 0);
+const dyn = (light: string, dark: string): unknown => ({ dynamic: { light: { hex: light, alpha: 1 }, dark: { hex: dark, alpha: 1 } } });
+const D = (light: string, dark: string): Dyn => ({ light, dark });
+
+describe('renderTree', () => {
+  it('손으로 만든 나무가 정해진 호출 그대로 위젯이 된다', () => {
+    const tree: Tree = {
+      background: D('#FFFFFF', '#000000'), padding: [1, 2, 3, 4], spacing: 5,
+      children: [
+        { kind: 'text', text: '제목', size: 17, weight: 'bold', color: D('#111111', '#EEEEEE'), lines: 1, minScale: 0.7 },
+        { kind: 'spacer', length: 4 },
+        {
+          kind: 'stack', dir: 'h', spacing: 8, padding: [1, 4, 1, 4], background: D('#AAAAAA', '#222222'), radius: 7.5, align: 'center',
+          children: [
+            { kind: 'text', text: '글', size: 9, weight: 'regular', color: D('#111111', '#EEEEEE'), opacity: 0.4, lines: 0 },
+            { kind: 'spacer', length: null },
+          ],
+        },
+        { kind: 'stack', dir: 'v', children: [{ kind: 'text', text: '가', size: 11, weight: 'semibold', color: D('#1', '#2'), lines: 2 }, { kind: 'text', text: '나', size: 12, weight: 'medium', color: D('#1', '#2'), lines: 2 }] },
+      ],
+    };
+    const host = makeFakeHost();
+    const w = renderTree(host, tree, 'https://example.test/', now);
+    const rec = widgetRecord(w);
+    expect(rec.padding).toEqual([1, 2, 3, 4]);
+    expect(rec.props).toMatchObject({ spacing: 5, backgroundColor: dyn('#FFFFFF', '#000000'), url: 'https://example.test/', refreshAfterDate: new Date(now.getTime() + 15 * 60 * 1000), backgroundImage: null });
+    const expected: FakeNode[] = [
+      { kind: 'text', text: '제목', font: { font: 'bold', size: 17 }, textColor: dyn('#111111', '#EEEEEE'), lineLimit: 1, minimumScaleFactor: 0.7 },
+      { kind: 'spacer', length: 4 },
+      {
+        kind: 'stack', layout: 'h', spacing: 8, padding: [1, 4, 1, 4], backgroundColor: dyn('#AAAAAA', '#222222'), cornerRadius: 7.5, align: 'center',
+        children: [
+          { kind: 'text', text: '글', font: { font: 'system', size: 9 }, textColor: dyn('#111111', '#EEEEEE'), textOpacity: 0.4, lineLimit: 0 },
+          { kind: 'spacer', length: null },
+        ],
+      },
+      {
+        kind: 'stack', layout: 'v',
+        children: [
+          { kind: 'text', text: '가', font: { font: 'semibold', size: 11 }, textColor: dyn('#1', '#2'), lineLimit: 2 },
+          { kind: 'text', text: '나', font: { font: 'medium', size: 12 }, textColor: dyn('#1', '#2'), lineLimit: 2 },
+        ],
+      },
+    ];
+    expect(rec.children).toEqual(expected);
+    expect(w.backgroundImage).toBeNull();
+  });
+
+  it('buildTree의 결과는 나무와 같은 수의 글자, 상자, 빈 곳이 된다', () => {
+    const month = { monthId: '2026-11', days: { '13': { text: '회의\n[+]장보기', color: 'F12424' }, '14': { text: 'a\nb\nc\nd\ne\nf', color: '' } } };
+    for (const family of ['large', 'medium', 'small'] as const) {
+      const tree = buildTree({ family, size: widgetSize({ width: 390, height: 844 }, family), today: '2026-11-13', month, offline: true });
+      const count = (nodes: Node[], kind: Node['kind']): number => nodes.reduce((n, x) => n + (x.kind === kind ? 1 : 0) + (x.kind === 'stack' ? count(x.children, kind) : 0), 0);
+      const countFake = (nodes: FakeNode[], kind: FakeNode['kind']): number => nodes.reduce((n, x) => n + (x.kind === kind ? 1 : 0) + (x.kind === 'stack' ? countFake(x.children, kind) : 0), 0);
+      const host = makeFakeHost();
+      const rec = widgetRecord(renderTree(host, tree, 'https://example.test/', now));
+      for (const kind of ['text', 'stack', 'spacer'] as const) expect(countFake(rec.children, kind)).toBe(count(tree.children, kind));
+      expect(countFake(rec.children, 'text')).toBeGreaterThan(0);
+      const every = (nodes: FakeNode[]): boolean => nodes.every((n) => n.kind !== 'stack' || (n.layout !== null && every(n.children)));
+      expect(every(rec.children)).toBe(true);
+    }
+  });
+});
