@@ -64,3 +64,25 @@ export function adjustStep(adjusting: boolean, event: AdjustEvent): { adjusting:
   if (!adjusting) return { adjusting: false, action: 'none' };
   return { adjusting: false, action: event === 'reload' ? 'cancel' : 'end' };
 }
+
+// 화면(페이지)이 보고한 "입력을 받는 중" 상태. 새 페이지가 뜨기 시작할 때(그 페이지의 스크립트가 돌기 전) 되돌리므로,
+// 그 뒤에 온 보고는 새 페이지의 것이라 유지된다. generation은 페이지마다 하나 늘어난다.
+export class PageInput {
+  generation = 0;
+  interactive = false;
+  report(on: boolean): void {
+    this.interactive = on;
+  }
+  // 새 페이지가 뜨기 시작했다. 돌려받는 값은 되돌릴 입력 상태가 있었는지다.
+  navigationStart(): boolean {
+    this.generation += 1;
+    return this.reset(this.generation);
+  }
+  // generation 페이지가 사라졌다(렌더러 종료, 창 닫힘). 이미 새 페이지가 떴으면 무시한다.
+  reset(generation: number): boolean {
+    if (generation !== this.generation) return false;
+    const was = this.interactive;
+    this.interactive = false;
+    return was;
+  }
+}

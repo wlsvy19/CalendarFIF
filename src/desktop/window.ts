@@ -4,7 +4,7 @@ import { BrowserWindow, app, protocol, screen, session } from 'electron';
 import { CH, type DesktopCommand, type DragKind } from './api';
 import { applyDrag, clampBounds, layoutKey, resolveBounds, type DisplayInfo, type Rect } from './bounds';
 import { CSP, contentType, isAppUrl, resolveAppPath } from './protocol';
-import { BottomLimiter, Reattacher, adjustStep, isAtBottom, shouldKeepBottom } from './policy';
+import { BottomLimiter, PageInput, Reattacher, adjustStep, isAtBottom, shouldKeepBottom } from './policy';
 import type { Runtime } from './runtime';
 import { loadDesktopSettings, saveDesktopSettings, type DesktopSettings } from './settings';
 import { findProgman, isWindow, makeToolWindow, sendToBottom, setOwner, windowsBelow, type Hwnd } from './win32';
@@ -44,11 +44,14 @@ function toBottom(hwnd: Hwnd): boolean {
 // 창 상태가 바뀌었음을 알리는 곳(트레이 메뉴가 다시 만든다).
 export const events = { onChange: (): void => {}, onPageGone: (): void => {} };
 
-// 입력 상태를 보고하던 화면이 사라졌거나 새로 떴다(다시 불러옴, 렌더러 종료, 창을 닫고 다시 만듦). 새 화면에는 열린 시트가 없으므로
-// 창을 다시 입력을 받지 않는 상태로 돌리고 단축키 멈춤도 푼다. 새 화면이 곧 입력이 필요하면(로그인) 그 화면의 알림이 뒤따라 온다. 끝내는 중에는 하지 않는다.
-function pageGone(win: BrowserWindow): void {
-  if (quitting) return;
-  if (windowState.interactive) {
+const pageInput = new PageInput();
+
+// 입력 상태를 보고하던 화면이 사라졌거나 새로 뜨기 시작했다(다시 불러옴, 렌더러 종료, 창을 닫고 다시 만듦). 새 화면에는 열린 시트가 없으므로
+// 창을 다시 입력을 받지 않는 상태로 돌리고 단축키 멈춤도 푼다. 새 페이지는 뜨기 시작할 때 되돌리므로(스크립트가 돌기 전)
+// 로그인 화면 같은 새 페이지의 보고는 그 뒤에 와서 유지된다. 지금 창이 아닌 창의 늦은 사건과 끝내는 중에는 하지 않는다.
+function pageGone(win: BrowserWindow, navigation: boolean): void {
+  if (quitting || win !== current) return;
+  if (navigation ? pageInput.navigationStart() : pageInput.reset(pageInput.generation)) {
     windowState.interactive = false;
     if (!win.isDestroyed()) {
       win.setFocusable(false);
@@ -122,6 +125,7 @@ export function keepBottom(): void {
 export function setInteractive(on: boolean): void {
   const win = getWindow();
   if (!win) return;
+  pageInput.report(on);
   windowState.interactive = on;
   if (on) {
     win.setFocusable(true);
@@ -327,11 +331,13 @@ export function createDesktopWindow(): BrowserWindow {
 
   win.webContents.on('render-process-gone', () => {
     finishAdjust(false, 'reload');
-    pageGone(win);
+    pageGone(win, false);
+  });
+  win.webContents.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) pageGone(win, true);
   });
   win.webContents.on('did-finish-load', () => {
     finishAdjust(false, 'reload');
-    pageGone(win);
     sendCommand({ type: 'contentHidden', hidden: settings.contentHidden });
   });
   win.on('focus', keepBottom);
@@ -346,7 +352,7 @@ export function createDesktopWindow(): BrowserWindow {
   });
   win.on('closed', () => {
     if (win !== current) return;
-    pageGone(win);
+    pageGone(win, false);
     current = null;
     mode = null;
     reattacher.closed(quitting);

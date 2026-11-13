@@ -40,3 +40,23 @@ it('위치 조정 상태: 시작, 다시 시작, 화면 다시 읽힘, 끝', () 
     { adjusting: false, action: 'end' }, { adjusting: false, action: 'none' }, { adjusting: false, action: 'none' },
   ]);
 });
+
+import { PageInput } from './policy';
+it('새 페이지가 뜨기 시작할 때 입력 상태를 되돌리고, 그 뒤의 보고는 새 페이지의 것으로 유지한다', () => {
+  const p = new PageInput();
+  expect(p.navigationStart()).toBe(false); // 첫 불러오기: 되돌릴 것이 없다
+  p.report(true); // 로그인 화면이 입력을 요청
+  expect([p.interactive, p.navigationStart(), p.interactive]).toEqual([true, true, false]); // 다시 불러오기 시작
+  p.report(true); // 새 페이지의 보고는 그 뒤에 와서 유지된다
+  expect(p.interactive).toBe(true);
+});
+it('옛 페이지의 늦은 되돌리기는 새 페이지가 보고한 뒤에는 무시하고, 렌더러 종료는 되돌린다', () => {
+  const p = new PageInput();
+  p.navigationStart();
+  const old = p.generation;
+  p.navigationStart();
+  p.report(true);
+  expect([p.reset(old), p.interactive]).toEqual([false, true]);
+  expect([p.reset(p.generation), p.interactive]).toEqual([true, false]); // 렌더러가 죽었다
+  expect(p.reset(p.generation)).toBe(false);
+});

@@ -345,17 +345,39 @@ async function settings(_rt: Runtime, desk: Desk): Promise<Result> {
   const registeredAfterRecreate = await until(() => registered() === 1, 3000) ? 1 : registered();
   const focusableAfterRecreate = win2 ? win2.isFocusable() : null;
 
+  // 첫 시작의 순서: 열린 설정 위에서 페이지를 다시 불러와도, 새 페이지가 다시 열어 입력을 요청하면 그 요청이 남는다(되돌리기가 늦지 않다).
+  let reloadFocusable: boolean | null = null;
+  let reloadRegistered: number | null = null;
+  if (win2) {
+    const sheetOn = (open: boolean) => until(async () => ((await js(win2, "!!document.querySelector('.desk-settings')")) as boolean) === open, 5000);
+    sendCommand({ type: 'openSettings' });
+    await sheetOn(true);
+    win2.webContents.reload();
+    await until(async () => (await js(win2, RENDERED)) === 'calendar', 15000);
+    if (!(await sheetOn(true))) {
+      sendCommand({ type: 'openSettings' });
+      await sheetOn(true);
+    }
+    await until(() => win2.isFocusable() && registered() === 0, 3000);
+    reloadFocusable = win2.isFocusable();
+    reloadRegistered = registered();
+    await js(win2, "[...document.querySelectorAll('.desk-settings .textbtn')].find((b) => b.textContent === '닫기').click()");
+    await sheetOn(false);
+    await until(() => !win2.isFocusable(), 3000);
+  }
+
   // 시험이 끝나면 단축키를 풀고 설정도 되돌린다.
   desk.applySystem({ hideHotkey: { accelerator: HIDE_KEY, enabled: false } });
   const noneRegistered = registered() === 0;
 
-  const fields = { opened, tabs, interactiveWhileOpen, cellBg, savedTransparency, hotkey, registeredWhileInteractive, registeredWhileInteractiveAfterApply, registeredAfterClose, pausedBeforeRecreate, registeredAfterRecreate, focusableAfterRecreate, startSwitchDisabled, noneRegistered, closed, interactiveAfterClose, atBottomAfterClose, loginItemCalls };
+  const fields = { opened, tabs, interactiveWhileOpen, cellBg, savedTransparency, hotkey, registeredWhileInteractive, registeredWhileInteractiveAfterApply, registeredAfterClose, pausedBeforeRecreate, registeredAfterRecreate, focusableAfterRecreate, reloadFocusable, reloadRegistered, startSwitchDisabled, noneRegistered, closed, interactiveAfterClose, atBottomAfterClose, loginItemCalls };
   const checks = {
     opened, tabs: JSON.stringify(tabs) === JSON.stringify(['캘린더', '셀', '글꼴 및 색상', '고급', '계정']), interactiveWhileOpen,
     cellBg: cellBg === 'rgba(20, 24, 32, 0.7)', savedTransparency: savedTransparency === 30,
     hotkey: hotkey.accelerator === HIDE_KEY && hotkey.state === 'ok' && hotkey.registered, startSwitchDisabled,
     registeredWhileInteractive: registeredWhileInteractive === 0 && registeredWhileInteractiveAfterApply === 0, registeredAfterClose: registeredAfterClose === 1,
-    pausedBeforeRecreate, registeredAfterRecreate: registeredAfterRecreate === 1, focusableAfterRecreate: focusableAfterRecreate === false, noneRegistered, closed,
+    pausedBeforeRecreate, registeredAfterRecreate: registeredAfterRecreate === 1, focusableAfterRecreate: focusableAfterRecreate === false,
+    reloadFocusable: reloadFocusable === true, reloadRegistered: reloadRegistered === 0, noneRegistered, closed,
     interactiveAfterClose: interactiveAfterClose === false, atBottomAfterClose, loginItemCalls: loginItemCalls === 0,
   };
   return { fields, checks };
