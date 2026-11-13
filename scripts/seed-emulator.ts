@@ -1,5 +1,5 @@
-// Auth 에뮬레이터에 시험 계정을 만든다. 127.0.0.1의 에뮬레이터에만 접속한다.
-// 주소는 에뮬레이터 CLI가 정하는 환경 변수를 따르고, 없으면 표준 포트를 쓴다.
+// Auth 에뮬레이터에 시험 계정을 만든다. 에뮬레이터 CLI가 환경 변수로 알려 주는 주소에 접속하고,
+// 없으면 127.0.0.1의 표준 포트(Auth 9095, Firestore 8085)를 쓴다. 실제 프로젝트에는 접속하지 않는다.
 const AUTH = `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST ?? '127.0.0.1:9095'}`;
 const FIRESTORE = `http://${process.env.FIRESTORE_EMULATOR_HOST ?? '127.0.0.1:8085'}`;
 const account = { localId: 'owner-test-uid', email: 'test@example.com', password: 'test-password' };
