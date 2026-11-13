@@ -116,7 +116,7 @@ async function attach(): Promise<Result> {
   const fields = {
     ...first, rendered, bridgeKeys, rendererGlobals, navigationBlocked, popupBlocked, interactive, atBottomAfterInteractive,
     recreated, ownerIsProgmanAfterRecreate: second?.ownerIsProgman ?? false, atBottomAfterRecreate: second?.atBottom ?? false,
-    loginItemCalls, secondInstance: instance, ...shotInfo,
+    loginItemCalls, bottomAsserts: blocked.bottomAsserts, secondInstance: instance, ...shotInfo,
   };
   const checks = {
     mode: first.mode === 'owned', ownerIsProgman: first.ownerIsProgman, atBottom: first.atBottom, toolWindow: first.toolWindow,
@@ -124,7 +124,7 @@ async function attach(): Promise<Result> {
     bridgeKeys: JSON.stringify(bridgeKeys) === JSON.stringify(BRIDGE_KEYS), rendererGlobals: rendererGlobals === 'undefined,undefined',
     navigationBlocked, popupBlocked, interactive: interactive[0] === true && interactive[1] === false, atBottomAfterInteractive,
     recreated, ownerIsProgmanAfterRecreate: fields.ownerIsProgmanAfterRecreate, loginItemCalls: loginItemCalls === 0,
-    secondInstance: instance.exitCode === 0 && instance.notified,
+    secondInstance: instance.exitCode === 0 && instance.notified, bottomAsserts: blocked.bottomAsserts <= 20,
   };
   return { fields, checks };
 }

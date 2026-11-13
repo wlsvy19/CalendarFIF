@@ -27,3 +27,31 @@ export class Reattacher {
     return 'create';
   }
 }
+
+// 맨 아래로 보내는 횟수를 묶는다: 1초에 세 번까지, 세 번씩 5묶음(15번) 내리 닿지 못하면 30초에 한 번으로 물러선다.
+// 닿으면(reached) 모두 처음으로 돌아간다. 다른 바탕화면 프로그램과 맨 아래 자리를 두고 다투지 않기 위해서다.
+export class BottomLimiter {
+  private recent: number[] = [];
+  private attempts = 0;
+  private last = 0;
+  allow(now: number): boolean {
+    if (this.attempts >= BACKOFF_AFTER) {
+      if (now - this.last < BACKOFF_MS) return false;
+    } else {
+      this.recent = this.recent.filter((t) => now - t < WINDOW_MS);
+      if (this.recent.length >= PER_WINDOW) return false;
+    }
+    this.recent.push(now);
+    this.last = now;
+    this.attempts += 1;
+    return true;
+  }
+  reached(): void {
+    this.recent = [];
+    this.attempts = 0;
+  }
+}
+const WINDOW_MS = 1000;
+const PER_WINDOW = 3;
+const BACKOFF_AFTER = 15;
+const BACKOFF_MS = 30000;

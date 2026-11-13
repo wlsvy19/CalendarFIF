@@ -33,7 +33,7 @@ if (!app.requestSingleInstanceLock()) {
     installSecurity();
     ipcMain.on(CH.interactive, (e, on: unknown) => {
       const value = parseBool(on);
-      if (isAppUrl(e.senderFrame?.url) && value !== null) setInteractive(value);
+      if (e.senderFrame === e.sender.mainFrame && isAppUrl(e.senderFrame?.url) && value !== null) setInteractive(value);
     });
     startDesktopWindow(rt, join(__dirname, 'preload.cjs'));
     if (rt.smoke) void runSmoke(rt);

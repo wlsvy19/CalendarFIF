@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { BrowserWindow, app, protocol, screen, session } from 'electron';
 import { CSP, contentType, isAppUrl, resolveAppPath } from './protocol';
-import { Reattacher, isAtBottom, shouldKeepBottom } from './policy';
+import { BottomLimiter, Reattacher, isAtBottom, shouldKeepBottom } from './policy';
 import type { Runtime } from './runtime';
 import { findProgman, isWindow, makeToolWindow, sendToBottom, setOwner, windowsBelow, type Hwnd } from './win32';
 
@@ -14,7 +14,7 @@ export type AttachMode = 'owned' | 'bottom';
 // 뒤의 Task들이 바꾸는 상태. keepBottom이 읽는다.
 export const windowState = { interactive: false, alwaysOnTop: false, adjusting: false, hidden: false };
 // 시험 실행이 읽는 숫자.
-export const blocked = { navigations: 0, popups: 0 };
+export const blocked = { navigations: 0, popups: 0, bottomAsserts: 0 };
 
 let runtime: Runtime;
 let preloadPath: string;
@@ -25,6 +25,12 @@ let mode: AttachMode | null = null;
 let quitting = false;
 let created = 0;
 const reattacher = new Reattacher();
+const limiter = new BottomLimiter();
+
+function toBottom(hwnd: Hwnd): boolean {
+  blocked.bottomAsserts += 1;
+  return sendToBottom(hwnd);
+}
 
 export function registerAppProtocol(root: string): void {
   const headers = (file: string) => ({ 'content-type': contentType(file), 'content-security-policy': CSP });
@@ -77,9 +83,13 @@ export function keepBottom(): void {
   const win = getWindow();
   if (!win || !shouldKeepBottom({ ...windowState, hidden: windowState.hidden || !win.isVisible() })) return;
   const hwnd = currentHwnd;
-  if (isAtBottom(windowsBelow(hwnd, currentProgman), currentProgman)) return;
+  if (isAtBottom(windowsBelow(hwnd, currentProgman), currentProgman)) {
+    limiter.reached();
+    return;
+  }
+  if (!limiter.allow(Date.now())) return;
   setImmediate(() => {
-    if (win === current && !win.isDestroyed()) sendToBottom(hwnd);
+    if (win === current && !win.isDestroyed()) toBottom(hwnd);
   });
 }
 
@@ -115,19 +125,19 @@ function attach(win: BrowserWindow): void {
   if (progman !== 0n) {
     adopt(progman);
     win.showInactive();
-    sendToBottom(currentHwnd);
+    toBottom(currentHwnd);
     return;
   }
   mode = 'bottom';
   win.showInactive();
-  sendToBottom(currentHwnd);
+  toBottom(currentHwnd);
   const poll = setInterval(() => {
     if (win !== current || win.isDestroyed()) return clearInterval(poll);
     const found = findProgman();
     if (found === 0n) return;
     clearInterval(poll);
     adopt(found);
-    sendToBottom(currentHwnd);
+    toBottom(currentHwnd);
   }, PROGMAN_POLL_MS);
 }
 
@@ -152,6 +162,7 @@ export function createDesktopWindow(): BrowserWindow {
   currentProgman = 0n;
   mode = null;
   windowState.interactive = false;
+  limiter.reached();
   created += 1;
 
   // 잠금 화면 등으로 첫 그림이 늦어도 붙도록, ready-to-show가 없으면 잠시 뒤에 붙인다.
@@ -191,9 +202,9 @@ export function startDesktopWindow(rt: Runtime, preload: string): void {
   preloadPath = preload;
   createDesktopWindow();
   setInterval(() => {
-    if (current && mode === 'owned' && !isWindow(currentProgman)) reattacher.ownerLost();
+    if (!quitting && current && mode === 'owned' && !isWindow(currentProgman)) reattacher.ownerLost();
   }, PROGMAN_POLL_MS);
   setInterval(() => {
-    if (reattacher.tick(findProgman() !== 0n) === 'create') createDesktopWindow();
+    if (!quitting && reattacher.tick(findProgman() !== 0n) === 'create') createDesktopWindow();
   }, 1000);
 }
