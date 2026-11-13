@@ -1,7 +1,10 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { app, type BrowserWindow } from 'electron';
+import { app, globalShortcut, type BrowserWindow, type MenuItem } from 'electron';
+import type { SystemPatch, SystemState } from './api';
+import type { MenuAction } from './menu';
+import { trayMenu } from './tray';
 import { clampBounds, defaultBounds, layoutKey, resolveBounds, type Rect } from './bounds';
 import { isAtBottom } from './policy';
 import type { Runtime, Scenario } from './runtime';
@@ -9,6 +12,8 @@ import { loadDesktopSettings } from './settings';
 import { getExStyle, getOwner, windowsBelow } from './win32';
 import { blocked, displayInfos, getHwnd, getMode, getProgman, getWindow, signals, startAdjust, windowState, windowsCreated } from './window';
 
+// main.ts가 메뉴 항목과 단축키가 부르는 길을 시험 실행에 건넨다.
+export type Desk = { runAction(a: MenuAction): void; applySystem(p: SystemPatch): SystemState };
 type Result = { fields: Record<string, unknown>; checks: Record<string, boolean> };
 const TOTAL_MS = 45000;
 const BRIDGE_KEYS = ['adjustDone', 'drag', 'dragStart', 'getSystem', 'onCommand', 'setInteractive', 'setSystem', 'showMenu'];
@@ -180,7 +185,7 @@ async function bounds(rt: Runtime): Promise<Result> {
   const reloaded = resolveBounds(saved.settings.bounds, displays);
   const fields = {
     layoutKey: key, initial, offscreen, cancelled, cancelRestored: same(cancelled, initial), applied, savedBounds, reloaded,
-    settingsStatus: saved.status, alwaysOnTop: [topDuring, topAfter], atBottomAfter, overlayShown, overlayClosedAfterCancel, overlayClosedAfterApply,
+    settingsStatus: saved.status, alwaysOnTop: [topDuring, topAfter], atBottomAfter, loginItemCalls, overlayShown, overlayClosedAfterCancel, overlayClosedAfterApply,
   };
   const checks = {
     initialIsDefault: same(initial, defaultBounds(displays)),
@@ -189,21 +194,111 @@ async function bounds(rt: Runtime): Promise<Result> {
     appliedWidth: applied.width === initial.width - 200 && applied.height === initial.height - 100,
     savedMatches: same(applied, savedBounds), reloadedMatches: same(applied, reloaded),
     alwaysOnTop: topDuring === true && topAfter === false, atBottomAfter,
-    overlay: overlayShown && overlayClosedAfterCancel && overlayClosedAfterApply,
+    overlay: overlayShown && overlayClosedAfterCancel && overlayClosedAfterApply, loginItemCalls: loginItemCalls === 0,
   };
   return { fields, checks };
 }
 
-const SCENARIOS: Partial<Record<Scenario, (rt: Runtime) => Promise<Result>>> = { attach, bounds };
+const trayLabels = (): string[] => (trayMenu()?.items ?? []).map((i) => (i.type === 'separator' ? '-' : i.label));
+const trayItem = (label: string): MenuItem | undefined => trayMenu()?.items.find((i) => i.label === label);
+const TRAY_EXPECTED = ['캘린더 숨기기', '내용 숨기기', '맨 위에 보기', '-', '위치 및 크기', '설정', 'Windows 시작 시 실행', '-', '제품 정보', '닫기'];
+const HIDE_KEY = 'Ctrl+Alt+Shift+F9';
+const CONTENT_KEY = 'Ctrl+Alt+Shift+F10';
 
-export async function runSmoke(rt: Runtime): Promise<void> {
+// 트레이 메뉴 항목을 실제 Menu의 항목으로 눌러 본다. 단축키는 눌러 볼 수 없으므로 같은 동작 함수를 부른다.
+async function tray(rt: Runtime, desk: Desk): Promise<Result> {
+  const win = getWindow();
+  if (!win) return { fields: {}, checks: { window: false } };
+  await until(() => getMode() !== null, 10000);
+  await until(async () => (await js(win, RENDERED)) !== '', 15000);
+  const settingsFile = join(rt.profileDir, 'settings.json');
+  const savedSettings = () => loadDesktopSettings(settingsFile).settings;
+  const htmlHidden = async () => (await js(win, "document.documentElement.classList.contains('content-hidden')")) as boolean;
+  const bottom = () => isAtBottom(windowsBelow(getHwnd(), getProgman()), getProgman());
+  const click = (label: string) => trayItem(label)?.click();
+
+  const trayCreated = trayMenu() !== null;
+  const menuNames = trayLabels();
+  const start = trayItem('Windows 시작 시 실행');
+  const startItem = { checked: start?.checked, enabled: start?.enabled };
+
+  const visible: boolean[] = [];
+  click('캘린더 숨기기');
+  visible.push(win.isVisible());
+  const labelWhenHidden = trayLabels()[0];
+  const hiddenState = windowState.hidden;
+  click('캘린더 보이기');
+  visible.push(win.isVisible());
+  const labelWhenShown = trayLabels()[0];
+
+  const contentHidden: boolean[] = [];
+  const contentSaved: boolean[] = [];
+  click('내용 숨기기');
+  await until(htmlHidden, 3000);
+  contentHidden.push(await htmlHidden());
+  contentSaved.push(savedSettings().contentHidden);
+  const contentLabelWhenHidden = trayLabels()[1];
+  click('내용 보이기');
+  await until(async () => !(await htmlHidden()), 3000);
+  contentHidden.push(await htmlHidden());
+  contentSaved.push(savedSettings().contentHidden);
+
+  const onTop: boolean[] = [];
+  click('맨 위에 보기');
+  onTop.push(win.isAlwaysOnTop());
+  const onTopSaved = savedSettings().alwaysOnTop;
+  const onTopChecked = trayItem('맨 위에 보기')?.checked;
+  click('맨 위에 보기');
+  onTop.push(win.isAlwaysOnTop());
+  const atBottomAfterOnTopOff = await until(bottom, 3000);
+
+  // 설정 바꾸기는 화면의 다리(IPC)로 보낸다.
+  const bridge = (patch: string) => js(win, `window.calfifDesktop.setSystem(${patch})`) as Promise<SystemState>;
+  const hotkeyPatch = (key: string, name: 'hideHotkey' | 'contentHotkey', enabled: boolean) => `{ ${name}: { accelerator: '${key}', enabled: ${enabled} } }`;
+  await bridge(hotkeyPatch(HIDE_KEY, 'hideHotkey', true));
+  const both = await bridge(hotkeyPatch(CONTENT_KEY, 'contentHotkey', true));
+  const registeredBoth = [globalShortcut.isRegistered(HIDE_KEY), globalShortcut.isRegistered(CONTENT_KEY)];
+  const off = await bridge(hotkeyPatch(HIDE_KEY, 'hideHotkey', false));
+  const hideRegisteredAfterOff = globalShortcut.isRegistered(HIDE_KEY);
+  const contentRegisteredAfterOff = globalShortcut.isRegistered(CONTENT_KEY);
+  const badPatchState = (await js(win, "window.calfifDesktop.setSystem('x')")) as SystemState;
+  const badPatchIgnored = JSON.stringify(badPatchState.settings) === JSON.stringify(off.settings);
+  const startPatch = await bridge('{ startWithWindows: true }');
+  const system = (await js(win, 'window.calfifDesktop.getSystem()')) as SystemState;
+
+  // 시험이 끝나면 단축키를 모두 풀고 설정도 되돌린다.
+  desk.applySystem({ hideHotkey: { accelerator: HIDE_KEY, enabled: false }, contentHotkey: { accelerator: CONTENT_KEY, enabled: false } });
+  const noneRegistered = !globalShortcut.isRegistered(HIDE_KEY) && !globalShortcut.isRegistered(CONTENT_KEY);
+
+  const fields = {
+    trayCreated, trayMenu: menuNames, startItem, labelWhenHidden, hiddenState, labelWhenShown, contentLabelWhenHidden, visible, contentHidden,
+    contentHiddenSaved: contentSaved.every((v, i) => v === contentHidden[i]), alwaysOnTop: onTop, onTopSaved, onTopChecked, atBottomAfterOnTopOff,
+    hotkeys: both.hotkeys, registeredBoth, hotkeysAfterOff: off.hotkeys, hideRegisteredAfterOff, contentRegisteredAfterOff, badPatchIgnored,
+    startWithWindowsAfterPatch: startPatch.settings.startWithWindows, canStartWithWindows: system.canStartWithWindows, noneRegistered, loginItemCalls,
+  };
+  const checks = {
+    trayCreated, trayMenu: JSON.stringify(menuNames) === JSON.stringify(TRAY_EXPECTED),
+    startItem: startItem.checked === false && startItem.enabled === false,
+    visible: visible[0] === false && visible[1] === true, hiddenState, labels: labelWhenHidden === '캘린더 보이기' && labelWhenShown === '캘린더 숨기기' && contentLabelWhenHidden === '내용 보이기',
+    contentHidden: contentHidden[0] === true && contentHidden[1] === false, contentHiddenSaved: fields.contentHiddenSaved,
+    alwaysOnTop: onTop[0] === true && onTop[1] === false, onTopSaved, onTopChecked: onTopChecked === true, atBottomAfterOnTopOff,
+    hotkeys: both.hotkeys.hide === 'ok' && both.hotkeys.content === 'ok', registeredBoth: registeredBoth[0] && registeredBoth[1],
+    hideOff: off.hotkeys.hide === 'off' && !hideRegisteredAfterOff && contentRegisteredAfterOff, badPatchIgnored,
+    startIgnored: startPatch.settings.startWithWindows === null && system.canStartWithWindows === false, noneRegistered, loginItemCalls: loginItemCalls === 0,
+  };
+  return { fields, checks };
+}
+
+const SCENARIOS: Partial<Record<Scenario, (rt: Runtime, desk: Desk) => Promise<Result>>> = { attach, bounds, tray };
+
+export async function runSmoke(rt: Runtime, desk: Desk): Promise<void> {
   const scenario = rt.smoke as Scenario;
   const run = SCENARIOS[scenario];
   let result: Result;
   let timedOut = false;
   try {
     result = await Promise.race([
-      run ? run(rt) : Promise.resolve<Result>({ fields: { error: '시나리오가 아직 없다' }, checks: { implemented: false } }),
+      run ? run(rt, desk) : Promise.resolve<Result>({ fields: { error: '시나리오가 아직 없다' }, checks: { implemented: false } }),
       sleep(TOTAL_MS).then(() => {
         timedOut = true;
         return { fields: {}, checks: {} } as Result;

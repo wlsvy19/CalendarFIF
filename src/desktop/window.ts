@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { BrowserWindow, app, protocol, screen, session } from 'electron';
-import { CH, type DragKind } from './api';
+import { CH, type DesktopCommand, type DragKind } from './api';
 import { applyDrag, clampBounds, layoutKey, resolveBounds, type DisplayInfo, type Rect } from './bounds';
 import { CSP, contentType, isAppUrl, resolveAppPath } from './protocol';
 import { BottomLimiter, Reattacher, adjustStep, isAtBottom, shouldKeepBottom } from './policy';
@@ -40,6 +40,9 @@ function toBottom(hwnd: Hwnd): boolean {
   blocked.bottomAsserts += 1;
   return sendToBottom(hwnd);
 }
+
+// 창 상태가 바뀌었음을 알리는 곳(트레이 메뉴가 다시 만든다).
+export const events = { onChange: (): void => {} };
 
 export function registerAppProtocol(root: string): void {
   const headers = (file: string) => ({ 'content-type': contentType(file), 'content-security-policy': CSP });
@@ -124,6 +127,12 @@ export function displayInfos(): DisplayInfo[] {
 }
 const workAreas = (): Rect[] => displayInfos().map((d) => d.workArea);
 
+// 설정을 바꾸고 저장한다. 설정은 모두 이 길로만 쓴다.
+export function updateSettings(patch: Partial<DesktopSettings>): void {
+  settings = { ...settings, ...patch };
+  saveSettings();
+}
+
 function saveSettings(): void {
   try {
     saveDesktopSettings(settingsFile, settings);
@@ -132,12 +141,18 @@ function saveSettings(): void {
   }
 }
 
-function sendAdjust(win: BrowserWindow, active: boolean): void {
+// 메인 → 화면 명령. 화면이 죽었으면 보낼 곳이 없다.
+export function sendCommand(c: DesktopCommand): void {
+  const win = getWindow();
   try {
-    if (!win.isDestroyed()) win.webContents.send(CH.command, { type: 'adjust', active });
+    if (win) win.webContents.send(CH.command, c);
   } catch {
     // 화면이 죽었으면 보낼 곳이 없다.
   }
+}
+
+function sendAdjust(win: BrowserWindow, active: boolean): void {
+  if (win === current) sendCommand({ type: 'adjust', active });
 }
 
 // IPC를 보낸 곳이 지금 창의 앱 화면(주 프레임)인지 본다. 모든 처리기가 쓴다.
@@ -239,19 +254,19 @@ function attach(win: BrowserWindow): void {
   if (progman !== 0n) {
     adopt(progman);
     win.showInactive();
-    toBottom(currentHwnd);
+    if (shouldKeepBottom(windowState)) toBottom(currentHwnd);
     return;
   }
   mode = 'bottom';
   win.showInactive();
-  toBottom(currentHwnd);
+  if (shouldKeepBottom(windowState)) toBottom(currentHwnd);
   const poll = setInterval(() => {
     if (win !== current || win.isDestroyed()) return clearInterval(poll);
     const found = findProgman();
     if (found === 0n) return;
     clearInterval(poll);
     adopt(found);
-    toBottom(currentHwnd);
+    if (shouldKeepBottom(windowState)) toBottom(currentHwnd);
   }, PROGMAN_POLL_MS);
 }
 
@@ -279,6 +294,8 @@ export function createDesktopWindow(): BrowserWindow {
   mode = null;
   windowState.interactive = false;
   windowState.adjusting = false;
+  windowState.alwaysOnTop = settings.alwaysOnTop;
+  win.setAlwaysOnTop(settings.alwaysOnTop);
   adjustBefore = null;
   adjustBase = null;
   limiter.reached();
@@ -295,11 +312,20 @@ export function createDesktopWindow(): BrowserWindow {
   setTimeout(once, ATTACH_FALLBACK_MS);
 
   win.webContents.on('render-process-gone', () => finishAdjust(false, 'reload'));
-  win.webContents.on('did-finish-load', () => finishAdjust(false, 'reload'));
+  win.webContents.on('did-finish-load', () => {
+    finishAdjust(false, 'reload');
+    sendCommand({ type: 'contentHidden', hidden: settings.contentHidden });
+  });
   win.on('focus', keepBottom);
   win.hookWindowMessage(WM_WINDOWPOSCHANGED, keepBottom);
-  win.on('show', () => { windowState.hidden = false; });
-  win.on('hide', () => { windowState.hidden = true; });
+  win.on('show', () => {
+    windowState.hidden = false;
+    events.onChange();
+  });
+  win.on('hide', () => {
+    windowState.hidden = true;
+    events.onChange();
+  });
   win.on('closed', () => {
     if (win !== current) return;
     current = null;
@@ -315,6 +341,40 @@ export function showWindow(): void {
   const win = getWindow();
   if (win && !win.isVisible()) win.showInactive();
   keepBottom();
+}
+
+export const isHidden = (): boolean => {
+  const win = getWindow();
+  return !win || !win.isVisible();
+};
+
+// 캘린더 숨기기와 보이기. 숨김은 저장하지 않는다. 위치 조정 중에는 숨기지 않는다.
+export function toggleHidden(): void {
+  const win = getWindow();
+  if (!win) return;
+  if (win.isVisible()) {
+    if (!windowState.adjusting) win.hide();
+  } else {
+    showWindow();
+  }
+}
+
+// 맨 위에 보기. 켜면 맨 아래 지키기가 멈추고, 끄면 다시 맨 아래로 보낸다. 위치 조정 중에는 조정이 끝날 때 반영된다.
+export function setAlwaysOnTop(on: boolean): void {
+  updateSettings({ alwaysOnTop: on });
+  const win = getWindow();
+  if (!win || windowState.adjusting) return;
+  windowState.alwaysOnTop = on;
+  win.setAlwaysOnTop(on);
+  if (!on) {
+    limiter.reached();
+    keepBottom();
+  }
+}
+
+export function setContentHidden(hidden: boolean): void {
+  updateSettings({ contentHidden: hidden });
+  sendCommand({ type: 'contentHidden', hidden });
 }
 
 // 창 만들기와 탐색기 재시작 대응을 시작한다.
