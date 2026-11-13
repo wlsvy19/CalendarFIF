@@ -1,7 +1,12 @@
 export type LunarDate = { month: number; day: number; leap: boolean };
 
 const DAY_MS = 86_400_000;
-const dangi = new Intl.DateTimeFormat('en-US-u-ca-dangi', { month: 'numeric', day: 'numeric', timeZone: 'UTC' });
+// 음력 형식기는 처음 쓸 때 만들어 둔다. 웹 번들도 이 모듈을 읽지만 아이폰 화면은 음력을 쓰지 않으므로 만들지 않는다.
+let dangi: Intl.DateTimeFormat | null = null;
+function dangiFormat(): Intl.DateTimeFormat {
+  dangi ??= new Intl.DateTimeFormat('en-US-u-ca-dangi', { month: 'numeric', day: 'numeric', timeZone: 'UTC' });
+  return dangi;
+}
 
 function utcOf(dateKey: string): number {
   const [y, m, d] = dateKey.split('-').map(Number);
@@ -13,7 +18,7 @@ function keyOfUtc(ms: number): string {
 }
 
 function lunarOfUtc(ms: number): LunarDate {
-  const parts = dangi.formatToParts(new Date(ms));
+  const parts = dangiFormat().formatToParts(new Date(ms));
   const month = parts.find((p) => p.type === 'month')?.value ?? '';
   const day = parts.find((p) => p.type === 'day')?.value ?? '';
   return { month: parseInt(month, 10), day: parseInt(day, 10), leap: month.endsWith('bis') };

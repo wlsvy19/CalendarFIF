@@ -11,7 +11,7 @@ export function menuPosition(at: Point, size: { width: number; height: number },
 
 export type CellMenuProps = { dateKey: string; at: Point; onEdit(): void; onColor(color: string): void; onToday(): void; onClose(): void };
 
-/** 날짜 칸을 오른쪽 클릭하면 뜨는 메뉴. 편집, 배경색, 오늘로. */
+/** 날짜 칸을 오른쪽 클릭하면 뜨는 메뉴. 편집, 배경색, 오늘로. Esc, 바깥 누르기, 창이 포커스를 잃으면 닫힌다. */
 export function mountCellMenu(root: HTMLElement, props: CellMenuProps): { destroy(): void } {
   const menu = document.createElement('div');
   menu.className = 'cellmenu';
@@ -72,8 +72,11 @@ export function mountCellMenu(root: HTMLElement, props: CellMenuProps): { destro
   const onPointer = (e: Event): void => {
     if (!menu.contains(e.target as Node)) props.onClose();
   };
+  // 다른 창으로 옮겨 가면(창이 포커스를 잃으면) 닫는다.
+  const onBlur = (): void => props.onClose();
   document.addEventListener('keydown', onKey);
   document.addEventListener('pointerdown', onPointer, true);
+  window.addEventListener('blur', onBlur);
   root.append(menu);
   place();
   menu.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
@@ -82,6 +85,7 @@ export function mountCellMenu(root: HTMLElement, props: CellMenuProps): { destro
     destroy() {
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('pointerdown', onPointer, true);
+      window.removeEventListener('blur', onBlur);
       menu.remove();
     },
   };

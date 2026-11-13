@@ -29,3 +29,14 @@ it('편집, 배경색, 오늘로. 배경색은 없음과 22색이고, Esc와 바
   document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
   expect([esc.props.onClose.mock.calls.length > 0, outside.props.onClose.mock.calls.length > 0]).toEqual([true, true]);
 });
+it('창이 포커스를 잃으면(blur) 닫히고, 닫은 뒤에는 듣지 않는다', () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const onClose = vi.fn();
+  const menu = mountCellMenu(root, { dateKey: '2026-11-20', at: { x: 10, y: 10 }, onEdit: vi.fn(), onColor: vi.fn(), onToday: vi.fn(), onClose });
+  window.dispatchEvent(new Event('blur'));
+  expect(onClose).toHaveBeenCalledTimes(1);
+  menu.destroy();
+  window.dispatchEvent(new Event('blur'));
+  expect(onClose).toHaveBeenCalledTimes(1);
+});

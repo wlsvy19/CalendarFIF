@@ -31,3 +31,23 @@ it('취소로 돌아갈 자리는 지금 있는 모니터 안으로 들어온다
   const before = { ...r, x: -1500, y: 10 }; // 빠진 모니터 위의 자리
   expect(clampBounds(before, wa)).toEqual({ ...r, x: -720, y: 10 });
 });
+
+// 주인의 배치: 주 모니터(1920x1080) 왼쪽에 더 크고 배율이 다른(1.25) 보조 모니터. DisplayInfo에는 배율이 없고 Electron은 DIP로 알려 주므로
+// 픽셀 값(2560x1440)과 1.25배 DIP 값(2048x1152)을 둘 다 본다.
+const leftOf = (width: number, height: number, workHeight: number): DisplayInfo[] => [
+  ...one,
+  { bounds: { x: -width, y: 0, width, height }, workArea: { x: -width, y: 0, width, height: workHeight }, primary: false },
+];
+const inside = (r: { x: number; y: number; width: number; height: number }, wa: { x: number; y: number; width: number; height: number }) =>
+  r.x >= wa.x && r.y >= wa.y && r.x + r.width <= wa.x + wa.width && r.y + r.height <= wa.y + wa.height;
+for (const layout of [leftOf(2560, 1440, 1392), leftOf(2048, 1152, 1114)]) {
+  const secondary = layout[1].workArea;
+  it(`왼쪽의 더 큰 보조 모니터(${secondary.width}x${layout[1].bounds.height}): 기본 자리, 저장한 자리, 모니터를 뺐을 때, 구성 문자열`, () => {
+    const placed = defaultBounds(layout)!;
+    expect(inside(placed, secondary)).toBe(true);
+    const saved = { [layoutKey(layout)]: { x: secondary.x + 300, y: 40, width: 1500, height: 900 } };
+    expect(resolveBounds(saved, layout)).toEqual({ x: secondary.x + 300, y: 40, width: 1500, height: 900 });
+    expect(inside(resolveBounds(saved, one)!, one[0].workArea)).toBe(true);
+    expect(new Set([layoutKey(layout), layoutKey(one), layoutKey(two)]).size).toBe(3);
+  });
+}
