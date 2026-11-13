@@ -242,7 +242,7 @@ export function mountSettings(
       return;
     }
     if (e.key !== 'Tab') return;
-    const stops = [...sheet.querySelectorAll<HTMLElement>('button, input')].filter(
+    const stops = [...sheet.querySelectorAll<HTMLElement>('button, input, summary, textarea')].filter(
       (el) => !el.hidden && !(el as HTMLButtonElement).disabled && !el.closest('[hidden]'),
     );
     const first = stops[0];

@@ -172,7 +172,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     };
     settings = appearance
       ? mountDesktopSettings(root, { appearance, onAppearance: changeAppearance, bridge, account, page: settingsPage, onClose })
-      : mountSettings(root, { ...account, onClose, widget: widgetInstall });
+      : mountSettings(root, { ...account, onClose, widget: DESKTOP ? undefined : widgetInstall });
     settingsPage = undefined;
     interactivity.begin('settings');
   };

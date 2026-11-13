@@ -15,6 +15,12 @@ it('값 안의 따옴표와 역슬래시는 글자열 안에서 안전하게 쓴
   expect(out).toContain('apiKey: "a\\"b\\\\c$&"');
   expect(new Function(`${out}; return c;`)().apiKey).toBe('a"b\\c$&');
 });
+it("줄바꿈과 따옴표, 달러 기호 묶음도 그대로 들어가고 결과는 여전히 글로 읽힌다", () => {
+  const tricky = { projectId: 'a\nb', apiKey: "x$'y$`z$&w$1", appUrl: 'https://example.test/$`' };
+  const out = fillPlaceholders(script, tricky);
+  expect(out).not.toContain('a\nb'); // 줄바꿈은 \n 두 글자로 들어간다
+  expect(new Function(`${out}; return c;`)()).toEqual(tricky);
+});
 it('자리 표시가 없거나 둘이거나 값이 비면 오류를 던진다', () => {
   expect(() => fillPlaceholders(script.replace('__API_KEY__', 'x'), config)).toThrow();
   expect(() => fillPlaceholders(`${script} "__APP_URL__"`, config)).toThrow();
@@ -76,6 +82,15 @@ it('복사가 막히면 글 상자를 보이고 전체를 고른다', async () =
   expect(m.area.selectionStart).toBe(0);
   expect(m.area.selectionEnd).toBe(filled.length);
   expect(m.status.textContent).toBe('복사하지 못했습니다. 아래 글을 길게 눌러 전체 선택한 뒤 복사하세요.');
+});
+it('복사가 막히면 setSelectionRange로도 전체를 고른다(아이폰은 select()가 안 먹는다)', async () => {
+  const m = mount({ copy: vi.fn(() => Promise.reject(new Error('denied'))) });
+  const spy = vi.spyOn(m.area, 'setSelectionRange');
+  m.resolveLoad();
+  await settle();
+  m.button.click();
+  await settle();
+  expect(spy).toHaveBeenCalledWith(0, fillPlaceholders(script, config).length);
 });
 it('읽지 못하거나 자리 표시가 맞지 않으면 준비하지 못했다고 하고 단추는 꺼 둔다', async () => {
   const a = mount();

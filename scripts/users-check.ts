@@ -471,22 +471,29 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   );
 
   // 20
+  // 앱을 한 번 열어 두고(from=1, 달력), 사용자 관리의 주소를 새 문서로 연다(from=2#users). 닫은 뒤 뒤로 가면 첫 쪽의 달력이어야 한다.
+  const pageUrl = (from: number, hash = ''): string => {
+    const u = new URL(base.href);
+    u.searchParams.set('from', String(from));
+    return `${u.href}${hash}`;
+  };
   const adminCold = await logIn(ADMIN);
-  await load('about:blank'); // 앞 기록을 빈 페이지로 두고 #users를 새로 읽는다
-  await sleep(500);
-  await load(`${base.origin}${base.pathname}${base.search}#users`);
-  const coldUsers = adminCold && (await waitFor<boolean>(`!!${sheet('.users')}`, 20000)) === true;
+  await load(pageUrl(1));
+  const firstPage = adminCold && (await waitFor<boolean>(CALENDAR, 20000)) === true;
+  await load(pageUrl(2, '#users'));
+  const coldUsers = firstPage && (await waitFor<boolean>(`!!${sheet('.users')}`, 20000)) === true;
   await sleep(700);
   const lengthBefore = await js<number>('history.length');
   const coldClosed = coldUsers && (await press(`${sheet('.users')}?.querySelector('.sheet-bar .textbtn.end')`)) && (await waitFor<boolean>(NO_SHEET, 5000)) === true;
   const lengthSame = (await js<number>('history.length')) === lengthBefore;
   await js('history.back()');
-  await sleep(700);
+  const landed = coldClosed && (await waitFor<boolean>(`location.search.includes('from=1') && ${CALENDAR}`, 8000)) === true;
+  await sleep(500);
   const reopenedUsers = await js<boolean>(`!!${sheet('.users')}`).catch(() => false);
   record(
-    '20. #users로 곧바로 연 사용자 관리를 닫은 뒤 뒤로 가도 다시 열리지 않는다',
-    coldUsers && coldClosed && lengthSame && !reopenedUsers,
-    `열림 ${coldUsers ? '예' : '아니오'}, 닫음 ${coldClosed ? '예' : '아니오'}, 기록 수 ${lengthSame ? '그대로' : '바뀜'}, 뒤로 간 뒤 사용자 관리 ${reopenedUsers ? '다시 열림' : '없음'}`,
+    '20. #users로 곧바로 연 사용자 관리를 닫은 뒤 뒤로 가면 앞 쪽의 달력이 보이고 사용자 관리는 다시 열리지 않는다',
+    coldUsers && coldClosed && lengthSame && landed && !reopenedUsers,
+    `열림 ${coldUsers ? '예' : '아니오'}, 닫음 ${coldClosed ? '예' : '아니오'}, 기록 수 ${lengthSame ? '그대로' : '바뀜'}, 뒤로 간 곳 ${landed ? '앞 쪽 달력' : '앞 쪽 달력이 아님'}, 사용자 관리 ${reopenedUsers ? '다시 열림' : '없음'}`,
   );
   return results;
 }

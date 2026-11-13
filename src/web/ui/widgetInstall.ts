@@ -109,6 +109,7 @@ export function widgetSection(deps: WidgetInstallDeps): HTMLElement {
         area.hidden = false;
         area.focus({ preventScroll: true });
         area.select();
+        area.setSelectionRange(0, area.value.length); // 아이폰에서는 select()만으로 안 골라질 때가 많다
         status.textContent = '복사하지 못했습니다. 아래 글을 길게 눌러 전체 선택한 뒤 복사하세요.';
       },
     );

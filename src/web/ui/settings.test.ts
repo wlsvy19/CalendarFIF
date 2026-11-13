@@ -78,6 +78,43 @@ it('widget을 주면 위젯 칸이 로그아웃 앞에 있다', () => {
   expect(labels.at(-2)).toBe('위젯');
 });
 
+function widgetMount(copy: () => Promise<void>) {
+  const m = mount({ widget: { load: async () => '"__PROJECT_ID__" "__API_KEY__" "__APP_URL__"', config: widget.config, copy } });
+  const sheet = m.root.querySelector<HTMLElement>('.sheet')!;
+  const close = m.root.querySelector<HTMLElement>('.textbtn.end')!;
+  m.button('로그아웃').hidden = true; // 위젯 칸의 것이 맨 끝이 되게 한다
+  const tab = (from: HTMLElement) => {
+    from.focus();
+    const e = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    from.dispatchEvent(e);
+    return e;
+  };
+  return { ...m, sheet, close, tab };
+}
+it('Tab 순서에 "설치 방법"이 들어간다: 그것이 끝이면 거기서 처음으로 돈다', async () => {
+  vi.useRealTimers();
+  const { root, close, tab } = widgetMount(async () => {});
+  await new Promise((r) => setTimeout(r, 0));
+  const summary = root.querySelector<HTMLElement>('summary')!;
+  summary.setAttribute('tabindex', '0'); // jsdom은 summary에 초점을 주지 않는다
+  root.querySelector<HTMLDetailsElement>('details')!.open = true;
+  const e = tab(summary);
+  expect(e.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(close);
+});
+it('Tab 순서에 복사 실패 때 나오는 글 상자가 들어간다: 그것이 끝이면 거기서 처음으로 돈다', async () => {
+  vi.useRealTimers();
+  const { root, button, close, tab } = widgetMount(() => Promise.reject(new Error('denied')));
+  await new Promise((r) => setTimeout(r, 0));
+  button('위젯 스크립트 복사').click();
+  await new Promise((r) => setTimeout(r, 0));
+  const area = root.querySelector<HTMLTextAreaElement>('textarea')!;
+  expect(area.hidden).toBe(false);
+  const e = tab(area);
+  expect(e.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(close);
+});
+
 function pwSetup(onChangePassword: (c: string, n: string) => Promise<{ ok: boolean; message: string }>) {
   const m = mount({ onChangePassword });
   const input = (name: string) => m.root.querySelector<HTMLInputElement>(`input[name="${name}"]`)!;
