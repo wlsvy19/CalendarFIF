@@ -27,6 +27,7 @@
 - 에뮬레이터 포트: Firestore 8085, Auth 9095. 에뮬레이터 프로젝트 ID는 `demo-calfif`, 시험용 소유자 uid는 `owner-test-uid`다.
 - 브랜치는 `phase-1-sync-core`. `git add`는 경로를 적어서 한다. `.mcp.json`은 사용자 파일이므로 커밋하지 않는다. 커밋 메시지 끝에는 실행 세션의 지침에 있는 `Co-Authored-By` 줄을 붙인다.
 - 도구 버전은 2026-11-13에 npm에서 확인한 최신이다(firebase 13.3, firebase-tools 15.36, vite 8.3, vitest 5.1, typescript 7.0). 이 계획의 설정 예와 설치된 버전의 문법이 다르면 설치된 버전의 타입 정의를 따른다.
+- 테스트 코드는 이 계획에 적힌 대로 쓴다. 설치된 도구 버전 때문에 문법이나 타입 오류가 나면 단언의 뜻을 바꾸지 않는 최소한의 수정만 하고 보고서에 적는다.
 
 ## Review Focus
 
@@ -138,7 +139,7 @@ export default defineConfig({
 });
 ```
 
-`.gitignore`: `node_modules/`, `dist/`, `build/`, `.tools/`, `.env.local`, `.firebaserc`, `.firebase/`, `*.log`, `*.db`, `coverage/`.
+`.gitignore`: `node_modules/`, `dist/`, `build/`, `.tools/`, `.superpowers/`, `.env.local`, `.firebaserc`, `.firebase/`, `*.log`, `*.db`, `coverage/`.
 
 `.env.example`:
 
@@ -444,6 +445,7 @@ export const edit: (monthId: string, day: string, baseText: string, nextText: st
 - `put`의 합치기: 같은 `monthId`와 `day`가 이미 있으면 그 항목의 `base`는 두고 `next`와 `editedAt`만 바꾼다. 바꾼 뒤 `next`가 `base`와 같으면 항목을 뺀다.
 - `flush`는 대기열이 빌 때까지 달 단위로 올린다. 달마다 `transactMonth`를 한 번 부른다. `decide`는 불릴 때마다 그 달의 대기 편집을 대기열에서 새로 읽어 `resolveEdit`로 바꿀 값을 만든다. 성공하면 마지막 `decide`에서 읽은 편집을 `remove`한다. 어떤 달이 실패하면 그 달은 두고 다른 달을 계속한다. 한 바퀴를 돌아도 더 보낸 것이 없으면 끝낸다.
 - 동시에 불린 `flush`는 같은 실행을 함께 기다린다.
+- `flush`는 마이크로태스크 한 번 뒤에 대기열을 읽기 시작한다. 같은 틱에 이어진 `saveEdit`들을 한 번에 묶기 위해서다.
 - 상태: 올리는 동안 `sending`. 끝났을 때 대기열이 비었으면 `synced`, 남았으면 `waiting`.
 - `Outbox`는 내용을 메모리에 캐시하지 않는다. 읽기와 쓰기 때마다 저장소를 본다. JSON이 깨져 있으면 원문을 `${키}.corrupt.${시각}`에 옮기고 빈 목록으로 시작한다. 저장소 쓰기가 실패하면 그때부터 메모리 목록을 쓰고 `persistent`를 `false`로 둔다.
 
@@ -506,7 +508,7 @@ it('저장소에 쓸 수 없으면 메모리에 두고 알린다', () => {
 
 ```ts
 // src/sync/engine.test.ts
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import type { MonthDoc } from '../core/types';
 import { SyncEngine } from './engine';
 import { Outbox } from './outbox';
@@ -571,6 +573,7 @@ it('올리는 도중에 같은 날짜를 또 고쳐도 줄이 겹치지 않는�
   let release!: () => void;
   store.hold = new Promise<void>((resolve) => { release = resolve; });
   engine.saveEdit('2026-11', '13', val('A'), val('A\nB'));
+  await vi.waitFor(() => expect(store.calls).toEqual(['2026-11']));   // 첫 올리기가 진행 중인 상태
   setNow(2000);
   engine.saveEdit('2026-11', '13', val('A\nB'), val('A\nB\nC'));
   store.hold = undefined;
@@ -641,6 +644,7 @@ git commit -m "feat: 대기열과 동기화 엔진"
 // scripts/build-rules.ts
 export function buildRules(template: string, ownerUid: string): string;    // uid는 /^[A-Za-z0-9]{1,128}$/ 여야 한다. 아니면 throw
 // 명령줄: tsx scripts/build-rules.ts [--uid <uid>]  → build/firestore.rules. --uid가 없으면 .env.local의 OWNER_UID
+//   --uid 없이 실행했는데 OWNER_UID가 비었거나 'owner-test-uid'이면 파일을 만들지 않고 이유를 알린 뒤 종료 코드 1로 끝난다(배포용 보호)
 
 // scripts/jdk.ts
 export function findJdkBin(toolsDir: string): string | null;                // `${toolsDir}/jdk-21/*/bin`에 java 실행 파일이 있으면 그 경로
@@ -794,7 +798,7 @@ git commit -m "feat: 소유자 한 명만 허용하는 보안 규칙과 에뮬�
 
 **Files:**
 - Create: `src/sync/monthDoc.ts`, `src/sync/firestoreStore.ts`
-- Test: `tests/emulator/firestoreStore.test.ts`, `tests/emulator/twoDevices.test.ts`
+- Test: `src/sync/monthDoc.test.ts`, `tests/emulator/firestoreStore.test.ts`, `tests/emulator/twoDevices.test.ts`
 
 **Interfaces:**
 - Consumes: Task 3의 `MonthStore`, `SyncEngine`, `Outbox`, `MemoryStorage`, `rec`, `val`. Task 4의 `createEnv`, `ownerDb`, `OWNER`.
@@ -803,6 +807,11 @@ git commit -m "feat: 소유자 한 명만 허용하는 보안 규칙과 에뮬�
 ```ts
 // src/sync/monthDoc.ts (Firebase를 가져오지 않는 순수 함수. 가져오기 도구도 쓴다)
 export function parseMonthDoc(data: unknown): MonthDoc;     // 형식이 맞지 않는 날짜는 버리고, 빠진 필드는 '' 또는 0으로 채운다
+/** 달 문서에 병합해 쓸 내용을 만든다. 바꿀 것이 없으면 null. 'delete'는 sentinels.deleteField()로 바뀐다. */
+export function buildMonthPatch(
+  changes: Record<string, DayChange>,
+  sentinels: { deleteField(): unknown; serverTimestamp(): unknown },
+): { days: Record<string, unknown>; updatedAt: unknown } | null;
 
 // src/sync/firestoreStore.ts
 import type { DocumentReference, Firestore } from 'firebase/firestore';
@@ -815,9 +824,28 @@ export class FirestoreMonthStore implements MonthStore {
 }
 ```
 
-`transactMonth`는 `runTransaction` 안에서 문서를 읽고 `decide`를 부른다. 바꿀 것이 없으면 쓰지 않는다. 있으면 `set(..., { merge: true })`로 `days`의 해당 날짜만 쓰고(`'delete'`는 `deleteField()`), `updatedAt`에 `serverTimestamp()`를 넣는다.
+`transactMonth`는 `runTransaction` 안에서 문서를 읽고 `decide`를 부른다. 쓸 내용은 `buildMonthPatch`로 만든다. `null`이면 쓰지 않는다. 있으면 `set(..., { merge: true })`로 쓴다. 이렇게 하면 `days`의 해당 날짜만 바뀌고 `updatedAt`에 서버 시각이 들어간다.
 
 - [ ] **Step 1: 실패하는 테스트 쓰기**
+
+```ts
+// src/sync/monthDoc.test.ts
+import { expect, it } from 'vitest';
+import { buildMonthPatch } from './monthDoc';
+import { rec } from './testing';
+
+const sentinels = { deleteField: () => 'DEL', serverTimestamp: () => 'NOW' };
+
+it('바꿀 것이 없으면 null이다', () => {
+  expect(buildMonthPatch({}, sentinels)).toBeNull();
+});
+it('쓸 날짜와 지울 날짜를 한 번에 담는다', () => {
+  expect(buildMonthPatch({ '13': rec('A', 'F12424', 100, 'pc'), '14': 'delete' }, sentinels)).toEqual({
+    days: { '13': { text: 'A', color: 'F12424', editedAt: 100, editedBy: 'pc' }, '14': 'DEL' },
+    updatedAt: 'NOW',
+  });
+});
+```
 
 ```ts
 // tests/emulator/firestoreStore.test.ts
@@ -935,20 +963,20 @@ it('오프라인에서 추가한 줄과 다른 기기의 수정이 합쳐진다'
 
 - [ ] **Step 2: 실패 확인**
 
-Run: `npm run test:emu`
-Expected: FAIL. `src/sync/firestoreStore`, `src/sync/monthDoc` 모듈을 찾지 못한다.
+Run: `npx vitest run --project unit src/sync/monthDoc.test.ts; npm run test:emu`
+Expected: 둘 다 FAIL. `src/sync/firestoreStore`, `src/sync/monthDoc` 모듈을 찾지 못한다.
 
 - [ ] **Step 3: `src/sync/monthDoc.ts`와 `src/sync/firestoreStore.ts`를 Interfaces대로 구현한다**
 
 - [ ] **Step 4: 통과 확인**
 
-Run: `npm run test:emu && npx tsc --noEmit`
-Expected: `rules`, `firestoreStore`, `twoDevices` 전부 PASS. 타입 오류 없음.
+Run: `npx vitest run --project unit src/sync && npm run test:emu && npx tsc --noEmit`
+Expected: 단위 테스트와 `rules`, `firestoreStore`, `twoDevices` 전부 PASS. 타입 오류 없음.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/sync/monthDoc.ts src/sync/firestoreStore.ts tests/emulator
+git add src/sync/monthDoc.ts src/sync/monthDoc.test.ts src/sync/firestoreStore.ts tests/emulator
 git commit -m "feat: Firestore 달 문서 어댑터와 두 기기 동기화 시험"
 ```
 
@@ -957,7 +985,7 @@ git commit -m "feat: Firestore 달 문서 어댑터와 두 기기 동기화 시�
 ### Task 6: 웹앱 뼈대와 로그인
 
 **Files:**
-- Create: `index.html`, `vite.config.ts`, `.env.emulator`, `scripts/seed-emulator.ts`
+- Create: `index.html`, `vite.config.ts`, `.env.emulator`, `scripts/seed-emulator.ts`, `scripts/shot.ts`
 - Create: `src/web/main.ts`, `src/web/firebase.ts`, `src/web/app.ts`, `src/web/device.ts`, `src/web/autoFlush.ts`, `src/web/ui/login.ts`, `src/web/styles.css`
 - Modify: `package.json` (scripts)
 - Test: `src/web/device.test.ts`, `src/web/autoFlush.test.ts`, `src/web/ui/login.test.ts`, `src/web/app.test.ts`
@@ -998,6 +1026,8 @@ export function createApp(deps: AppDeps): { destroy(): void };
 - `initFirebase`: 앱 설정은 `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_APP_ID`에서 읽는다. Firestore는 기기 안 영구 캐시(여러 탭 지원)와 롱폴링 자동 감지를 켠다. `VITE_FORCE_LONG_POLLING`이 `1`이면 롱폴링을 강제한다. `VITE_USE_EMULATOR`가 `1`이면 Firestore `127.0.0.1:8085`, Auth `http://127.0.0.1:9095` 에뮬레이터에 붙는다.
 - `.env.emulator`: `VITE_USE_EMULATOR=1`, `VITE_FIREBASE_PROJECT_ID=demo-calfif`, 나머지 키는 `demo`.
 - `scripts/seed-emulator.ts`: Auth 에뮬레이터에 uid `owner-test-uid`, 이메일 `test@example.com`, 비밀번호 `test-password` 계정을 만든다. 이미 있으면 넘어간다.
+- 화면 확인용 자동 로그인: `VITE_USE_EMULATOR`가 `1`이고 주소에 `?autologin=1`이 있으면 `main.ts`가 위 시험 계정으로 로그인한다. 에뮬레이터 모드가 아니면 이 주소 인자를 무시한다.
+- `scripts/shot.ts`: 화면 확인용 스크린샷 도구다. 헤드리스 Edge(`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`)를 원격 디버깅 포트로 띄우고 DevTools 프로토콜로 조작한다(Node 내장 `WebSocket` 사용, 추가 패키지 없음). 사용법: `npx tsx scripts/shot.ts --url <주소> --out <png 경로> [--size 402x874] [--scheme light|dark] [--wait 3000] [--eval "<페이지에서 실행할 JS>"]`. 화면 크기와 `prefers-color-scheme`을 맞추고, 주소를 열고, `--wait` 밀리초 기다린 뒤(`--eval`이 있으면 실행하고 500ms 더 기다린 뒤) PNG를 저장하고 Edge를 끈다. Edge 프로필은 `.tools/edge-profile`에 둔다. 스크린샷은 `build/shots/`에 저장한다.
 - `package.json` scripts: `"dev": "vite"`, `"build": "tsc --noEmit && vite build"`, `"dev:emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && vite --mode emulator\""`.
 - `startAutoFlush`: 시작할 때 `flush`를 한 번 부른다(앱을 열 때 올리기). `target`의 `online` 이벤트와 `visibilitychange`(보이게 될 때)에서 `flush`를 부른다. `retryMs`(기본 15000)마다 대기 건수가 있으면 `flush`를 부른다. 돌려주는 함수는 전부 해제한다.
 - 로그인 오류 문구:
@@ -1129,13 +1159,13 @@ Expected: PASS, 타입 오류 없음.
 
 - [ ] **Step 5: 에뮬레이터로 화면 확인**
 
-Run: `npm run dev:emu` 실행 후 브라우저로 `http://localhost:5173`을 연다.
-Expected: 로그인 화면이 뜬다. `test@example.com` / `test-password`로 들어가면 임시 화면에 이메일이 보이고, 로그아웃하면 로그인 화면으로 돌아온다. 틀린 비밀번호를 넣으면 "이메일 또는 비밀번호가 맞지 않습니다."가 보인다.
+Run: `npm run dev:emu`를 백그라운드로 띄우고, `scripts/shot.ts`로 `http://localhost:5173/`과 `http://localhost:5173/?autologin=1`을 402x874, 밝은 화면과 어두운 화면으로 찍어 PNG를 열어 본다. 끝나면 띄운 프로세스를 끈다.
+Expected: 첫 주소는 로그인 화면이다(이메일 칸, 비밀번호 칸, 로그인 버튼). 둘째 주소는 임시 화면이고 `test@example.com`이 보인다. 글자가 잘리거나 겹치지 않는다.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add index.html vite.config.ts .env.emulator scripts/seed-emulator.ts src/web package.json package-lock.json
+git add index.html vite.config.ts .env.emulator scripts/seed-emulator.ts scripts/shot.ts src/web package.json package-lock.json
 git commit -m "feat: 웹앱 뼈대와 이메일 로그인"
 ```
 
@@ -1330,7 +1360,7 @@ Expected: PASS, 타입 오류 없음.
 
 - [ ] **Step 5: 에뮬레이터로 화면 확인**
 
-Run: `npm run dev:emu` 실행 후 로그인한다. 창 폭을 402px과 1440px로 바꿔 가며 본다.
+Run: `npm run dev:emu`를 백그라운드로 띄우고 `scripts/shot.ts`로 `http://localhost:5173/?autologin=1`을 402x874와 1440x900, 밝은 화면과 어두운 화면으로 찍어 본다. `--eval`로 다음 달 버튼을 눌러 한 장 더 찍는다. 끝나면 띄운 프로세스를 끈다.
 Expected: 이번 달이 한 화면에 들어온다. 오늘 날짜가 강조된다. 달을 넘길 수 있다. 가로 스크롤이 생기지 않는다. 밝은 화면과 어두운 화면 모두 글자가 읽힌다.
 
 - [ ] **Step 6: Commit**
@@ -1467,7 +1497,7 @@ Expected: PASS, 타입 오류 없음.
 
 - [ ] **Step 5: 에뮬레이터로 두 창 확인**
 
-Run: `npm run dev:emu` 실행 후 브라우저 창 두 개로 로그인한다.
+Run: `npm run dev:emu`를 백그라운드로 띄운다. `scripts/shot.ts`의 `--eval`로 한 페이지에서 날짜를 열어 메모와 배경색, 완료 표시를 저장하게 한 뒤, 새로 연 페이지(`?autologin=1`)의 스크린샷에서 같은 내용이 보이는지 확인한다. `?autologin=1#2026-11-20`과 `?autologin=1#2026-02-30`도 찍는다. 끝나면 띄운 프로세스를 끈다.
 Expected: 한 창에서 메모와 배경색을 저장하면 다른 창의 같은 날짜가 5초 안에 바뀐다. 완료 표시를 켠 줄은 달력에서 취소선으로 보인다. 주소에 `#2026-11-20`을 붙여 열면 그 날짜의 편집 화면이 뜬다. `#2026-02-30`은 달력으로 간다.
 
 - [ ] **Step 6: 실제 프로젝트로 회사 네트워크 확인(사용자의 Firebase 프로젝트가 준비됐을 때만)**
@@ -1570,7 +1600,7 @@ Expected: 단위·DOM 테스트 전부 PASS. `dist/`에 `index.html`, 서비스 
 
 - [ ] **Step 5: 화면 확인**
 
-Run: `npm run dev:emu` 실행 후 폭 402px과 1440px, 밝은 화면과 어두운 화면에서 로그인, 달력, 편집, 설정을 차례로 본다.
+Run: `npm run dev:emu`를 백그라운드로 띄우고 `scripts/shot.ts`로 폭 402px과 1440px, 밝은 화면과 어두운 화면에서 로그인, 달력, 편집(`#2026-11-20`), 설정(`#settings`)을 찍어 본다. 끝나면 띄운 프로세스를 끈다.
 Expected: 글자가 잘리거나 겹치지 않는다. 가로 스크롤이 없다. 22색 팔레트가 편집 화면 안에 다 들어온다. 배경색이 깔린 칸의 글자가 읽힌다.
 
 - [ ] **Step 6: Commit**
@@ -1921,7 +1951,7 @@ Expected: FAIL. `./plan`, `./stateFile`, `./upload` 모듈을 찾지 못한다.
 
 - [ ] **Step 3: 구현**
 
-네 파일을 Interfaces와 규칙대로 쓴다. `LiteMonthStore`의 쓰기 방식은 Task 5의 `FirestoreMonthStore.transactMonth`와 같고, 읽은 문서는 `parseMonthDoc`으로 바꾼다.
+네 파일을 Interfaces와 규칙대로 쓴다. `LiteMonthStore`는 읽은 문서를 `parseMonthDoc`으로 바꾸고, 쓸 내용을 `buildMonthPatch`(`src/sync/monthDoc.ts`)로 만들어 `set(..., { merge: true })`로 쓴다. Lite SDK의 `deleteField`와 `serverTimestamp`를 넘긴다.
 
 - [ ] **Step 4: 통과 확인**
 
@@ -2197,7 +2227,7 @@ git commit -m "feat: 가져오기 명령줄과 따라가기"
 - Consumes: 앞의 모든 Task
 - Produces: 배포된 웹앱, 옮겨진 기록, `README.md`의 실행 방법
 
-`package.json` scripts 추가: `"deploy": "npm run build && tsx scripts/build-rules.ts && firebase deploy --only hosting,firestore:rules"`. `build-rules.ts`는 `OWNER_UID`가 비었거나 `owner-test-uid`이면 배포용 규칙을 만들지 않고 오류로 끝난다.
+`package.json` scripts 추가: `"deploy": "npm run build && tsx scripts/build-rules.ts && firebase deploy --only hosting,firestore:rules"`. `build-rules.ts`는 Task 4에서 만든 대로, `OWNER_UID`가 비었거나 `owner-test-uid`이면 배포용 규칙을 만들지 않고 오류로 끝난다.
 
 - [ ] **Step 1: 사용자에게 Firebase 프로젝트 준비를 부탁한다(사용자 작업)**
 
