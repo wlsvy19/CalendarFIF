@@ -42,13 +42,20 @@ const accounts = firebaseAccountMaker(app.options, {
 
 // PC 앱(데스크톱 빌드)에서만 켠다. 웹앱은 이 값들을 쓰지 않는다.
 const DESKTOP = import.meta.env.VITE_DESKTOP === '1';
+// 옮긴 자리는 상자마다 따로, 앱이 켜져 있는 동안만 기억한다.
 const editorMemory = sessionMemory();
+const usersMemory = sessionMemory();
 const bridge = DESKTOP ? getBridge() : null;
 const interactivity = new Interactivity((on) => bridge?.setInteractive(on));
 // 로그인 뒤 화면이 열려 있는 동안 메인 프로세스의 명령을 받는 동작들. 로그인 전에는 null이라 명령을 무시한다.
 // 저장되지 않아 이 페이지의 메모리에만 있는 편집이 있는가. mountMain이 로그인 중에만 채운다(새 버전으로 다시 읽기를 미룰지 정한다).
 let unsavedOnlyInMemory: () => boolean = () => false;
 let deskActions: { goToday(): void; openSettings(page?: SettingsPage): void; signOut(): void } | null = null;
+
+/** 주소의 #...을 기록을 남기지 않고 지운다(다시 로그인했을 때 설정이나 사용자 관리가 열리지 않게 한다). */
+function clearHash(): void {
+  history.replaceState(null, '', location.pathname + location.search);
+}
 
 type CalendarScreen = {
   destroy(): void;
@@ -114,7 +121,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   };
   const signOutNow = (): void => {
     closeSettings();
-    history.replaceState(null, '', location.pathname + location.search); // 다시 로그인했을 때 설정이 열리지 않게 한다
+    clearHash();
     void signOut(auth);
   };
   let settingsPage: SettingsPage | undefined;
@@ -199,7 +206,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     if (action === 'leave') {
       closeUsers();
       pushedByApp = false;
-      history.replaceState(null, '', location.pathname + location.search);
+      clearHash();
       return;
     }
     if (action !== 'open' || users) return;
@@ -217,6 +224,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
         closeUsers(); // 주소가 바뀌기를 기다리지 않고 바로 닫는다
         backToCalendar();
       },
+      attachDrag: DESKTOP ? (sheet, handle) => makeDraggable(sheet, handle, usersMemory) : undefined,
     });
     interactivity.begin('users');
   };
@@ -362,9 +370,11 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
     });
   let screen: CalendarScreen | null = mountScreen();
   const signOutFromNotice = (): void => {
-    history.replaceState(null, '', location.pathname + location.search); // 다시 로그인했을 때 설정이 열리지 않게 한다
+    clearHash();
     void signOut(auth);
   };
+  // 안내의 "다시 확인": 서버의 답이 오면(늦어도 10초 뒤) 끝난다. 누를 수 있을 때는 watch가 이미 있다.
+  const recheckFromNotice = (): Promise<void> => new Promise((resolve) => watch.recheck(resolve));
   function apply(): void {
     if (stopped) return;
     const next = screenFor(access, shown);
@@ -384,8 +394,14 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
     } else {
       screen?.destroy();
       screen = null;
-      notice = mountBlocked(root, { kind: next, email: session.email, onSignOut: signOutFromNotice });
-      interactivity.begin('blocked'); // PC 앱에서 로그아웃 단추를 누를 수 있게 한다
+      notice = mountBlocked(root, {
+        kind: next,
+        email: session.email,
+        pending: () => outbox.list().length,
+        onSignOut: signOutFromNotice,
+        onRecheck: recheckFromNotice,
+      });
+      interactivity.begin('blocked'); // PC 앱에서 다시 확인과 로그아웃 단추를 누를 수 있게 한다
     }
     shown = next;
   }

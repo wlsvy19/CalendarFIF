@@ -205,11 +205,12 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     await clickEl(`${sheet(cls)}?.querySelector('.sheet-bar .textbtn.end')`);
     return (await waitFor<boolean>(NO_SHEET, 5000)) === true;
   }
-  /** 로그인 화면이 될 때까지 로그아웃한다: 안내의 로그아웃, 또는 설정의 로그아웃(대기 중인 편집이 있으면 "그래도 로그아웃"). */
+  /** 로그인 화면이 될 때까지 로그아웃한다: 안내나 설정의 로그아웃(대기 중인 편집이 있으면 둘 다 "그래도 로그아웃"). */
   async function signOut(): Promise<boolean> {
     if (await js<boolean>(LOGIN_FORM)) return true;
     if (await js<boolean>(`!!${button(q('.login-card'), '로그아웃')}`)) {
       await press(button(q('.login-card'), '로그아웃'));
+      if (await js<boolean>(`${button(q('.login-card'), '그래도 로그아웃')}?.hidden === false`)) await press(button(q('.login-card'), '그래도 로그아웃'));
     } else {
       if (await js<boolean>(`!!${sheet('')}`)) await closeSheet('');
       if (!(await openSettings())) return false;

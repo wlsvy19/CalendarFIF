@@ -9,6 +9,8 @@ export type UsersProps = {
   onRemove(uid: string): Promise<void>;
   onReset(email: string): Promise<void>;
   onClose(): void;
+  /** PC 앱에서만 준다: 시트를 제목 줄로 끌어 옮기게 한다(편집 화면과 같은 모양). */
+  attachDrag?: (sheet: HTMLElement, handle: HTMLElement) => { destroy(): void };
 };
 
 const CONFIRM_MS = 4000;
@@ -228,11 +230,13 @@ export function mountUsers(root: HTMLElement, props: UsersProps): { destroy(): v
     },
   );
   render();
+  const drag = props.attachDrag?.(sheet, sheet.querySelector<HTMLElement>('.sheet-bar')!);
 
   return {
     destroy() {
       if (!alive) return;
       alive = false;
+      drag?.destroy();
       unwatch();
       for (const t of armed.values()) clearTimeout(t);
       armed.clear();
