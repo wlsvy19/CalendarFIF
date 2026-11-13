@@ -102,3 +102,23 @@ it('destroy하면 이벤트 처리기가 빠진다', () => {
   pointer(handle, 'pointermove', 160, 130);
   expect(offset()).toEqual(['0px', '0px']);
 });
+it('시트 크기가 바뀌면(다른 설정 쪽) 다시 가두고, destroy하면 관찰을 끝낸다', () => {
+  let current = { sheet: sheetSize, viewport };
+  let notify = () => {};
+  let disconnected = false;
+  const sheet = document.createElement('div');
+  const handle = document.createElement('div');
+  const memory = sessionMemory();
+  memory.set({ x: 0, y: 150 });
+  const drag = makeDraggable(sheet, handle, memory, {
+    measure: () => current,
+    observe: (_el, cb) => { notify = cb; return { disconnect: () => { disconnected = true; } }; },
+  });
+  expect(sheet.style.getPropertyValue('--drag-y')).toBe('150px');
+  current = { sheet: { width: 480, height: 700 }, viewport }; // y 한계 42
+  notify();
+  expect(sheet.style.getPropertyValue('--drag-y')).toBe('42px');
+  expect(memory.get().y).toBe(42);
+  drag.destroy();
+  expect(disconnected).toBe(true);
+});

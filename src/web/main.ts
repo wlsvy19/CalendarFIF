@@ -10,7 +10,7 @@ import { loadAppearance, saveAppearance, applyAppearance, type Appearance } from
 import type { SettingsPage } from '../desktop/api';
 import { getBridge } from './desktop/bridge';
 import { mountAdjust } from './desktop/adjust';
-import { sessionMemory } from './desktop/dragSheet';
+import { makeDraggable, sessionMemory } from './desktop/dragSheet';
 import { mountDesktopSettings } from './desktop/settingsPages';
 import { mountCellMenu } from './desktop/cellMenu';
 import { Interactivity } from './desktop/interactive';
@@ -137,7 +137,7 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
         closeEditor();
         backToCalendar();
       },
-    }, DESKTOP ? { focusText: true, drag: editorMemory } : undefined);
+    }, DESKTOP ? { focusText: true, attachDrag: (sheet, handle) => makeDraggable(sheet, handle, editorMemory) } : undefined);
     editor = { dateKey, handle };
     interactivity.begin('editor');
   };

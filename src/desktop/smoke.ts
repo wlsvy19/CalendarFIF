@@ -449,7 +449,10 @@ async function settings(_rt: Runtime, desk: Desk): Promise<Result> {
   const fitsX = far.right - far.left + 16 <= far.w;
   const fitsY = far.bottom - far.top + 16 <= far.h;
   const sheetClamped = (!fitsX || (far.left >= 7 && far.right <= far.w - 7)) && (!fitsY || (far.top >= 7 && far.bottom <= far.h - 7)) && (far.left > moved.left || far.top > moved.top);
-  await js(win, "[...document.querySelectorAll('.desk-settings .textbtn')].find((b) => b.textContent === '닫기').click()");
+  const closeAt = (await js(win, "(() => { const r = [...document.querySelectorAll('.desk-settings .textbtn')].find((b) => b.textContent === '닫기').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()")) as { x: number; y: number };
+  mouse('mouseDown', closeAt.x, closeAt.y);
+  await sleep(50);
+  mouse('mouseUp', closeAt.x, closeAt.y);
   const closeStillWorks = await sheet(false);
   sendCommand({ type: 'openSettings' });
   await sheet(true);

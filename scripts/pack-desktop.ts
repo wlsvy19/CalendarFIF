@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { packager } from '@electron/packager';
-import { bundleProblem, hasTopLevelKoffiRequire, runningInside } from './pack-check';
+import { bundleProblem, guardDecision, hasTopLevelKoffiRequire } from './pack-check';
 import { stageManifest } from './pack-manifest';
 
 // 사용법: tsx scripts/pack-desktop.ts [--emu]
@@ -18,15 +18,18 @@ const build = (extra: NodeJS.ProcessEnv, cliArgs: string[]) => {
 };
 
 const out = emu ? 'build/release-emu' : `release/${readJson('package.json').version}`;
-if (!emu) {
-  // 쓰던 앱이 켜져 있는 폴더를 지우다 멈추면 설치가 깨진다. 켜져 있으면 아무것도 하지 않고 멈춘다.
-  const ps = spawnSync('powershell', ['-NoProfile', '-Command', 'Get-Process CalendarFIF -ErrorAction SilentlyContinue | ForEach-Object { $_.Path }'], { encoding: 'utf8' });
-  const running = (ps.stdout ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  if (runningInside(running, resolve(root, out))) {
-    console.error(`그 폴더의 앱이 실행 중입니다. 앱을 끄고 다시 실행하세요: ${resolve(root, out)}`);
+// 쓰던 앱이 켜져 있는 폴더를 지우다 멈추면 설치가 깨진다. 켜져 있거나 확인하지 못하면 아무것도 하지 않고 멈춘다.
+// 위치를 읽지 못한 프로세스는 '?'로 알린다.
+const ensureNotRunning = (): void => {
+  if (emu) return;
+  const ps = spawnSync('powershell', ['-NoProfile', '-Command', "Get-Process CalendarFIF -ErrorAction SilentlyContinue | ForEach-Object { if ($_.Path) { $_.Path } else { '?' } }"], { encoding: 'utf8', timeout: 30000 });
+  const decision = guardDecision(ps, resolve(root, out));
+  if (!decision.ok) {
+    console.error(decision.message);
     process.exit(1);
   }
-}
+};
+ensureNotRunning();
 
 const emuBuild = emu ? '1' : '0';
 build({}, ['--mode', emu ? 'desktop-emu' : 'desktop']);
@@ -58,6 +61,7 @@ cpSync(rendererDir, resolve(stage, 'dist-desktop'), { recursive: true });
 // koffi의 실행 파일(.node)은 플랫폼별 패키지에 들어 있다.
 for (const dir of ['koffi', '@koromix/koffi-win32-x64']) cpSync(resolve(root, 'node_modules', dir), resolve(stage, 'node_modules', dir), { recursive: true });
 
+ensureNotRunning(); // 빌드에 걸린 시간 동안 앱이 켜졌을 수 있다
 const made = await packager({
   dir: stage,
   out: resolve(root, out),

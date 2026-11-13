@@ -25,7 +25,7 @@ PC(Windows)와 아이폰에서 날짜별 메모를 양방향으로 동기화하�
 - 이 폴더는 사용자의 실제 Firebase 프로젝트에 연결되어 있다. 프로젝트 ID와 설정값은 `.env.local`과 `.firebaserc`에 있고 git에는 없다.
 - 사용자는 PC에서 DesktopCal을 계속 쓰면서 따라가기(`npm run import -- --follow`)로 CalendarFIF에 넘긴다.
 - 사용자가 순서를 맡겨서(2026-11-13) ③ 단계(PC 바탕화면 앱)를 ② 단계(아이폰 위젯)보다 먼저 했다. 브랜치 `phase-3-desktop-app`에 작업 10개와 전체 검토 수정까지 들어 있고 GitHub에 올라가 있다. `main`에는 아직 합치지 않았다. 화면이 잠긴 채로 만들어서 실제 바탕화면에서 눌러 본 사람이 없기 때문이다. 사용자가 써 본 뒤에 합친다. 결과와 남은 것은 `docs/superpowers/phase3-results.md`에 있다.
-- 꾸린 실제 앱은 `release\0.4.0\CalendarFIF-win32-x64\CalendarFIF.exe`다(git에 없다). 새 버전을 꾸리면 새 폴더에 만들어진다. 쓰던 앱을 끄고 새 폴더의 `CalendarFIF.exe`를 실행하면 설정과 로그인은 그대로 이어진다(둘 다 `%APPDATA%\CalendarFIF`에 있다). 사용자가 직접 실행한다. 세션이 이 실행 파일이나 `npm run desktop`을 띄우지 않는다. 이 둘은 사용자의 실제 프로필(`%APPDATA%\CalendarFIF`)과 실제 프로젝트를 쓰고, 꾸린 앱은 처음 실행할 때 Windows 시작 프로그램에 등록한다.
+- 꾸린 실제 앱은 `npm run desktop:pack`이 `release\<버전>\CalendarFIF-win32-x64\CalendarFIF.exe`에 만든다(git에 없다). 새 버전을 꾸리면 새 폴더에 만들어진다. 쓰던 앱을 끄고 새 폴더의 `CalendarFIF.exe`를 실행하면 설정과 로그인은 그대로 이어진다(둘 다 `%APPDATA%\CalendarFIF`에 있다). 사용자가 직접 실행한다. 세션이 이 실행 파일이나 `npm run desktop`을 띄우지 않는다. 이 둘은 사용자의 실제 프로필(`%APPDATA%\CalendarFIF`)과 실제 프로젝트를 쓰고, 꾸린 앱은 처음 실행할 때 Windows 시작 프로그램에 등록한다.
 - PC 앱의 시험은 `npm run desktop:smoke`(에뮬레이터, 저장소 안의 프로필)로 한다. `src/desktop/win32.ts`나 `window.ts`를 고친 뒤에는 여러 번 돌려 상태 파일의 `nestedNativeCalls`가 0인지 본다. 창 메시지 처리 안에서 Windows 기능을 부르면 앱이 죽는다.
 - 화면 시안 확인 없이 설계했다. 작성자가 정한 것은 ③ 설계 문서 14절과 결과 문서에 있고 사용자가 바꿀 수 있다.
 - 웹앱 배포는 세션이 판단해서 한다(사용자가 2026-11-13 밤에 맡겼다: "너가 알아서 앞으로 배포해"). 조건은 아래 "사용자가 정한 것"에 있다. 달 넘기기 수정이 들어간 웹앱을 2026-11-13 23:47에 배포했다.

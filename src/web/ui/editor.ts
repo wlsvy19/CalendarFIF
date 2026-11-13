@@ -1,7 +1,6 @@
 import { PALETTE } from '../../core/color';
 import { normalizeText, toggleDoneInRange } from '../../core/text';
 import type { DayValue } from '../../core/types';
-import { makeDraggable, type DragMemory } from '../desktop/dragSheet';
 import { dismiss } from './sheetMotion';
 
 const WEEKDAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
@@ -30,7 +29,7 @@ export function mountEditor(
     onSave(next: DayValue): void;
     onCancel(): void;
   },
-  env?: { visualViewport?: VisualViewportLike | null; focusText?: boolean; drag?: DragMemory },
+  env?: { visualViewport?: VisualViewportLike | null; focusText?: boolean; attachDrag?: (sheet: HTMLElement, handle: HTMLElement) => { destroy(): void } },
 ): { destroy(): void } {
   const viewport = env?.visualViewport === undefined ? (window.visualViewport ?? null) : env.visualViewport;
   const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -169,7 +168,7 @@ export function mountEditor(
 
   root.append(scrim, sheet);
   document.documentElement.classList.add('sheet-open');
-  const drag = env?.drag ? makeDraggable(sheet, sheet.querySelector<HTMLElement>('.sheet-bar')!, env.drag) : null;
+  const drag = env?.attachDrag?.(sheet, sheet.querySelector<HTMLElement>('.sheet-bar')!);
   if (env?.focusText || window.innerWidth >= WIDE_PX) {
     area.focus();
     area.setSelectionRange(area.value.length, area.value.length);

@@ -107,7 +107,7 @@
   animation: none;
 }
 :root.desk .scrim { animation: none; }
-:root.desk .sheet-bar.drag-handle { cursor: move; user-select: none; }
+:root.desk .sheet-bar.drag-handle { cursor: move; user-select: none; touch-action: none; }
 :root.desk .sheet-bar.drag-handle button { cursor: pointer; }
 :root.desk .memo-input { min-height: 200px; }
 @media (max-width: 519.98px) {

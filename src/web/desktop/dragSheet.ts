@@ -29,7 +29,11 @@ export function sessionMemory(): DragMemory {
   };
 }
 
-export type DragEnv = { measure?(): { sheet: Size; viewport: Size } };
+export type DragEnv = {
+  measure?(): { sheet: Size; viewport: Size };
+  /** 시트 자신의 크기가 바뀔 때 부른다. 기본은 ResizeObserver가 있으면 그것이다. */
+  observe?(el: HTMLElement, onChange: () => void): { disconnect(): void };
+};
 
 const NOT_A_HANDLE = 'button, input, select, textarea, a';
 
@@ -81,6 +85,8 @@ export function makeDraggable(sheet: HTMLElement, handle: HTMLElement, memory: D
   handle.addEventListener('pointercancel', end);
   handle.addEventListener('lostpointercapture', onLost);
   window.addEventListener('resize', onResize);
+  const observe = env?.observe ?? (typeof ResizeObserver === 'undefined' ? null : (el, cb) => { const o = new ResizeObserver(cb); o.observe(el); return o; });
+  const sizeWatch = observe?.(sheet, onResize);
 
   return {
     destroy() {
@@ -90,6 +96,7 @@ export function makeDraggable(sheet: HTMLElement, handle: HTMLElement, memory: D
       handle.removeEventListener('pointercancel', end);
       handle.removeEventListener('lostpointercapture', onLost);
       window.removeEventListener('resize', onResize);
+      sizeWatch?.disconnect();
       drag = null;
     },
   };
