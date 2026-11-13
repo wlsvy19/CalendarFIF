@@ -1,6 +1,93 @@
 import { dismiss } from './sheetMotion';
 
-export type AccountProps = { email: string; pending: number; storageOk: boolean; corruptFound: boolean; onSignOut(): void };
+export type AccountProps = {
+  email: string;
+  pending: number;
+  storageOk: boolean;
+  corruptFound: boolean;
+  onSignOut(): void;
+  /** 주면 "비밀번호 변경"을 보인다. 결과 문구를 돌려준다. */
+  onChangePassword?(current: string, next: string): Promise<{ ok: boolean; message: string }>;
+  /** 주면 "사용자 관리" 단추를 보인다(관리자). */
+  onManageUsers?(): void;
+};
+
+const PASSWORD_DONE_MS = 1500;
+
+// "비밀번호" 칸. 단추를 누르면 그 자리가 폼으로 바뀐다.
+function passwordField(onChange: NonNullable<AccountProps['onChangePassword']>): HTMLElement {
+  const field = document.createElement('div');
+  field.className = 'field';
+  field.innerHTML = `
+    <span class="field-label">비밀번호</span>
+    <div class="account-pw"></div>`;
+  const slot = field.querySelector<HTMLElement>('.account-pw')!;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const showButton = (): void => {
+    clearTimeout(timer);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'settings-btn';
+    b.textContent = '비밀번호 변경';
+    b.addEventListener('click', showForm);
+    slot.replaceChildren(b);
+  };
+  const showForm = (): void => {
+    const form = document.createElement('form');
+    form.className = 'account-pw-form';
+    form.noValidate = true;
+    form.innerHTML = `
+      <input type="password" name="current" autocomplete="current-password" placeholder="지금 비밀번호">
+      <input type="password" name="next" autocomplete="new-password" placeholder="새 비밀번호 (8자 이상)">
+      <div class="account-pw-actions">
+        <button type="submit" class="donebtn">바꾸기</button>
+        <button type="button" class="donebtn cancel">취소</button>
+      </div>
+      <p class="settings-note" role="status"></p>`;
+    const current = form.querySelector<HTMLInputElement>('input[name="current"]')!;
+    const next = form.querySelector<HTMLInputElement>('input[name="next"]')!;
+    const note = form.querySelector<HTMLElement>('.settings-note')!;
+    const controls = form.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button');
+    const setBusy = (on: boolean): void => controls.forEach((c) => (c.disabled = on));
+    form.querySelector('.cancel')!.addEventListener('click', showButton);
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (current.disabled) return;
+      setBusy(true);
+      onChange(current.value, next.value).then(
+        (result) => {
+          if (!form.isConnected) return;
+          note.textContent = result.message;
+          if (result.ok) {
+            current.value = '';
+            next.value = '';
+            timer = setTimeout(showButton, PASSWORD_DONE_MS);
+          }
+          setBusy(false);
+        },
+        () => {
+          if (!form.isConnected) return;
+          note.textContent = '바꾸지 못했습니다.';
+          setBusy(false);
+        },
+      );
+    });
+    slot.replaceChildren(form);
+    current.focus();
+  };
+  showButton();
+  return field;
+}
+
+function usersField(onManage: () => void): HTMLElement {
+  const field = document.createElement('div');
+  field.className = 'field';
+  field.innerHTML = `
+    <span class="field-label">사용자</span>
+    <button type="button" class="settings-btn">사용자 관리</button>`;
+  field.querySelector('button')!.addEventListener('click', onManage);
+  return field;
+}
 
 // 계정, 동기화, (extra), 로그아웃. 웹앱 설정 화면과 PC 앱 설정의 계정 쪽이 함께 쓴다.
 // 감싸는 요소는 상자를 만들지 않아서(display: contents) 자식들이 시트의 세로 배치에 그대로 놓인다.
@@ -27,7 +114,10 @@ export function accountSection(props: AccountProps, extra?: HTMLElement): HTMLEl
   el.querySelector('.settings-pending')!.textContent = `대기 중인 편집 ${props.pending}건`;
   el.querySelector<HTMLElement>('.settings-storage')!.hidden = props.storageOk;
   el.querySelector<HTMLElement>('.settings-corrupt')!.hidden = !props.corruptFound;
-  if (extra) el.querySelector('.settings-signout')!.before(extra);
+  const signOutField = el.querySelector('.settings-signout')!;
+  if (props.onManageUsers) signOutField.before(usersField(props.onManageUsers));
+  if (props.onChangePassword) signOutField.before(passwordField(props.onChangePassword));
+  if (extra) signOutField.before(extra);
   const signOutBtn = el.querySelector<HTMLButtonElement>('.signout')!;
   const forceBtn = el.querySelector<HTMLButtonElement>('.danger')!;
   const confirmText = el.querySelector<HTMLElement>('.settings-confirm')!;
@@ -64,6 +154,8 @@ export function mountSettings(
     corruptFound: boolean;
     onSignOut(): void;
     onClose(): void;
+    onChangePassword?: AccountProps['onChangePassword'];
+    onManageUsers?: AccountProps['onManageUsers'];
   },
 ): { destroy(): void } {
   const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -106,7 +198,9 @@ export function mountSettings(
       return;
     }
     if (e.key !== 'Tab') return;
-    const stops = [...sheet.querySelectorAll<HTMLElement>('button')].filter((el) => !el.hidden);
+    const stops = [...sheet.querySelectorAll<HTMLElement>('button, input')].filter(
+      (el) => !el.hidden && !(el as HTMLButtonElement).disabled && !el.closest('[hidden]'),
+    );
     const first = stops[0];
     const last = stops[stops.length - 1];
     if (e.shiftKey && (document.activeElement === first || document.activeElement === sheet)) {

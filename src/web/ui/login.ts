@@ -16,7 +16,7 @@ export function loginErrorMessage(code: string): string {
 
 export function mountLogin(
   root: HTMLElement,
-  props: { signIn(email: string, password: string): Promise<void> },
+  props: { signIn(email: string, password: string): Promise<void>; resetPassword?(email: string): Promise<void> },
 ): { destroy(): void } {
   const wrap = document.createElement('div');
   wrap.className = 'login';
@@ -27,6 +27,7 @@ export function mountLogin(
       <label>비밀번호<input type="password" name="password" autocomplete="current-password" required></label>
       <p class="login-error" role="alert"></p>
       <button type="submit" class="primary">로그인</button>
+      ${props.resetPassword ? '<button type="button" class="textbtn login-forgot">비밀번호를 잊었습니다</button>' : ''}
     </form>`;
   const form = wrap.querySelector('form')!;
   const email = wrap.querySelector<HTMLInputElement>('input[type="email"]')!;
@@ -38,6 +39,7 @@ export function mountLogin(
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     alertEl.textContent = '';
+    alertEl.classList.remove('ok');
     button.disabled = true;
     props.signIn(email.value.trim(), password.value).then(
       () => {
@@ -51,6 +53,35 @@ export function mountLogin(
       },
     );
   });
+
+  const forgot = wrap.querySelector<HTMLButtonElement>('.login-forgot');
+  if (forgot && props.resetPassword) {
+    const reset = props.resetPassword;
+    forgot.addEventListener('click', () => {
+      alertEl.classList.remove('ok');
+      const address = email.value.trim();
+      if (!address.includes('@')) {
+        alertEl.textContent = '이메일을 먼저 적으세요.';
+        return;
+      }
+      alertEl.textContent = '';
+      forgot.disabled = true;
+      reset(address).then(
+        () => {
+          if (!alive) return;
+          alertEl.classList.add('ok');
+          alertEl.textContent = '재설정 메일을 보냈습니다. 메일함을 확인하세요.';
+          forgot.disabled = false;
+        },
+        (error: unknown) => {
+          if (!alive) return;
+          const code = (error as { code?: string } | null)?.code ?? 'unknown';
+          alertEl.textContent = `메일을 보내지 못했습니다. (${code})`;
+          forgot.disabled = false;
+        },
+      );
+    });
+  }
 
   root.appendChild(wrap);
   return {
