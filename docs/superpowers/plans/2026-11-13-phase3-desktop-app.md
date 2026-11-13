@@ -24,8 +24,8 @@
 - 테스트 코드는 이 계획에 적힌 대로 쓴다. 설치된 도구 버전 때문에 문법이나 타입 오류가 나면 단언의 뜻을 바꾸지 않는 최소한의 수정만 하고 보고서에 적는다.
 
 **사용자의 프로젝트와 PC를 지키는 것**
-- 이 폴더는 사용자의 실제 Firebase 프로젝트에 연결돼 있다(`.env.local`, `.firebaserc`). 실행자는 `npm run deploy`, `npm run import`, `npm run dev`, `npm run build`, `npm run desktop`, `npm run desktop:pack`, `firebase deploy`, `firebase use`를 실행하지 않고 `release/` 아래의 실행 파일을 띄우지 않는다. 에뮬레이터 쪽 명령(`dev:emu`, `dev:desktop-emu`, `desktop:smoke`, `desktop:pack:emu`, `desktop:pack:check`, `test:emu`)만 쓴다.
-- DesktopCal의 파일, 프로세스, 창을 건드리지 않는다(읽기, 메시지 보내기, 끄기 모두). 탐색기를 다시 시작하지 않는다. 탐색기 재시작은 앱이 자기 창을 없애는 것으로 흉내 낸다(Task 6).
+- 이 폴더는 사용자의 실제 Firebase 프로젝트에 연결돼 있다(`.env.local`, `.firebaserc`). 실행자는 `npm run deploy`, `npm run import`, `npm run dev`, `npm run build`, `npm run desktop`, `npm run desktop:pack`, `firebase deploy`, `firebase use`를 실행하지 않고 `release/` 아래의 실행 파일을 띄우지 않는다. 쓸 수 있는 명령은 다음뿐이다. `npm install`, `npm run desktop:setup`, `npm test`, `npx vitest run ...`, `npx tsc --noEmit`, `npm run test:emu`, `npm run dev:emu`, 이 계획이 정의한 에뮬레이터·시험 실행 스크립트(`dev:desktop-emu`, `desktop:emu`, `desktop:smoke`, `desktop:pack:emu`, `desktop:pack:check`), 이 계획의 단계가 에뮬레이터 설정으로 쓰는 `npx vite build --mode emulator`와 `--mode desktop-emu`(`--mode desktop`도 에뮬레이터 설정의 단계에서만), 이 저장소의 스크립트를 부르는 `npx tsx scripts/...`. 실제 Firebase 프로젝트에 닿는 명령은 쓰지 않는다.
+- DesktopCal의 파일, 프로세스, 창을 건드리지 않는다(파일 읽기, 창에 메시지 보내기, 창을 옮기거나 바꾸기, 프로세스 끄기 모두). 단, 최상위 창의 Z 순서를 따라가며 모든 창(DesktopCal의 창 포함)의 핸들, 소유자, 클래스 이름을 읽는 것은 허용한다. Task 6에서 달력이 맨 아래인지 확인하는 데 필요하다. 탐색기를 다시 시작하지 않는다. 탐색기 재시작은 앱이 자기 창을 없애는 것으로 흉내 낸다(Task 6).
 - 화면을 찍지 않는다. 그림은 `webContents.capturePage()`(앱 자기 창의 화소)와 `scripts/shot.ts`(헤드리스 Edge 안의 페이지)로만 만든다. 화면은 잠겨 있다고 보고, 잠금을 풀거나 막지 않는다.
 - Windows의 전원, 잠금, 시작 프로그램 설정을 바꾸지 않는다. "Windows 시작 시 실행"은 꾸린 앱의 실제 실행에서만 건다. 개발 실행과 시험 실행은 `app.setLoginItemSettings`를 부르지 않는다(Task 6 `resolveRuntime`, Task 8 `startupAction`).
 - 시험·에뮬레이터 실행은 저장소 안의 프로필(`build/desktop-smoke/profile`, `build/desktop-emu/profile`)을 쓴다. `%APPDATA%\CalendarFIF`는 사용자의 실제 실행만 쓴다. 앱이 등록한 전역 단축키는 끝날 때 모두 푼다.
@@ -504,7 +504,7 @@ git commit -m "feat: 달력이 배치, 주 번호, 공휴일, 음력, 줄 설정
 - Modify: `vite.config.ts`, `src/web/firebase.ts`, `src/web/main.ts`, `src/web/ui/calendar.ts`, `src/web/ui/calendar.test.ts`, `src/web/ui/editor.ts`, `src/web/ui/editor.test.ts`, `package.json`, `.gitignore`
 
 **Interfaces:**
-- Consumes: Task 4의 `mountCalendar`, `CalendarHandle.goToday`, `applyAppearance`, `loadAppearance`. `PALETTE`, `EMPTY_DAY`, `SyncEngine.saveEdit`.
+- Consumes: Task 2의 `loadAppearance`, Task 4의 `mountCalendar`, `CalendarHandle.goToday`, `applyAppearance`. `PALETTE`, `EMPTY_DAY`, `SyncEngine.saveEdit`.
 - Produces:
 ```ts
 // src/desktop/api.ts (화면은 타입만 쓰고, preload와 메인은 CH도 쓴다)
@@ -551,11 +551,11 @@ export function playDoneTone(make?: () => ToneContext): void; // 기본 new Audi
 정해 둔 값:
 - 빌드: `vite.config.ts`를 `defineConfig(({ mode }) => …)`로 바꾼다. `mode`가 `desktop`이나 `desktop-emu`면 VitePWA를 빼고(서비스 워커 없음), `build.outDir`을 `dist-desktop` / `dist-desktop-emu`로, `transformIndexHtml`로 `<html lang="ko">`를 `<html lang="ko" class="desk">`로 바꾼다(첫 화면부터 투명). 웹 모드는 그대로다. `.env.desktop`은 `VITE_DESKTOP=1`, `.env.desktop-emu`는 `.env.emulator`의 다섯 줄과 `VITE_DESKTOP=1`. `.gitignore`에 `dist-desktop/`, `dist-desktop-emu/`, `release/`. 스크립트 `"dev:desktop-emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && vite --mode desktop-emu\""`.
 - `initFirebase`: `VITE_DESKTOP === '1'`이면 `getAuth` 대신 `initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] })`.
-- `desktop.css`(`main.ts`가 가져오고 규칙은 모두 `:root.desk` 아래): 문서, `#app`, `.app`, `.grid`, `.login` 바탕은 투명. 칸은 `--desk-cell-bg`, 모서리 4px, 격자 `gap: var(--desk-gap)`. `.rest`는 `--desk-rest-bg`, `.rest .num`과 `.hname`은 `--desk-holiday-ink`. 날짜 배경색은 `color-mix(in srgb, var(--day-color) var(--desk-day-pct), transparent)`. 오늘은 `box-shadow: inset 0 0 0 2px var(--desk-today)`. 날짜·요일은 `--desk-cal-ink`/`--desk-cal-size`, 메모 줄은 `--desk-memo-ink`/`--desk-memo-size`, 줄 높이 `calc(var(--desk-memo-size) * var(--desk-line))`. `.lunar`는 `--desk-lunar-ink`로 날짜보다 2px 작게. 머리는 한 줄(`2026년 11월`, 이전·오늘·다음·메뉴 단추)이고 단추는 `--desk-btn`, 동기화 상태는 그 줄 오른쪽 끝에 작게(설계 7절). `.calendar.shadow`의 글자는 `text-shadow: 0 1px 2px rgba(0,0,0,.85)`. `data-bullet="number"`는 CSS 카운터로 `1. `, `"dot"`은 `• `(`.ln.more` 제외). `.month-gap .m-top { margin-top: 6px }`, `.m-left { margin-left: 6px }`. `:root.content-hidden .memo { visibility: hidden }`. 편집·설정 시트는 창 폭과 상관없이 가운데 상자(넓은 화면 규칙)이고, 창이 520px보다 좁으면 폭 `calc(100vw - 24px)`.
-- 달력(`deps.desktop`가 있을 때): 한 번 클릭은 아무것도 하지 않고 `dblclick`이 `onOpenDay`. 칸의 `contextmenu`는 기본 메뉴를 막고 `onDayMenu(dateKey, { x: clientX, y: clientY })`. 설정 단추 대신 `aria-label="메뉴"` 단추가 `onOpenMenu({ x: clientX, y: clientY })`.
+- `desktop.css`(`main.ts`가 가져오고 규칙은 모두 `:root.desk` 아래): `:root.desk { color-scheme: normal }`(`index.html`의 `color-scheme: light dark`가 투명한 창에 바탕을 칠하지 않게). 문서, `#app`, `.app`, `.grid`, `.login` 바탕은 투명. 칸은 `--desk-cell-bg`, 모서리 4px, 격자 `gap: var(--desk-gap)`. `.rest`는 `--desk-rest-bg`, `.rest .num`과 `.hname`은 `--desk-holiday-ink`. 날짜 배경색은 `color-mix(in srgb, var(--day-color) var(--desk-day-pct), transparent)`. 오늘은 `box-shadow: inset 0 0 0 2px var(--desk-today)`. 날짜·요일은 `--desk-cal-ink`/`--desk-cal-size`, 메모 줄은 `--desk-memo-ink`/`--desk-memo-size`, 줄 높이 `calc(var(--desk-memo-size) * var(--desk-line))`. `.lunar`는 `--desk-lunar-ink`로 날짜보다 2px 작게. 머리는 한 줄(`2026년 11월`, 이전·오늘·다음·메뉴 단추)이고 단추는 `--desk-btn`, 동기화 상태는 그 줄 오른쪽 끝에 작게(설계 7절). `.calendar.shadow`의 글자는 `text-shadow: 0 1px 2px rgba(0,0,0,.85)`. `data-bullet="number"`는 CSS 카운터로 `1. `, `"dot"`은 `• `(`.ln.more` 제외). `.month-gap .m-top { margin-top: 6px }`, `.m-left { margin-left: 6px }`. `:root.content-hidden .memo { visibility: hidden }`. 편집·설정 시트는 창 폭과 상관없이 가운데 상자(넓은 화면 규칙)이고, 창이 520px보다 좁으면 폭 `calc(100vw - 24px)`.
+- 달력(`deps.desktop`가 있을 때): 마우스(`pointerType === 'mouse'`)로는 달 넘기기가 따라 움직이지 않는다(8px 넘는 마우스 끌기가 달을 넘기고 다음 클릭을 삼키지 않게. 시험의 `pointerType: ''`은 영향이 없다). 한 번 클릭은 아무것도 하지 않고 `dblclick`이 `onOpenDay`. 칸의 `contextmenu`는 기본 메뉴를 막고 `onDayMenu(dateKey, { x: clientX, y: clientY })`. 설정 단추 대신 `aria-label="메뉴"` 단추가 `onOpenMenu({ x: clientX, y: clientY })`.
 - 칸 메뉴: `.cellmenu[role="menu"]`에 `편집`, `배경색`, `오늘로`(`role="menuitem"`, `data-action`은 `edit`, `color`, `today`). `배경색`을 누르면 메뉴 안에 `.swatch` 23개(`없음` + `PALETTE`, `data-color`)가 펼쳐지고, 고르면 `onColor` 뒤 `onClose`. Esc와 바깥 `pointerdown`도 `onClose`. 자리는 `menuPosition`: 오른쪽·아래가 넘치면 창 끝에서 4px 안쪽으로 당기고, 4px보다 작게 하지 않는다.
 - `main.ts`(데스크톱일 때): `getBridge()`와 `new Interactivity((on) => bridge?.setInteractive(on))`. 로그인 화면이 보이는 동안 `login`, 편집 화면은 `editor`, 설정 시트는 `settings`를 `begin`/`end`한다. 창이 포커스를 잃어도 아무것도 닫지 않는다. 편집 화면은 `focusText: true`. 칸 메뉴의 `편집`은 날짜 주소로 간다. `배경색`은 `engine.saveEdit(monthId, day, base, { text: base.text, color })`(`base = store.days(monthId)[day] ?? EMPTY_DAY`) 뒤 `store.refresh()`. `오늘로`는 `goToday()`. 저장할 때 `doneTone`이 `short`면 `playDoneTone()`. 모양은 `loadAppearance(openStorage().store)`로 읽어 `applyAppearance(document.documentElement, a)`. 명령: `today` → `goToday()`, `openSettings` → `location.hash = 'settings'`, `signOut` → 대기 0건이면 로그아웃, 아니면 설정을 연다, `contentHidden` → `<html>`의 `content-hidden` 클래스, `adjust` → Task 7까지 무시. 로그인 전에는 `today`, `openSettings`, `signOut`을 무시한다.
-- 소리(`짧은 소리`): 사인파 880Hz, 이득 0.15, `currentTime`에 시작해 0.12초 뒤 멈추고, 끝나면 컨텍스트를 닫는다.
+- 소리(`짧은 소리`): 사인파 880Hz, 이득 0.15, `currentTime`에 시작해 0.12초 뒤 멈추고, 끝나면 컨텍스트를 닫는다. 시험의 가짜에 맞춰 `osc.type = 'sine'`, `osc.frequency.value = 880`, `gain.gain.value = 0.15`를 대입하고(`setValueAtTime`을 쓰지 않는다), `osc.connect(gain)`과 `gain.connect(ctx.destination)`를 따로 부르며(연결 결과를 이어 부르지 않는다), `osc.onended = () => ctx.close()`를 대입한다(`addEventListener`를 쓰지 않는다).
 - `FakeBridge.setSystem`은 패치를 합치고 켠 단축키는 `taken`에 있으면 `taken`, 아니면 `ok`, 끈 것은 `off`로 돌려준다. 처음 `system`은 Task 7의 기본값(`Ctrl+Alt+H`, `Ctrl+Alt+F`, 둘 다 꺼짐, `startWithWindows: null`)과 `canStartWithWindows: false`.
 
 - [ ] **Step 1: 실패하는 테스트 쓰기**
@@ -676,7 +676,7 @@ export const CSP: string;
 export function isAppUrl(url: string | undefined): boolean;
 export function resolveAppPath(url: string, root: string): string | null;
 export function contentType(file: string): string;
-export function registerAppProtocol(root: string): void; // 얇다: protocol.handle('app', …)에 CSP 머리를 붙인다
+// (protocol.ts에는 순수 함수만 둔다. protocol.handle('app', …)에 CSP 머리를 붙이는 얇은 registerAppProtocol(root: string): void는 window.ts에 둔다)
 // src/desktop/policy.ts
 export type BelowEntry = { hwnd: bigint; desktopOwned: boolean };
 export function isAtBottom(below: BelowEntry[], progman: bigint): boolean;
@@ -700,7 +700,7 @@ export function keepBottom(): void; // "맨 아래 지키기". 뒤의 Task들이
 ```
 
 정해 둔 값:
-- `resolveRuntime`: 렌더러 폴더는 꾸린 앱이면 늘 `join(appPath, 'dist-desktop')`, 개발이면 `CALFIF_RENDERER_DIR`이 있으면 그것. 프로필은 `CALFIF_PROFILE_DIR`, 없으면 `join(appData, 'CalendarFIF')`. `CALFIF_SMOKE`는 시나리오 이름(`1`은 `attach`), 모르는 값이면 `CALFIF_SMOKE`가 들어간 오류. 시험 실행인데 `CALFIF_PROFILE_DIR`이 없으면 `CALFIF_PROFILE_DIR`이 들어간 오류. `statusDir`은 시험 실행일 때 `dirname(profileDir)`. `emulator`는 `CALFIF_EMU === '1'`. `manageLoginItem`은 `isPackaged && !smoke`.
+- `resolveRuntime`: 렌더러 폴더는 꾸린 앱이면 늘 `join(appPath, 'dist-desktop')`, 개발이면 `CALFIF_RENDERER_DIR`이 있으면 그것, 없으면 `join(appPath, 'dist-desktop')`(오류를 내지 않는다). 검사 순서는 `CALFIF_SMOKE` 이름 → `CALFIF_PROFILE_DIR`. 프로필은 `CALFIF_PROFILE_DIR`, 없으면 `join(appData, 'CalendarFIF')`. `CALFIF_SMOKE`는 시나리오 이름(`1`은 `attach`), 모르는 값이면 `CALFIF_SMOKE`가 들어간 오류. 시험 실행인데 `CALFIF_PROFILE_DIR`이 없으면 `CALFIF_PROFILE_DIR`이 들어간 오류. `statusDir`은 시험 실행일 때 `dirname(profileDir)`. `emulator`는 `CALFIF_EMU === '1'`. `manageLoginItem`은 `isPackaged && !smoke`.
 - `CSP` = `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https: wss: http://127.0.0.1:8085 http://127.0.0.1:9095 ws://127.0.0.1:8085; frame-src 'none'; object-src 'none'; base-uri 'none'`.
 - `resolveAppPath`: `app:`이고 호스트가 `calfif`일 때만. 경로를 디코드해 NUL이 있으면 거부, `/`는 `index.html`, 질의와 해시는 버린다. `resolve(root, '.' + 경로)`가 `root` 밖이면 `null`. `contentType`: `.html`, `.js`, `.css`, `.json`, `.webmanifest`는 `text/html`, `text/javascript`, `text/css`, `application/json`, `application/manifest+json`에 `; charset=utf-8`. `.png` `image/png`, `.svg` `image/svg+xml`, `.ico` `image/x-icon`, `.woff2` `font/woff2`, 그 밖은 `application/octet-stream`.
 - `isAtBottom`: `progman`이 0이 아니면 아래 목록이 `progman`에 닿아야 하고 그 앞의 창이 모두 `desktopOwned`여야 참. 0이면 아래 목록이 비어야 참. `desktopOwned`는 소유자가 Progman이거나 Progman의 자식(`IsChild`)인 창이다(DesktopCal의 달력 창이 그렇다).
@@ -712,8 +712,8 @@ export function keepBottom(): void; // "맨 아래 지키기". 뒤의 Task들이
 - 맨 아래 지키기(`keepBottom()`): `focus` 이벤트와 `hookWindowMessage(0x47 /* WM_WINDOWPOSCHANGED */)`에서 `shouldKeepBottom(상태)`이고 `!isAtBottom(windowsBelow(…))`일 때만 `setImmediate`로 `sendToBottom`. `CH.interactive`가 참이면 `setFocusable(true)`와 `focus()`, 거짓이면 `setFocusable(false)`와 맨 아래 지키기.
 - 탐색기 재시작: 창의 `closed`(앱이 끝내는 중이 아니면 `closed(false)`)와, 5초마다 `isWindow(progman)`이 거짓이면 `ownerLost()`. 기다리는 동안 1초마다 `tick(findProgman() !== 0n)`, `create`면 창을 다시 만들어 붙인다.
 - preload: `contextBridge.exposeInMainWorld('calfifDesktop', …)`. 여덟 함수는 각자 `CH`의 채널로 `send`나 `invoke`만 한다. `onCommand`는 `(_e, c) => listener(c)`로 감싸고 해제 함수를 돌려준다.
-- `vite.desktop.config.ts`: `build.ssr`로 `src/desktop/main.ts`, `preload.ts`를 `build/desktop/main.cjs`, `preload.cjs`로 묶는다(형식 `cjs`, `electron`과 `koffi`는 외부, target `node22`).
-- `scripts/desktop-run.ts [--emu] [--smoke] [--packaged <exe>]`: `--smoke`는 `--emu`를 포함하고 시나리오는 `CALFIF_SMOKE`(없으면 `attach`). `--packaged`가 없으면 `npx vite build --mode desktop-emu`(`--emu`가 없으면 `desktop`)와 `npx vite build -c vite.desktop.config.ts`를 하고 `createRequire(import.meta.url)('electron')`(실행 파일 경로)로 `.`을 띄운다. 환경: `CALFIF_RENDERER_DIR`, `CALFIF_EMU=1`(에뮬레이터), `CALFIF_PROFILE_DIR`(`build/desktop-emu/profile` 또는 `build/desktop-smoke/profile`), `CALFIF_SMOKE`. 경로는 모두 절대 경로다. `ELECTRON_RUN_AS_NODE`는 지우고, `--smoke`가 아니면 `CALFIF_SMOKE`도 지운다. 시험 실행은 프로필과 그 시나리오의 JSON을 먼저 지우고, 90초가 지나면 프로세스 트리를 끝내고, JSON을 출력하고, `failures`가 비었을 때만 0으로 끝난다.
+- `vite.desktop.config.ts`: `build.ssr`로 `src/desktop/main.ts`를 `build/desktop/main.cjs`로 묶는다(형식 `cjs`, `electron`과 `koffi`는 외부, target `node22`). sandbox preload는 `electron` 말고는 `require`하지 못하므로 `preload.cjs`는 모든 import를 품은 단일 파일이어야 한다. 그래서 빌드를 둘로 나눈다. 환경 변수 `VITE_DESKTOP_ENTRY=preload`로 입력을 `src/desktop/preload.ts`로 바꾼 두 번째 실행이 `build/desktop/preload.cjs`를 `emptyOutDir: false`로 만든다(한 빌드에 입력 둘을 두면 `api.ts`가 공유 조각으로 빠져 preload가 깨진다). `desktop-run.ts`와 `pack-desktop.ts`는 이 빌드를 두 번(main, preload) 부르고, 빌드 뒤 `preload.cjs`에 `electron` 말고 `require(`가 없는지 검사한다.
+- `scripts/desktop-run.ts [--emu] [--smoke] [--packaged <exe>]`(`--packaged`는 Task 10에서 쓴다): `--smoke`는 `--emu`를 포함하고 시나리오는 `CALFIF_SMOKE`(없으면 `attach`). `--packaged`가 없으면 `npx vite build --mode desktop-emu`(`--emu`가 없으면 `desktop`)와 `npx vite build -c vite.desktop.config.ts`(main), `VITE_DESKTOP_ENTRY=preload`를 준 같은 명령(preload)을 하고 `createRequire(import.meta.url)('electron')`(실행 파일 경로)로 `.`을 띄운다. 환경: `CALFIF_RENDERER_DIR`, `CALFIF_EMU=1`(에뮬레이터), `CALFIF_PROFILE_DIR`(`build/desktop-emu/profile` 또는 `build/desktop-smoke/profile`), `CALFIF_SMOKE`. 경로는 모두 절대 경로다. `ELECTRON_RUN_AS_NODE`는 지우고, `--smoke`가 아니면 `CALFIF_SMOKE`도 지운다. 시험 실행은 프로필과 그 시나리오의 JSON을 먼저 지우고, 90초가 지나면 프로세스 트리를 끝내고, JSON을 출력하고, `failures`가 비었을 때만 0으로 끝난다.
 - `package.json`: `"main": "build/desktop/main.cjs"`, `"desktop:setup": "node node_modules/electron/install.js"`, `"desktop": "tsx scripts/desktop-run.ts"`, `"desktop:emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && tsx scripts/desktop-run.ts --emu\""`, `"desktop:smoke"`는 `desktop:emu`에서 끝의 `--emu`만 `--smoke`로.
 - 시험 실행 공통(`smoke.ts`): 시나리오 함수가 `{ 필드, checks: Record<string, boolean> }`를 돌려주면 `{ scenario, ok, failures: 거짓인 check 이름, ...필드 }`를 `statusDir/<scenario>.json`에 쓰고 `app.quit()`. 45초 안에 끝나지 않으면 `failures: ['timeout']`. 화면은 `webContents.executeJavaScript`로 DOM을 읽어 기다린다. 그림은 `capturePage()`가 비지 않았을 때만 `build/shots/desktop-<scenario>.png`에 쓰고, 비면 `shot: null`(실패 아님).
 
@@ -784,7 +784,7 @@ it('화면에서 온 값을 검사한다', () => {
 ```
 - [ ] **Step 3: 실패 확인** — `npx vitest run --project unit src/desktop` → FAIL(모듈이 없다).
 - [ ] **Step 4: 순수 모듈 구현, 통과 확인** — `npx vitest run --project unit src/desktop` → PASS.
-- [ ] **Step 5: 얇은 모듈과 attach 시험 실행 구현** — "정해 둔 값"대로 쓴다. `attach`는 차례로: 화면을 15초까지 기다린다 → 아래 필드를 잰다 → `location.href = 'https://example.invalid/'`와 `window.open('https://example.invalid/')`을 시도한다 → `CH.interactive` 처리기를 `true`, `false`로 부른다 → `win.destroy()`로 창을 없애고 5초 안에 다시 붙은 창을 같은 방법으로 잰다 → `process.execPath`와 `process.argv.slice(1)`, 같은 환경으로 두 번째 실행을 띄워 종료 코드와 `second-instance` 알림을 본다.
+- [ ] **Step 5: 얇은 모듈과 attach 시험 실행 구현** — "정해 둔 값"대로 쓴다. (선택: `capturePage` 결과가 비지 않았으면 모서리 화소의 알파가 0인지도 본다.) `attach`는 차례로: 화면을 15초까지 기다린다 → 아래 필드를 잰다 → `location.href = 'https://example.invalid/'`와 `window.open('https://example.invalid/')`을 시도한다 → `CH.interactive` 처리기를 `true`, `false`로 부른다 → `win.destroy()`로 창을 없애고 5초 안에 다시 붙은 창을 같은 방법으로 잰다 → `process.execPath`와 `process.argv.slice(1)`, 같은 환경으로 두 번째 실행을 띄워 종료 코드와 `second-instance` 알림을 본다.
 - [ ] **Step 6: 확인** — `npm test && npx tsc --noEmit && npm run desktop:smoke` → 테스트 PASS, 타입 오류 없음, `build/desktop-smoke/attach.json`이 아래와 같다(`progman`, `owner`는 16진수 문자열로 함께 적고 비교하지 않는다).
 ```jsonc
 { "scenario": "attach", "ok": true, "failures": [], "mode": "owned", "ownerIsProgman": true, "atBottom": true,
@@ -792,6 +792,7 @@ it('화면에서 온 값을 검사한다', () => {
   "bridgeKeys": ["adjustDone", "drag", "dragStart", "getSystem", "onCommand", "setInteractive", "setSystem", "showMenu"],
   "rendererGlobals": "undefined,undefined", "navigationBlocked": true, "popupBlocked": true,   // typeof require, typeof process
   "interactive": [true, false], "atBottomAfterInteractive": true, "recreated": true, "ownerIsProgmanAfterRecreate": true,
+  "loginItemCalls": 0,   // Task 8 이후에 더해진다
   "secondInstance": { "exitCode": 0, "notified": true }, "shot": "build/shots/desktop-attach.png" }  // 그림이 비면 null
 ```
 - [ ] **Step 7: Commit**
@@ -845,7 +846,7 @@ export function startAdjust(): void; // 메뉴의 "위치 및 크기"(Task 8)와
 - `loadDesktopSettings`: 없으면 `missing`. JSON이 깨졌거나 객체가 아니면 원본을 `<file>.corrupt`로 옮기고 `corrupt`. `version`이 1이 아니거나 없으면 `migrated`. 어느 경우든 앱은 그 설정으로 뜬다. `saveDesktopSettings`는 폴더를 만들고 `<file>.tmp`에 쓴 뒤 이름을 바꾼다. 파일은 `join(profileDir, 'settings.json')`.
 - 위치 조정(메인): `startAdjust()`는 지금 자리를 `before`로 두고 `adjusting = true`, `setAlwaysOnTop(true)`, 숨겨져 있으면 보이고, `{ type: 'adjust', active: true }`. `dragStart`에서 지금 자리를 `base`로, `drag`마다 `setBounds(applyDrag(base, …, 작업 영역들))`. `adjustDone(true)`는 `clampBounds`한 자리를 지금 구성의 키로 저장하고, `false`는 `before`로 돌린다. 끝나면 `adjusting = false`, `setAlwaysOnTop(settings.alwaysOnTop)`, 맨 아래 지키기, `{ type: 'adjust', active: false }`. 메뉴에서 여는 길은 Task 8.
 - 화면 구성이 바뀌면(`display-added`, `display-removed`, `display-metrics-changed`) 500ms 모아 `setBounds(resolveBounds(…))`. 조정 중에는 하지 않는다. 창을 만들 때도 `resolveBounds`. `DisplayInfo`는 `screen.getAllDisplays()`에서 `primary: d.id === screen.getPrimaryDisplay().id`.
-- 위치 조정(화면): `.adjust` 덮개(창 전체, 점선 테두리 `#6AA6FF`, 옅은 파란 바탕). 위쪽 줄에 `끌어서 옮기고, 가장자리를 끌어 크기를 바꿉니다.`와 단추 `적용`, `취소`. 가운데 `.adjust-move`와 가장자리 8px·모서리 16px의 `.adjust-handle[data-kind]` 여덟 개. `pointerdown`에서 `dragStart()`, 시작 `screenX/screenY`를 기억하고 포인터를 잡는다. `pointermove`마다 `drag(kind, screenX − 시작X, screenY − 시작Y)`. 이동과 놓기는 `.adjust`에서 듣는다. `적용` → `adjustDone(true)`, `취소` → `adjustDone(false)`. `main.ts`는 `adjust` 명령으로 덮개를 열고 닫는다.
+- 위치 조정(화면): `.adjust` 덮개(창 전체, 점선 테두리 `#6AA6FF`, 옅은 파란 바탕). 위쪽 줄에 `끌어서 옮기고, 가장자리를 끌어 크기를 바꿉니다.`와 단추 `적용`, `취소`. 가운데 `.adjust-move`와 가장자리 8px·모서리 16px의 `.adjust-handle[data-kind]` 여덟 개. `pointerdown`에서 `dragStart()`, 시작 `screenX/screenY`를 기억하고 포인터를 잡는다(`setPointerCapture`가 없거나 실패해도 계속). `pointermove`마다 `drag(kind, screenX − 시작X, screenY − 시작Y)`. 이동과 놓기는 `.adjust`에서 듣는다. `적용` → `adjustDone(true)`, `취소` → `adjustDone(false)`. `main.ts`는 `adjust` 명령으로 덮개를 열고 닫는다.
 
 - [ ] **Step 1: 실패하는 테스트 쓰기**
 ```ts
@@ -969,12 +970,13 @@ export function parseSystemPatch(v: unknown): SystemPatch | null;
 
 정해 둔 값:
 - `normalizeAccelerator`: `+`로 나눠 공백을 떼고 대소문자를 가리지 않는다. 수식키는 `Ctrl`, `Alt`, `Shift`를 이 순서로, 중복이면 거부. 키는 정확히 하나이고 `A`~`Z`, `0`~`9`, `F1`~`F24`. `Ctrl`이나 `Alt` 중 하나는 있어야 한다. `Super`/`Win`/`Meta`가 있거나 `Alt+F4`면 거부. `acceleratorFromKey`: `code`의 `KeyH` → `H`, `Digit7` → `7`, `F9` → `F9`. 수식키만 눌렀거나 `metaKey`면 `null`. 결과는 `normalizeAccelerator`를 거친다.
-- `HotkeyManager.apply`: 지난번에 등록한 것을 먼저 푼다. 꺼진 것 `off`, 정규화가 안 되면 `invalid`, 등록이 거짓이면 `taken`(앞의 것과 같은 단축키여도), 참이면 `ok`. 실제 `Registrar`는 `globalShortcut.register(…) && globalShortcut.isRegistered(…)`. `will-quit`에서 `dispose()`와 `globalShortcut.unregisterAll()`.
+- `HotkeyManager.apply`: 지난번에 등록한 것을 먼저 푼다. 꺼진 것 `off`, 정규화가 안 되면 `invalid`, 등록이 거짓이면 `taken`(앞의 것과 같은 단축키여도), 참이면 `ok`. 실제 `Registrar`는 `main.ts`에서 만들고(`hotkeys.ts`는 `electron`을 가져오지 않는다) `globalShortcut.register(…) && globalShortcut.isRegistered(…)`다. `will-quit`에서 `dispose()`와 `globalShortcut.unregisterAll()`.
 - 메뉴 문구(설계 9절): 트레이 = `캘린더 숨기기`(숨겨져 있으면 `캘린더 보이기`), `내용 숨기기`(`내용 보이기`), `맨 위에 보기`(체크), 구분선, `위치 및 크기`, `설정`, `Windows 시작 시 실행`(체크는 `startWithWindows === true`, 쓸 수 있음은 `canStartWithWindows`), 구분선, `제품 정보`, `닫기`. 제목 줄 = `오늘로`, 구분선, 트레이의 `닫기` 앞까지, `로그아웃`, `닫기`.
 - 동작: 숨기기 `win.hide()`, 보이기 `showInactive()`와 맨 아래 지키기. 숨김은 저장하지 않는다(다시 켜면 늘 보인다). 내용 숨기기는 `settings.contentHidden`을 바꿔 저장하고 `{ type: 'contentHidden', hidden }`, 화면이 새로 읽힐 때(`did-finish-load`)도 보낸다. 맨 위에 보기는 `setAlwaysOnTop(on)`과 저장, 끄면 맨 아래 지키기. `위치 및 크기` → `startAdjust()`. `설정` → 창을 보이고 `{ type: 'openSettings' }`. `오늘로` → `{ type: 'today' }`, `로그아웃` → `{ type: 'signOut' }`. `닫기` → 끝내는 중 표시 후 `app.quit()`.
 - `제품 정보`: `dialog.showMessageBox({ type: 'info', title: '제품 정보', message: 'CalendarFIF ' + app.getVersion(), detail: 'PC와 아이폰의 날짜별 메모를 동기화하는 개인용 달력입니다.', buttons: ['확인'] })`.
 - 트레이: 아이콘 `join(rendererDir, 'icons', 'icon-192.png')`을 16x16으로, 툴팁 `CalendarFIF`, 오른쪽 클릭은 `menuModel(…, 'tray')`, 왼쪽 클릭은 숨겨져 있으면 보이기. 상태가 바뀔 때마다 메뉴를 다시 만든다. 제목 줄 메뉴: `CH.menu`(`parsePoint`) → `Menu.popup({ window, x, y, callback })`, 닫히면 맨 아래 지키기.
 - 자동 실행: 앱이 뜰 때 `startupAction({ manage: runtime.manageLoginItem, saved: settings.startWithWindows })`의 `register`가 있으면 `app.setLoginItemSettings({ openAtLogin: register })`, `save`가 있으면 저장(설계 8절 "꾸린 앱에서 켬"을 첫 실행에서 한 번). 켜고 끄기(메뉴, `CH.setSystem`)는 `manageLoginItem`일 때만 같은 호출을 하고 아니면 무시한다. `canStartWithWindows = manageLoginItem`. 상태의 `startWithWindows`는 관리할 수 있으면 `app.getLoginItemSettings().openAtLogin`, 아니면 저장 값. `setLoginItemSettings`는 한 함수로 감싸 부른 횟수를 세고, 모든 시나리오의 결과에 `loginItemCalls`로 적는다(시험 실행에서 0이 아니면 실패).
+- `parseSystemPatch`: 보통 객체가 아닌 것(`[]`, `null`, 문자열 등)은 통째로 `null`로 거절한다. 객체이면 아는 칸(`hideHotkey`, `contentHotkey`, `startWithWindows`) 중 값이 틀린 칸은 버리고 맞는 칸만 남겨 돌려준다(남는 칸이 없으면 `{}`). 단축키 칸은 `accelerator`가 1~40자 문자열이고 `enabled`가 참거짓이어야 맞다.
 - `CH.getSystem`은 지금 `SystemState`. `CH.setSystem`은 `parseSystemPatch`를 통과한 패치를 저장하고 단축키를 다시 `apply`한 `SystemState`.
 
 - [ ] **Step 1: 실패하는 테스트 쓰기**
@@ -1054,13 +1056,14 @@ it('자동 실행은 꾸린 앱의 첫 실행에서만 켜고, 개발과 시험 
 it('설정 바꾸기 요청은 아는 칸만 받는다', () => {
   expect(parseSystemPatch({ hideHotkey: { accelerator: 'Ctrl+Alt+K', enabled: true } })).toEqual({ hideHotkey: { accelerator: 'Ctrl+Alt+K', enabled: true } });
   expect(parseSystemPatch({ startWithWindows: true, other: 1 })).toEqual({ startWithWindows: true });
-  expect([{ hideHotkey: { accelerator: 'x'.repeat(41), enabled: true } }, { startWithWindows: 'yes' }, null, []].map(parseSystemPatch)).toEqual([null, null, null, null]);
+  expect([{ hideHotkey: { accelerator: 'x'.repeat(41), enabled: true } }, { startWithWindows: 'yes' }].map(parseSystemPatch)).toEqual([{}, {}]);
+  expect([null, [], 'x'].map(parseSystemPatch)).toEqual([null, null, null]);
 });
 ```
 - [ ] **Step 2: 실패 확인** — `npx vitest run --project unit src/core/accelerator.test.ts src/desktop` → FAIL(모듈과 `parseSystemPatch`가 없다).
 - [ ] **Step 3: 구현** — Interfaces와 "정해 둔 값"대로 쓴다.
 - [ ] **Step 4: 통과 확인** — `npm test && npx tsc --noEmit` → PASS, 타입 오류 없음.
-- [ ] **Step 5: tray 시험 실행** — `smoke.ts`의 `tray`: 트레이 메뉴 항목 이름(실제 `Menu`의 `items`), 숨기기와 보이기, 내용 숨기기 두 번(화면 `<html>`의 클래스와 저장 값), 맨 위에 보기 켜고 끄기, `setSystem`으로 `Ctrl+Alt+Shift+F9`, `Ctrl+Alt+Shift+F10`을 켜고 상태를 본 뒤 숨기기 단축키를 끄고 `globalShortcut.isRegistered('Ctrl+Alt+Shift+F9')`. Run: `CALFIF_SMOKE=tray npm run desktop:smoke`. Expected: `failures: []`, `trayCreated: true`, `trayMenu`가 menu 테스트의 트레이 목록과 같다, `startItem: { checked: false, enabled: false }`, `visible: [false, true]`, `contentHidden: [true, false]`, `contentHiddenSaved: true`, `alwaysOnTop: [true, false]`, `atBottomAfterOnTopOff: true`, `hotkeys: { hide: "ok", content: "ok" }`, `hideRegisteredAfterOff: false`, `loginItemCalls: 0`.
+- [ ] **Step 5: tray 시험 실행** — `smoke.ts`의 `tray`: 트레이 메뉴 항목 이름(실제 `Menu`의 `items`), 숨기기와 보이기, 내용 숨기기 두 번(화면 `<html>`의 클래스와 저장 값), 맨 위에 보기 켜고 끄기, `setSystem`으로 `Ctrl+Alt+Shift+F9`, `Ctrl+Alt+Shift+F10`을 켜고 상태를 본 뒤 숨기기 단축키를 끄고 `globalShortcut.isRegistered('Ctrl+Alt+Shift+F9')`. Run: `CALFIF_SMOKE=tray npm run desktop:smoke`. Expected: `failures: []`, `trayCreated: true`, `trayMenu`가 menu 테스트의 트레이 목록과 같다(구분선은 `-`로 바꿔 비교한다), `startItem: { checked: false, enabled: false }`, `visible: [false, true]`, `contentHidden: [true, false]`, `contentHiddenSaved: true`, `alwaysOnTop: [true, false]`, `atBottomAfterOnTopOff: true`, `hotkeys: { hide: "ok", content: "ok" }`, `hideRegisteredAfterOff: false`, `loginItemCalls: 0`.
 - [ ] **Step 6: Commit**
 ```bash
 git add src/core/accelerator.ts src/core/accelerator.test.ts src/desktop
@@ -1076,7 +1079,7 @@ git commit -m "feat: 트레이 메뉴, 전역 단축키, 숨기기, 맨 위에 �
 - Modify: `src/web/ui/settings.ts`, `src/web/main.ts`, `src/web/desktop.css`, `src/desktop/smoke.ts`
 
 **Interfaces:**
-- Consumes: Task 2의 `Appearance`, `DEFAULT_APPEARANCE`, `saveAppearance`. Task 4의 `applyAppearance`, `CalendarHandle.setAppearance`. Task 5의 `CalfifDesktop`, `SystemState`, `SettingsPage`, `FakeBridge`, `Interactivity`, `playDoneTone`. Task 8의 `acceleratorFromKey`. `PALETTE`.
+- Consumes: Task 2의 `Appearance`, `DEFAULT_APPEARANCE`, `saveAppearance`. Task 4의 `applyAppearance`, `CalendarHandle.setAppearance`. Task 5의 `CalfifDesktop`, `SystemState`, `SettingsPage`, `FakeBridge`, `playDoneTone`. Task 8의 `acceleratorFromKey`. `PALETTE`.
 - Produces:
 ```ts
 // src/web/ui/settings.ts: 지금의 계정, 동기화, 로그아웃 부분을 떼어 낸다. mountSettings는 이것을 쓰고 위젯 안내를 extra로 넘긴다
@@ -1090,11 +1093,11 @@ export function mountDesktopSettings(root: HTMLElement, props: {
 ```
 
 정해 둔 값:
-- 시트 제목 `설정`, 단추 `닫기`. 탭(`role="tab"`) `캘린더`, `셀`, `글꼴 및 색상`, `고급`, `계정`, 내용은 `role="tabpanel"`이고 고르지 않은 쪽은 `hidden`. 줄은 `.srow`, 이름은 `.srow-label`(설계 8절 그대로). 켬/끔은 `input[type="checkbox"][role="switch"]`. 바꿀 때마다 `onAppearance({ ...지금, 그 칸 })`. Esc는 닫기(조합 중 제외), 단축키 칸 안의 Esc는 받기만 그만둔다.
+- 시트 제목 `설정`, 단추 `닫기`. 탭(`role="tab"`) `캘린더`, `셀`, `글꼴 및 색상`, `고급`, `계정`, 내용은 `role="tabpanel"`이고 고르지 않은 쪽은 `hidden`. 줄은 `.srow`, 이름은 `.srow-label`(설계 8절 그대로). 켬/끔은 `input[type="checkbox"][role="switch"]`. `지금`은 `mountDesktopSettings`가 안에 들고 있는 현재 모양이고(`props.appearance`는 처음 값이다), 바꿀 때마다 그 값을 갱신한 뒤 `onAppearance({ ...지금, 그 칸 })`로 넘긴다. Esc는 닫기(조합 중 제외), 단축키 칸 안의 Esc는 받기만 그만둔다.
 - 캘린더: `배치`(라디오 `변동 월`, `전체 월`, `고정 단일 행`, `변동 단일 행`), `최대 행`(select 2~8), `지나간 주 표시`(select 0~3; 둘은 `변동 월`이 아니면 비활성이고 `변동 월에서만 씁니다.`), `월 간격`, `주 번호`, `그림자`, `제목 표시줄 표시`, `공휴일`(도움말 `대한민국 공휴일 이름을 칸에 표시합니다.`), `음력`(도움말 `칸에 음력 날짜를 표시합니다.`).
 - 셀: `줄 머리`(라디오 `없음`, `번호`, `점`), `셀 간격`(select 0~12, 보기 `4px`), `줄 간격`(range 1~2, step 0.05, 값을 옆에 `1.35`), `완료 작업 자동으로 맨 아래 줄로 이동`, `완료된 작업 표시`, `편집 완료 알람`(select `없음`, `짧은 소리`; `짧은 소리`로 바꾸면 한 번 들려준다).
-- 글꼴 및 색상: `캘린더 글꼴(날짜·요일)`(색 + select 11~20), `편집 내용의 글꼴 크기 및 색상`(색 + select 11~22), `캘린더 배경`, `휴일 배경색`, `오늘의 테두리`, `제목 표시줄 버튼 색상`, `휴일 텍스트 색상`, `음력 텍스트 색상`, `투명도`(range 0~100, step 5, 양 끝 `단색`, `완전 투명`, 값을 옆에 `60%`).
-- 색 고르기(설계 8절: 22색, 없음, 직접 입력): 줄의 `.color-btn`(지금 색 견본)을 누르면 줄 아래에 `.swatch`가 펼쳐진다. `캘린더 배경`, `휴일 배경색`, `오늘의 테두리`는 `없음` + 22색, 나머지는 22색. 그 아래 `직접 입력` 칸 `input.hex`(placeholder `RRGGBB`): `change`에서 `#`을 떼고 대문자로 바꿔 6자리 16진수면 반영, 아니면 줄에 `16진수 6자리로 적어 주세요.`를 보이고 값은 그대로.
+- 글꼴 및 색상: `캘린더 글꼴(날짜·요일) 색과 크기`(색 + select 11~20), `편집 내용의 글꼴 크기 및 색상`(색 + select 11~22), `캘린더 배경`, `휴일 배경색`, `오늘의 테두리`, `제목 표시줄 버튼 색상`, `휴일 텍스트 색상`, `음력 텍스트 색상`, `투명도`(range 0~100, step 5, 양 끝 `단색`, `완전 투명`, 값을 옆에 `60%`).
+- 색 고르기(설계 8절: 22색, 없음, 직접 입력): 줄의 `.color-btn`(지금 색 견본)을 누르면 줄 아래에 `.swatch`가 펼쳐진다. `.swatch` 묶음, `input.hex`, 오류 문구는 모두 그 `.srow` 요소 안에 둔다. `캘린더 배경`, `휴일 배경색`, `오늘의 테두리`는 `없음` + 22색, 나머지는 22색. 그 아래 `직접 입력` 칸 `input.hex`(placeholder `RRGGBB`): `change`에서 `#`을 떼고 대문자로 바꿔 6자리 16진수면 반영, 아니면 줄에 `16진수 6자리로 적어 주세요.`를 보이고 값은 그대로.
 - 고급: `시작 요일`(select `일요일`~`토요일`), `첫번째 주`(select `1월 1일이 든 주`, `ISO 방식`), `쉬는날 표시`, `쉬는날`(체크 일곱 개 `일`~`토`), `캘린더 숨기기 단축키`, `내용 표시 및 숨기기 단축키`(각각 읽기 전용 `input.hotkey`(placeholder `새 단축키를 누르세요`) + 스위치), `Windows 시작 시 실행`(스위치).
 - 단축키 칸: 처음에 `bridge.getSystem()`의 답으로 지금 단축키와 스위치를 채운다. `keydown`을 `acceleratorFromKey`로 바꿔 `null`이 아니면 칸에 적고 `bridge.setSystem({ hideHotkey 또는 contentHotkey: { accelerator, enabled: 지금 스위치 } })`. 스위치는 `enabled`를 바꿔 같은 호출. 결과가 `taken`이면 `다른 프로그램이 이 단축키를 쓰고 있습니다. 다른 조합을 고르세요.`, `invalid`면 `Ctrl 또는 Alt를 넣은 조합을 고르세요.`를 줄에 보인다.
 - `Windows 시작 시 실행`: `canStartWithWindows`가 거짓이면 스위치를 끄고 비활성, `개발 실행에서는 바꿀 수 없습니다. 꾸린 앱에서 바꿉니다.`. `bridge`가 `null`(브라우저 개발 화면)이면 고급의 단축키와 자동 실행 줄을 모두 비활성으로 두고 `바탕화면 앱에서만 바꿀 수 있습니다.`.
@@ -1128,7 +1131,7 @@ it('다섯 쪽과 설계 8절의 문구', () => {
   tab(root, '셀').click();
   expect(labels(root)).toEqual(['줄 머리', '셀 간격', '줄 간격', '완료 작업 자동으로 맨 아래 줄로 이동', '완료된 작업 표시', '편집 완료 알람']);
   tab(root, '글꼴 및 색상').click();
-  expect(labels(root)).toEqual(['캘린더 글꼴(날짜·요일)', '편집 내용의 글꼴 크기 및 색상', '캘린더 배경', '휴일 배경색', '오늘의 테두리', '제목 표시줄 버튼 색상', '휴일 텍스트 색상', '음력 텍스트 색상', '투명도']);
+  expect(labels(root)).toEqual(['캘린더 글꼴(날짜·요일) 색과 크기', '편집 내용의 글꼴 크기 및 색상', '캘린더 배경', '휴일 배경색', '오늘의 테두리', '제목 표시줄 버튼 색상', '휴일 텍스트 색상', '음력 텍스트 색상', '투명도']);
   tab(root, '고급').click();
   expect(labels(root)).toEqual(['시작 요일', '첫번째 주', '쉬는날 표시', '쉬는날', '캘린더 숨기기 단축키', '내용 표시 및 숨기기 단축키', 'Windows 시작 시 실행']);
 });
@@ -1191,10 +1194,10 @@ git commit -m "feat: PC 앱 설정 화면(캘린더, 셀, 글꼴 및 색상, 고
 
 정해 둔 값:
 - `package.json`: `"version": "0.3.0"`, devDependencies에 `@electron/packager`, 스크립트 `"desktop:pack": "tsx scripts/pack-desktop.ts"`, `"desktop:pack:emu": "tsx scripts/pack-desktop.ts --emu"`, `"desktop:pack:check"`(`desktop:smoke`와 같고 끝만 `tsx scripts/desktop-run.ts --smoke --packaged build/release-emu/CalendarFIF-win32-x64/CalendarFIF.exe`).
-- `pack-desktop.ts [--emu]`: 화면을 `desktop`(또는 `desktop-emu`) 모드로, 메인을 `vite.desktop.config.ts`로 빌드한다. `build/pack-stage/`를 비우고 `package.json`(= `stageManifest(루트, node_modules/koffi의 version)`), `desktop/`(= `build/desktop/*`), `dist-desktop/`(= 고른 화면 빌드), `node_modules/koffi/`를 복사한다. `@electron/packager`를 `{ dir: 'build/pack-stage', out: --emu ? 'build/release-emu' : 'release', name: 'CalendarFIF', platform: 'win32', arch: 'x64', electronVersion: node_modules/electron/package.json의 version, overwrite: true, prune: false, asar: false }`로 부른다. 서명과 설치 프로그램은 없다(설계 11절). 결과는 `release/CalendarFIF-win32-x64/CalendarFIF.exe`.
+- `pack-desktop.ts [--emu]`: 화면을 `desktop`(또는 `desktop-emu`) 모드로, 메인과 preload를 `vite.desktop.config.ts`로 두 번 빌드한다(Task 6의 `VITE_DESKTOP_ENTRY=preload` 방식, `preload.cjs`는 단일 파일). `build/pack-stage/`를 비우고 `package.json`(= `stageManifest(루트, node_modules/koffi의 version)`), `desktop/`(= `build/desktop/*`), `dist-desktop/`(= 고른 화면 빌드), `node_modules/koffi/`를 복사한다. `@electron/packager`를 `{ dir: 'build/pack-stage', out: --emu ? 'build/release-emu' : 'release', name: 'CalendarFIF', platform: 'win32', arch: 'x64', electronVersion: node_modules/electron/package.json의 version, overwrite: true, prune: false, asar: false }`로 부른다. 서명과 설치 프로그램은 없다(설계 11절). 결과는 `release/CalendarFIF-win32-x64/CalendarFIF.exe`.
 - `stageManifest` = `{ name: 'calendarfif', productName: 'CalendarFIF', version: rootPkg.version ?? '0.0.0', private: true, main: 'desktop/main.cjs', dependencies: { koffi: koffiVersion } }`.
-- `desktop-run.ts --packaged <exe>`: 빌드하지 않고 그 실행 파일을 같은 환경 변수로 띄운다(`CALFIF_RENDERER_DIR`은 꾸린 앱이 무시한다).
-- `e2e` 시나리오(설계 13절 "5초 안에"): 앱은 달력이 보이면 `build/desktop-smoke/e2e.json`에 `{ phase: 'ready' }`를 쓰고 250ms마다 `.cell.today`에 `원격 시험 메모`가 보이는지 본다. 보이면 `remoteSeen: true`를 쓰고, 칸 메뉴(`contextmenu` → `[data-action="color"]` → `.swatch[data-color="F12424"]`)로 오늘의 배경색을 바꾸고 `localEditDone: true`를 쓴다. `desktop-run.ts`는 `ready`를 보면 에뮬레이터 REST로 오늘 칸만(`updateMask.fieldPaths`에 ``days.`DD` ``) `{ text: '원격 시험 메모', color: '', editedAt: 지금, editedBy: 'iphone' }`을 쓰고, `remoteSeen`까지의 시간과, 그 뒤 그 칸의 `color`가 `F12424`가 될 때까지의 시간을 재서 `build/desktop-smoke/e2e-result.json`에 `{ remoteToDesktopMs, desktopToRemoteMs, ok }`(`ok`는 둘 다 5000 미만)를 쓰고 앱을 끝낸다.
+- `desktop-run.ts --packaged <exe>`(Task 6에서 정한 옵션): 빌드하지 않고 그 실행 파일을 같은 환경 변수로 띄운다(`CALFIF_RENDERER_DIR`은 꾸린 앱이 무시한다).
+- `e2e` 시나리오(설계 13절 "5초 안에"): 앱은 달력이 보이면 `build/desktop-smoke/e2e.json`에 `{ phase: 'ready' }`를 쓰고 250ms마다 `.cell.today`에 `원격 시험 메모`가 보이는지 본다. 보이면 `remoteSeen: true`를 쓰고, 칸 메뉴(`contextmenu` → `[data-action="color"]` → `.swatch[data-color="F12424"]`)로 오늘의 배경색을 바꾸고 `localEditDone: true`를 쓴다. `desktop-run.ts`는 `ready`를 보면 에뮬레이터 REST로 오늘 칸만(`updateMask.fieldPaths`에 ``days.`DD` ``) `{ text: '원격 시험 메모', color: '', editedAt: 지금, editedBy: 'iphone' }`을 쓰고, `remoteSeen`까지의 시간과, 그 뒤 그 칸의 `color`가 `F12424`가 될 때까지의 시간을 재서 `build/desktop-smoke/e2e-result.json`에 `{ remoteToDesktopMs, desktopToRemoteMs, loginItemCalls, ok }`(`ok`는 둘 다 5000 미만)를 쓰고 앱을 끝낸다. e2e 시나리오 함수는 앱의 그 로컬 편집이 에뮬레이터에 올라갈 때까지(동기화 상태가 `synced`가 되고 `desktop-run.ts`가 REST로 `color == F12424`를 확인할 때까지, 최대 45초) 돌려주지 않아서 `smoke.ts`의 공통 처리가 먼저 `app.quit()`를 부르지 않는다. 앱은 `localEditDone` 뒤 동기화 상태가 `synced`가 되면 `e2e.json`에 `uploaded: true`도 쓴다. `e2e`의 종료 코드는 `e2e-result.json`의 `ok`가 정하고, 앱이 쓴 `e2e.json`의 `failures`도 비어 있어야 0이다. `e2e-result.json`에는 앱이 쓴 `e2e.json`의 `loginItemCalls`를 그대로 옮겨 적는다(`{ remoteToDesktopMs, desktopToRemoteMs, loginItemCalls, ok }`).
 - README에 "PC 바탕화면 앱" 절: 준비(`npm install`, `npm run desktop:setup`), 실행(`npm run desktop`), 꾸리기(`npm run desktop:pack`, 결과 폴더를 원하는 곳에 두고 `CalendarFIF.exe` 실행, 첫 실행에서 Windows 시작 시 실행이 켜진다), 회사 PC가 서명 없는 실행 파일을 막으면 `npm run desktop`을 바로가기로 쓰는 방법(설계 12절), 설정 위치(`%APPDATA%\CalendarFIF\settings.json`, 달력 모양은 앱 안), 트레이 메뉴와 단축키 기본값(`Ctrl+Alt+H`, `Ctrl+Alt+F`, 꺼짐), 지우는 방법(트레이의 Windows 시작 시 실행 끄기 → 닫기 → 폴더와 `%APPDATA%\CalendarFIF` 지우기), DesktopCal과 함께 쓰는 동안은 반대쪽 모니터에 둔다는 점. 개발 표에 `dev:desktop-emu`, `desktop:emu`, `desktop:smoke`, `desktop:pack:emu`, `desktop:pack:check`. 첫 문단의 "PC 바탕화면 앱은 나중에 만든다"를 고친다.
 
 - [ ] **Step 1: 실패하는 테스트 쓰기**
@@ -1209,10 +1212,10 @@ it('꾸리기용 package.json에는 koffi만 의존성으로 남긴다', () => {
 - [ ] **Step 2: 실패 확인** — `npx vitest run --project unit scripts/pack-manifest.test.ts` → FAIL(모듈이 없다).
 - [ ] **Step 3: 구현과 통과 확인** — `npm install -D @electron/packager` 뒤 "정해 둔 값"대로 쓴다. `npm test && npx tsc --noEmit` → PASS, 타입 오류 없음.
 - [ ] **Step 4: 끝에서 끝까지(개발 실행)** — `CALFIF_SMOKE=e2e npm run desktop:smoke` → `build/desktop-smoke/e2e-result.json`의 `ok: true`, `remoteToDesktopMs`와 `desktopToRemoteMs`가 5000 미만.
-- [ ] **Step 5: 꾸린 앱(에뮬레이터용) 확인** — `npm run desktop:pack:emu && npm run desktop:pack:check && CALFIF_SMOKE=e2e npm run desktop:pack:check` → `build/release-emu/CalendarFIF-win32-x64/CalendarFIF.exe`가 있다. 꾸린 앱의 `attach.json`이 Task 6과 같은 값이고 `e2e-result.json`도 `ok: true`다. 꾸린 앱이어도 시험 실행이므로 두 결과 모두 `loginItemCalls: 0`이다(Windows 시작 프로그램에 아무것도 등록하지 않았다).
+- [ ] **Step 5: 꾸린 앱(에뮬레이터용) 확인** — `npm run desktop:pack:emu && npm run desktop:pack:check && CALFIF_SMOKE=e2e npm run desktop:pack:check` → `build/release-emu/CalendarFIF-win32-x64/CalendarFIF.exe`가 있다. 꾸린 앱의 `attach.json`이 Task 6과 같은 값이고 `e2e-result.json`도 `ok: true`다. 꾸린 앱이어도 시험 실행이므로 `attach.json`과 `e2e-result.json`의 `loginItemCalls`가 0이다(Windows 시작 프로그램에 아무것도 등록하지 않았다).
 - [ ] **Step 6: 전체 확인과 Commit** — `npm test && npx tsc --noEmit && npm run test:emu && for s in attach bounds tray settings; do CALFIF_SMOKE=$s npm run desktop:smoke || exit 1; done` → 모두 PASS.
 ```bash
 git add package.json package-lock.json scripts/pack-manifest.ts scripts/pack-manifest.test.ts scripts/pack-desktop.ts scripts/desktop-run.ts src/desktop/smoke.ts README.md
 git commit -m "feat: PC 앱 꾸리기와 끝에서 끝까지 확인, 사용 안내"
 ```
-- [ ] **Step 7: 사용자에게 넘기기** — 실행자는 여기서 멈추고 사용자에게 다음을 부탁한다. ① `npm run desktop:pack`으로 실제 앱을 꾸리고 `CalendarFIF.exe`를 DesktopCal 반대쪽 모니터에서 띄워 로그인한다. ② 달력이 바탕화면에 붙어 다른 창 뒤에 있고, Win+D를 해도 남고, 작업 표시줄과 Alt+Tab에 없는지(D1). ③ 바탕화면 그림이 비치고 투명도를 바꿀 수 있는지(D2). ④ 여기서 고친 메모와 배경색이 아이폰에, 아이폰에서 고친 것이 5초 안에 여기에 보이는지(D3). ⑤ 위치 및 크기를 바꾸고 재부팅 뒤 같은 자리에 자동으로 뜨는지(D4, D5). ⑥ 트레이 메뉴, 숨기기, 내용 숨기기, 켠 단축키(D5). ⑦ 한글 입력기 후보 창의 자리(설계 12절). ⑧ 설정 네 쪽의 각 줄(D6). ⑨ 웹앱을 `npm run deploy`로 다시 배포하고 아이폰에서 달을 넘길 때 손가락을 따라오는지(D7).
+- [ ] **Step 7: 사용자에게 넘기기** — (아래는 사용자가 하는 일이다. 실행자는 실행하지 않는다.) 실행자는 여기서 멈추고 사용자에게 다음을 부탁한다. ① `npm run desktop:pack`으로 실제 앱을 꾸리고 `CalendarFIF.exe`를 DesktopCal 반대쪽 모니터에서 띄워 로그인한다. ② 달력이 바탕화면에 붙어 다른 창 뒤에 있고, Win+D를 해도 남고, 작업 표시줄과 Alt+Tab에 없는지(D1). ③ 바탕화면 그림이 비치고 투명도를 바꿀 수 있는지(D2). ④ 여기서 고친 메모와 배경색이 아이폰에, 아이폰에서 고친 것이 5초 안에 여기에 보이는지(D3). ⑤ 위치 및 크기를 바꾸고 재부팅 뒤 같은 자리에 자동으로 뜨는지(D4, D5). ⑥ 트레이 메뉴, 숨기기, 내용 숨기기, 켠 단축키(D5). ⑦ 한글 입력기 후보 창의 자리(설계 12절). ⑧ 설정 다섯 쪽의 각 줄(D6). ⑨ 웹앱을 `npm run deploy`로 다시 배포하고 아이폰에서 달을 넘길 때 손가락을 따라오는지(D7).
