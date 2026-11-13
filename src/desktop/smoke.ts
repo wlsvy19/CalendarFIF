@@ -2,10 +2,12 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { app, type BrowserWindow } from 'electron';
+import { clampBounds, defaultBounds, layoutKey, resolveBounds, type Rect } from './bounds';
 import { isAtBottom } from './policy';
 import type { Runtime, Scenario } from './runtime';
+import { loadDesktopSettings } from './settings';
 import { getExStyle, getOwner, windowsBelow } from './win32';
-import { blocked, getHwnd, getMode, getProgman, getWindow, signals, windowsCreated } from './window';
+import { blocked, displayInfos, getHwnd, getMode, getProgman, getWindow, signals, startAdjust, windowState, windowsCreated } from './window';
 
 type Result = { fields: Record<string, unknown>; checks: Record<string, boolean> };
 const TOTAL_MS = 45000;
@@ -129,7 +131,70 @@ async function attach(): Promise<Result> {
   return { fields, checks };
 }
 
-const SCENARIOS: Partial<Record<Scenario, () => Promise<Result>>> = { attach };
+const same = (a: Rect, b: Rect | undefined) => !!b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+const rectOf = (r: Rect): Rect => ({ x: r.x, y: r.y, width: r.width, height: r.height });
+
+// 위치 조정을 앱 안의 길(IPC 메시지와 setBounds)로만 움직여 본다. 마우스 입력은 흉내 내지 않는다.
+async function bounds(rt: Runtime): Promise<Result> {
+  const win = getWindow();
+  if (!win) return { fields: {}, checks: { window: false } };
+  await until(() => getMode() !== null, 10000);
+  await until(async () => (await js(win, RENDERED)) !== '', 15000);
+  const displays = displayInfos();
+  const key = layoutKey(displays);
+  const initial = rectOf(win.getBounds());
+  const overlayOpen = async (open: boolean) => until(async () => ((await js(win, "!!document.querySelector('.adjust')")) as boolean) === open, 3000);
+  const send = (code: string) => js(win, `window.calfifDesktop.${code}`);
+  const bottom = () => isAtBottom(windowsBelow(getHwnd(), getProgman()), getProgman());
+
+  startAdjust();
+  const topDuring = win.isAlwaysOnTop();
+  const overlayShown = await overlayOpen(true);
+  await send('dragStart()');
+  await send("drag('move', -50000, 0)");
+  await until(() => win.getBounds().x !== initial.x, 3000);
+  const offscreen = rectOf(win.getBounds());
+  const visibleOverlap = displays.some((d) => {
+    const w = d.workArea;
+    return Math.min(offscreen.x + offscreen.width, w.x + w.width) - Math.max(offscreen.x, w.x) >= 80 && Math.min(offscreen.y + offscreen.height, w.y + w.height) - Math.max(offscreen.y, w.y) >= 80;
+  });
+  await send('adjustDone(false)');
+  await until(() => !windowState.adjusting, 3000);
+  await until(() => win.getBounds().x === initial.x, 3000);
+  const cancelled = rectOf(win.getBounds());
+  const overlayClosedAfterCancel = await overlayOpen(false);
+
+  startAdjust();
+  await send('dragStart()');
+  await send("drag('se', -200, -100)");
+  await until(() => win.getBounds().width !== initial.width, 3000);
+  await send('adjustDone(true)');
+  await until(() => !windowState.adjusting, 3000);
+  const applied = rectOf(win.getBounds());
+  const topAfter = win.isAlwaysOnTop();
+  const atBottomAfter = await until(bottom, 3000);
+  const overlayClosedAfterApply = await overlayOpen(false);
+
+  const saved = loadDesktopSettings(join(rt.profileDir, 'settings.json'));
+  const savedBounds = saved.settings.bounds[key];
+  const reloaded = resolveBounds(saved.settings.bounds, displays);
+  const fields = {
+    layoutKey: key, initial, offscreen, cancelled, cancelRestored: same(cancelled, initial), applied, savedBounds, reloaded,
+    settingsStatus: saved.status, alwaysOnTop: [topDuring, topAfter], atBottomAfter, overlayShown, overlayClosedAfterCancel, overlayClosedAfterApply,
+  };
+  const checks = {
+    initialIsDefault: same(initial, defaultBounds(displays)),
+    offscreenVisible: visibleOverlap && same(offscreen, clampBounds(offscreen, displays.map((d) => d.workArea))),
+    cancelRestored: same(cancelled, initial),
+    appliedWidth: applied.width === initial.width - 200 && applied.height === initial.height - 100,
+    savedMatches: same(applied, savedBounds), reloadedMatches: same(applied, reloaded),
+    alwaysOnTop: topDuring === true && topAfter === false, atBottomAfter,
+    overlay: overlayShown && overlayClosedAfterCancel && overlayClosedAfterApply,
+  };
+  return { fields, checks };
+}
+
+const SCENARIOS: Partial<Record<Scenario, (rt: Runtime) => Promise<Result>>> = { attach, bounds };
 
 export async function runSmoke(rt: Runtime): Promise<void> {
   const scenario = rt.smoke as Scenario;
@@ -138,7 +203,7 @@ export async function runSmoke(rt: Runtime): Promise<void> {
   let timedOut = false;
   try {
     result = await Promise.race([
-      run ? run() : Promise.resolve<Result>({ fields: { error: '시나리오가 아직 없다' }, checks: { implemented: false } }),
+      run ? run(rt) : Promise.resolve<Result>({ fields: { error: '시나리오가 아직 없다' }, checks: { implemented: false } }),
       sleep(TOTAL_MS).then(() => {
         timedOut = true;
         return { fields: {}, checks: {} } as Result;

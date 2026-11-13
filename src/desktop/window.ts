@@ -1,13 +1,18 @@
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { BrowserWindow, app, protocol, screen, session } from 'electron';
+import { CH, type DragKind } from './api';
+import { applyDrag, clampBounds, layoutKey, resolveBounds, type DisplayInfo, type Rect } from './bounds';
 import { CSP, contentType, isAppUrl, resolveAppPath } from './protocol';
 import { BottomLimiter, Reattacher, isAtBottom, shouldKeepBottom } from './policy';
 import type { Runtime } from './runtime';
+import { loadDesktopSettings, saveDesktopSettings, type DesktopSettings } from './settings';
 import { findProgman, isWindow, makeToolWindow, sendToBottom, setOwner, windowsBelow, type Hwnd } from './win32';
 
 const WM_WINDOWPOSCHANGED = 0x47;
 const ATTACH_FALLBACK_MS = 2000;
 const PROGMAN_POLL_MS = 5000;
+const DISPLAY_DEBOUNCE_MS = 500;
 
 export type AttachMode = 'owned' | 'bottom';
 
@@ -17,6 +22,10 @@ export const windowState = { interactive: false, alwaysOnTop: false, adjusting: 
 export const blocked = { navigations: 0, popups: 0, bottomAsserts: 0 };
 
 let runtime: Runtime;
+let settings: DesktopSettings;
+let settingsFile = '';
+let adjustBefore: Rect | null = null;
+let adjustBase: Rect | null = null;
 let preloadPath: string;
 let current: BrowserWindow | null = null;
 let currentHwnd: Hwnd = 0n;
@@ -106,11 +115,85 @@ export function setInteractive(on: boolean): void {
   }
 }
 
-function placement() {
-  const wa = screen.getPrimaryDisplay().workArea;
-  const width = Math.min(900, wa.width);
-  const height = Math.min(700, wa.height);
-  return { width, height, x: wa.x + wa.width - width, y: wa.y + Math.round((wa.height - height) / 2) };
+export const getSettings = (): DesktopSettings => settings;
+export const settingsPath = (): string => settingsFile;
+
+export function displayInfos(): DisplayInfo[] {
+  const primary = screen.getPrimaryDisplay().id;
+  return screen.getAllDisplays().map((d) => ({ bounds: d.bounds, workArea: d.workArea, primary: d.id === primary }));
+}
+const workAreas = (): Rect[] => displayInfos().map((d) => d.workArea);
+
+function saveSettings(): void {
+  try {
+    saveDesktopSettings(settingsFile, settings);
+  } catch (e) {
+    console.error('설정을 저장하지 못했다', e);
+  }
+}
+
+function sendAdjust(win: BrowserWindow, active: boolean): void {
+  if (!win.isDestroyed()) win.webContents.send(CH.command, { type: 'adjust', active });
+}
+
+// 위치 및 크기 조정을 연다(메뉴의 "위치 및 크기"와 시험 실행이 부른다).
+export function startAdjust(): void {
+  const win = getWindow();
+  if (!win || windowState.adjusting) return;
+  adjustBefore = win.getBounds();
+  adjustBase = null;
+  windowState.adjusting = true;
+  win.setAlwaysOnTop(true);
+  if (!win.isVisible()) win.showInactive();
+  sendAdjust(win, true);
+}
+
+export function beginDrag(): void {
+  const win = getWindow();
+  if (win && windowState.adjusting) adjustBase = win.getBounds();
+}
+
+export function dragTo(kind: DragKind, dx: number, dy: number): void {
+  const win = getWindow();
+  if (!win || !windowState.adjusting || !adjustBase) return;
+  win.setBounds(applyDrag(adjustBase, kind, dx, dy, workAreas()));
+}
+
+export function finishAdjust(apply: boolean): void {
+  const win = getWindow();
+  if (!win || !windowState.adjusting) return;
+  if (apply) {
+    const placed = clampBounds(win.getBounds(), workAreas());
+    win.setBounds(placed);
+    settings = { ...settings, bounds: { ...settings.bounds, [layoutKey(displayInfos())]: placed } };
+    saveSettings();
+  } else if (adjustBefore) {
+    win.setBounds(adjustBefore);
+  }
+  adjustBefore = null;
+  adjustBase = null;
+  windowState.adjusting = false;
+  win.setAlwaysOnTop(settings.alwaysOnTop);
+  windowState.alwaysOnTop = settings.alwaysOnTop;
+  limiter.reached(); // 사용자가 직접 한 동작 뒤이므로 맨 아래로 보내는 횟수를 처음부터 센다.
+  keepBottom();
+  sendAdjust(win, false);
+}
+
+// 화면 구성이 바뀌면 500ms 모아 그 구성의 자리로 옮긴다. 조정 중에는 하지 않는다.
+function watchDisplays(): void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const changed = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      const win = getWindow();
+      if (win && !windowState.adjusting) win.setBounds(resolveBounds(settings.bounds, displayInfos()));
+    }, DISPLAY_DEBOUNCE_MS);
+  };
+  screen.on('display-added', changed);
+  screen.on('display-removed', changed);
+  screen.on('display-metrics-changed', changed);
 }
 
 function adopt(progman: Hwnd): void {
@@ -148,7 +231,7 @@ export function createDesktopWindow(): BrowserWindow {
     old.destroy();
   }
   const win = new BrowserWindow({
-    ...placement(),
+    ...resolveBounds(settings.bounds, displayInfos()),
     frame: false, transparent: true, backgroundColor: '#00000000', hasShadow: false, skipTaskbar: true,
     resizable: false, movable: false, minimizable: false, maximizable: false, fullscreenable: false,
     show: false, focusable: false,
@@ -162,6 +245,9 @@ export function createDesktopWindow(): BrowserWindow {
   currentProgman = 0n;
   mode = null;
   windowState.interactive = false;
+  windowState.adjusting = false;
+  adjustBefore = null;
+  adjustBase = null;
   limiter.reached();
   created += 1;
 
@@ -200,6 +286,12 @@ export function showWindow(): void {
 export function startDesktopWindow(rt: Runtime, preload: string): void {
   runtime = rt;
   preloadPath = preload;
+  settingsFile = join(rt.profileDir, 'settings.json');
+  const loaded = loadDesktopSettings(settingsFile);
+  if (loaded.status === 'corrupt') console.error('settings.json이 깨져 있어 settings.json.corrupt로 옮기고 기본 설정으로 시작한다');
+  settings = loaded.settings;
+  windowState.alwaysOnTop = settings.alwaysOnTop;
+  watchDisplays();
   createDesktopWindow();
   setInterval(() => {
     if (!quitting && current && mode === 'owned' && !isWindow(currentProgman)) reattacher.ownerLost();

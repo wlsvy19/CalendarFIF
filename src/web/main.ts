@@ -8,6 +8,7 @@ import { startAutoFlush } from './autoFlush';
 import { deviceLabel } from './device';
 import { loadAppearance, applyAppearance } from './appearance';
 import { getBridge } from './desktop/bridge';
+import { mountAdjust } from './desktop/adjust';
 import { mountCellMenu } from './desktop/cellMenu';
 import { Interactivity } from './desktop/interactive';
 import { playDoneTone } from './desktop/tone';
@@ -221,6 +222,7 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
   };
 }
 
+let adjust: { destroy(): void } | null = null;
 bridge?.onCommand((c) => {
   switch (c.type) {
     case 'today':
@@ -236,7 +238,9 @@ bridge?.onCommand((c) => {
       document.documentElement.classList.toggle('content-hidden', c.hidden);
       break;
     case 'adjust':
-      break; // Task 7까지 무시한다
+      adjust?.destroy();
+      adjust = c.active && bridge ? mountAdjust(document.body, bridge) : null;
+      break;
   }
 });
 
