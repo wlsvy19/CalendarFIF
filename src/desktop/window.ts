@@ -4,7 +4,7 @@ import { BrowserWindow, app, protocol, screen, session } from 'electron';
 import { CH, type DragKind } from './api';
 import { applyDrag, clampBounds, layoutKey, resolveBounds, type DisplayInfo, type Rect } from './bounds';
 import { CSP, contentType, isAppUrl, resolveAppPath } from './protocol';
-import { BottomLimiter, Reattacher, isAtBottom, shouldKeepBottom } from './policy';
+import { BottomLimiter, Reattacher, adjustStep, isAtBottom, shouldKeepBottom } from './policy';
 import type { Runtime } from './runtime';
 import { loadDesktopSettings, saveDesktopSettings, type DesktopSettings } from './settings';
 import { findProgman, isWindow, makeToolWindow, sendToBottom, setOwner, windowsBelow, type Hwnd } from './win32';
@@ -133,16 +133,32 @@ function saveSettings(): void {
 }
 
 function sendAdjust(win: BrowserWindow, active: boolean): void {
-  if (!win.isDestroyed()) win.webContents.send(CH.command, { type: 'adjust', active });
+  try {
+    if (!win.isDestroyed()) win.webContents.send(CH.command, { type: 'adjust', active });
+  } catch {
+    // 화면이 죽었으면 보낼 곳이 없다.
+  }
+}
+
+// IPC를 보낸 곳이 지금 창의 앱 화면(주 프레임)인지 본다. 모든 처리기가 쓴다.
+export function isFromWindow(e: { sender: Electron.WebContents; senderFrame?: Electron.WebFrameMain | null }): boolean {
+  const win = getWindow();
+  return !!win && e.sender === win.webContents && e.senderFrame === e.sender.mainFrame && isAppUrl(e.senderFrame?.url);
 }
 
 // 위치 및 크기 조정을 연다(메뉴의 "위치 및 크기"와 시험 실행이 부른다).
 export function startAdjust(): void {
   const win = getWindow();
-  if (!win || windowState.adjusting) return;
+  if (!win) return;
+  const step = adjustStep(windowState.adjusting, 'start');
+  if (step.action === 'resend') {
+    sendAdjust(win, true); // 덮개가 사라졌어도 다시 열린다
+    return;
+  }
   adjustBefore = win.getBounds();
   adjustBase = null;
-  windowState.adjusting = true;
+  windowState.adjusting = step.adjusting;
+  win.setFocusable(true); // 덮개에서 Esc를 받으려면 눌렀을 때 활성화될 수 있어야 한다
   win.setAlwaysOnTop(true);
   if (!win.isVisible()) win.showInactive();
   sendAdjust(win, true);
@@ -159,41 +175,56 @@ export function dragTo(kind: DragKind, dx: number, dy: number): void {
   win.setBounds(applyDrag(adjustBase, kind, dx, dy, workAreas()));
 }
 
-export function finishAdjust(apply: boolean): void {
+export function finishAdjust(apply: boolean, event: 'finish' | 'reload' = 'finish'): void {
   const win = getWindow();
-  if (!win || !windowState.adjusting) return;
-  if (apply) {
-    const placed = clampBounds(win.getBounds(), workAreas());
+  const step = adjustStep(windowState.adjusting, event);
+  if (!win || step.action === 'none') return;
+  const areas = workAreas();
+  if (apply && event === 'finish') {
+    const placed = clampBounds(win.getBounds(), areas);
     win.setBounds(placed);
-    settings = { ...settings, bounds: { ...settings.bounds, [layoutKey(displayInfos())]: placed } };
-    saveSettings();
+    const displays = displayInfos();
+    if (displays.length > 0) {
+      settings = { ...settings, bounds: { ...settings.bounds, [layoutKey(displays)]: placed } };
+      saveSettings();
+    }
   } else if (adjustBefore) {
-    win.setBounds(adjustBefore);
+    win.setBounds(clampBounds(adjustBefore, areas)); // 그 사이 모니터가 빠졌어도 보이는 곳으로
   }
   adjustBefore = null;
   adjustBase = null;
-  windowState.adjusting = false;
+  windowState.adjusting = step.adjusting;
+  win.setFocusable(windowState.interactive);
   win.setAlwaysOnTop(settings.alwaysOnTop);
   windowState.alwaysOnTop = settings.alwaysOnTop;
   limiter.reached(); // 사용자가 직접 한 동작 뒤이므로 맨 아래로 보내는 횟수를 처음부터 센다.
   keepBottom();
   sendAdjust(win, false);
+  if (layoutPending) scheduleLayout(); // 조정 중에 온 화면 구성 변화를 이제 반영한다
 }
 
-// 화면 구성이 바뀌면 500ms 모아 그 구성의 자리로 옮긴다. 조정 중에는 하지 않는다.
+let layoutPending = false;
+let layoutTimer: ReturnType<typeof setTimeout> | null = null;
+
+// 화면 구성에 맞는 자리로 옮긴다. 모니터가 하나도 없거나 조정 중이면 미루고 다음 때에 다시 한다.
+function scheduleLayout(): void {
+  layoutPending = true;
+  if (layoutTimer) clearTimeout(layoutTimer);
+  layoutTimer = setTimeout(() => {
+    layoutTimer = null;
+    const win = getWindow();
+    if (!win || windowState.adjusting) return; // finishAdjust가 다시 부른다
+    const placed = resolveBounds(settings.bounds, displayInfos());
+    if (!placed) return scheduleLayout();
+    layoutPending = false;
+    win.setBounds(placed);
+  }, DISPLAY_DEBOUNCE_MS);
+}
+
 function watchDisplays(): void {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const changed = () => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
-      timer = null;
-      const win = getWindow();
-      if (win && !windowState.adjusting) win.setBounds(resolveBounds(settings.bounds, displayInfos()));
-    }, DISPLAY_DEBOUNCE_MS);
-  };
-  screen.on('display-added', changed);
-  screen.on('display-removed', changed);
-  screen.on('display-metrics-changed', changed);
+  screen.on('display-added', scheduleLayout);
+  screen.on('display-removed', scheduleLayout);
+  screen.on('display-metrics-changed', scheduleLayout);
 }
 
 function adopt(progman: Hwnd): void {
@@ -230,8 +261,10 @@ export function createDesktopWindow(): BrowserWindow {
     current = null; // closed 처리기가 예기치 않은 닫힘으로 보지 않게 먼저 뗀다.
     old.destroy();
   }
+  const placed = resolveBounds(settings.bounds, displayInfos());
+  if (!placed) scheduleLayout(); // 모니터가 없으면 기본 자리로 만들고 곧 제자리를 찾는다
   const win = new BrowserWindow({
-    ...resolveBounds(settings.bounds, displayInfos()),
+    ...(placed ?? {}),
     frame: false, transparent: true, backgroundColor: '#00000000', hasShadow: false, skipTaskbar: true,
     resizable: false, movable: false, minimizable: false, maximizable: false, fullscreenable: false,
     show: false, focusable: false,
@@ -261,6 +294,8 @@ export function createDesktopWindow(): BrowserWindow {
   win.once('ready-to-show', once);
   setTimeout(once, ATTACH_FALLBACK_MS);
 
+  win.webContents.on('render-process-gone', () => finishAdjust(false, 'reload'));
+  win.webContents.on('did-finish-load', () => finishAdjust(false, 'reload'));
   win.on('focus', keepBottom);
   win.hookWindowMessage(WM_WINDOWPOSCHANGED, keepBottom);
   win.on('show', () => { windowState.hidden = false; });

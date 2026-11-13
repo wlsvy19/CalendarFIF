@@ -24,3 +24,10 @@ it('끌어서 옮기고 가장자리로 크기를 바꾸되 최소 크기를 지
   expect([applyDrag(r, 'move', 50, -20, wa), applyDrag(r, 'se', 100, 50, wa), applyDrag(r, 'nw', 600, 500, wa), applyDrag(r, 'w', -50, 999, wa), applyDrag(r, 'move', -5000, 0, wa)])
     .toEqual([{ x: 150, y: 80, width: 800, height: 600 }, { x: 100, y: 100, width: 900, height: 650 }, { x: 540, y: 460, width: 360, height: 240 }, { x: 50, y: 100, width: 850, height: 600 }, { ...r, x: -720 }]);
 });
+it('모니터가 하나도 없으면 자리를 정하지 않고 던지지 않는다', () => {
+  expect([defaultBounds([]), resolveBounds({ k: r }, []), clampBounds(r, [])]).toEqual([null, null, r]);
+});
+it('취소로 돌아갈 자리는 지금 있는 모니터 안으로 들어온다', () => {
+  const before = { ...r, x: -1500, y: 10 }; // 빠진 모니터 위의 자리
+  expect(clampBounds(before, wa)).toEqual({ ...r, x: -720, y: 10 });
+});

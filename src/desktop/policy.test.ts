@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { BottomLimiter, Reattacher, isAtBottom, shouldKeepBottom } from './policy';
+import { BottomLimiter, Reattacher, adjustStep, isAtBottom, shouldKeepBottom } from './policy';
 
 const P = 100n, own = (hwnd: bigint) => ({ hwnd, desktopOwned: true }), other = (hwnd: bigint) => ({ hwnd, desktopOwned: false });
 it('바탕화면에 붙은 창(DesktopCal 같은)들 말고는 아래에 아무것도 없어야 맨 아래다', () => {
@@ -32,4 +32,11 @@ it('5묶음 내리 닿지 못하면 30초에 한 번으로 물러서고, 닿으�
   expect(l.allow(4002 + 30001)).toBe(false);
   l.reached();
   expect([l.allow(40000), l.allow(40001), l.allow(40002), l.allow(40003)]).toEqual([true, true, true, false]);
+});
+
+it('위치 조정 상태: 시작, 다시 시작, 화면 다시 읽힘, 끝', () => {
+  expect([adjustStep(false, 'start'), adjustStep(true, 'start'), adjustStep(true, 'reload'), adjustStep(true, 'finish'), adjustStep(false, 'finish'), adjustStep(false, 'reload')]).toEqual([
+    { adjusting: true, action: 'begin' }, { adjusting: true, action: 'resend' }, { adjusting: false, action: 'cancel' },
+    { adjusting: false, action: 'end' }, { adjusting: false, action: 'none' }, { adjusting: false, action: 'none' },
+  ]);
 });

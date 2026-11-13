@@ -13,7 +13,9 @@ export function layoutKey(displays: DisplayInfo[]): string {
 }
 
 // 처음 보는 구성의 자리: 주 모니터가 아닌 모니터(없으면 주 모니터) 작업 영역의 오른쪽.
-export function defaultBounds(displays: DisplayInfo[]): Rect {
+// 모니터가 하나도 없으면(잠금, 원격 연결 끊김 등으로 잠시 그렇게 보고될 수 있다) 자리를 정하지 않고 null을 돌려준다.
+export function defaultBounds(displays: DisplayInfo[]): Rect | null {
+  if (displays.length === 0) return null;
   const sorted = [...displays].sort(byPosition);
   const target = sorted.find((d) => !d.primary) ?? sorted.find((d) => d.primary) ?? sorted[0];
   const wa = target.workArea;
@@ -35,13 +37,15 @@ function targetWorkArea(r: Rect, workAreas: Rect[]): Rect {
     const o = overlap(r, wa);
     const bo = overlap(r, best);
     return o > bo || (o === bo && o === 0 && distance(wa) < distance(best)) ? wa : best;
-  });
+  }, workAreas[0]);
 }
 
 const between = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
 // 크기를 최소 크기와 작업 영역 사이로 자르고, 화면 안에 80px 이상 남게 한다(위쪽은 넘지 않는다).
+// 작업 영역이 없으면 자를 기준이 없으므로 그대로 돌려준다.
 export function clampBounds(r: Rect, workAreas: Rect[]): Rect {
+  if (workAreas.length === 0) return r;
   const wa = targetWorkArea(r, workAreas);
   const width = between(r.width, MIN_SIZE.width, Math.max(MIN_SIZE.width, wa.width));
   const height = between(r.height, MIN_SIZE.height, Math.max(MIN_SIZE.height, wa.height));
@@ -53,7 +57,8 @@ export function clampBounds(r: Rect, workAreas: Rect[]): Rect {
   };
 }
 
-export function resolveBounds(saved: Record<string, Rect>, displays: DisplayInfo[]): Rect {
+export function resolveBounds(saved: Record<string, Rect>, displays: DisplayInfo[]): Rect | null {
+  if (displays.length === 0) return null;
   const key = layoutKey(displays);
   const own = Object.hasOwn(saved, key) ? saved[key] : undefined;
   return own ? clampBounds(own, displays.map((d) => d.workArea)) : defaultBounds(displays);

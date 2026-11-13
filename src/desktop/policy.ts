@@ -55,3 +55,12 @@ const WINDOW_MS = 1000;
 const PER_WINDOW = 3;
 const BACKOFF_AFTER = 15;
 const BACKOFF_MS = 30000;
+
+// 위치 조정 상태의 전이. 시작을 또 요청하면 덮개를 다시 보내고, 화면이 다시 읽히면 취소로 끝낸다.
+export type AdjustEvent = 'start' | 'reload' | 'finish';
+export type AdjustAction = 'begin' | 'resend' | 'cancel' | 'end' | 'none';
+export function adjustStep(adjusting: boolean, event: AdjustEvent): { adjusting: boolean; action: AdjustAction } {
+  if (event === 'start') return { adjusting: true, action: adjusting ? 'resend' : 'begin' };
+  if (!adjusting) return { adjusting: false, action: 'none' };
+  return { adjusting: false, action: event === 'reload' ? 'cancel' : 'end' };
+}

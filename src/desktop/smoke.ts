@@ -131,7 +131,7 @@ async function attach(): Promise<Result> {
   return { fields, checks };
 }
 
-const same = (a: Rect, b: Rect | undefined) => !!b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+const same = (a: Rect, b: Rect | null | undefined) => !!b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 const rectOf = (r: Rect): Rect => ({ x: r.x, y: r.y, width: r.width, height: r.height });
 
 // 위치 조정을 앱 안의 길(IPC 메시지와 setBounds)로만 움직여 본다. 마우스 입력은 흉내 내지 않는다.

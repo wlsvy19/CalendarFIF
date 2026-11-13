@@ -14,13 +14,13 @@ export function mountAdjust(root: HTMLElement, bridge: CalfifDesktop): { destroy
     </div>
     <div class="adjust-move"></div>
     ${KINDS.map((k) => `<div class="adjust-handle" data-kind="${k}"></div>`).join('')}`;
-  let drag: { kind: DragKind; x: number; y: number } | null = null;
+  let drag: { kind: DragKind; x: number; y: number; id: number } | null = null;
 
   overlay.addEventListener('pointerdown', (e) => {
     const target = e.target as Element;
     const kind = target.classList.contains('adjust-move') ? 'move' : target.classList.contains('adjust-handle') ? (target.getAttribute('data-kind') as DragKind) : null;
     if (!kind) return;
-    drag = { kind, x: e.screenX, y: e.screenY };
+    drag = { kind, x: e.screenX, y: e.screenY, id: e.pointerId };
     bridge.dragStart();
     try {
       target.setPointerCapture(e.pointerId);
@@ -29,15 +29,25 @@ export function mountAdjust(root: HTMLElement, bridge: CalfifDesktop): { destroy
     }
   });
   overlay.addEventListener('pointermove', (e) => {
-    if (drag) bridge.drag(drag.kind, e.screenX - drag.x, e.screenY - drag.y);
+    if (drag && e.pointerId === drag.id) bridge.drag(drag.kind, e.screenX - drag.x, e.screenY - drag.y);
   });
-  const end = (): void => {
-    drag = null;
+  const end = (e: PointerEvent): void => {
+    if (drag && e.pointerId === drag.id) drag = null;
   };
   overlay.addEventListener('pointerup', end);
   overlay.addEventListener('pointercancel', end);
+  overlay.addEventListener('lostpointercapture', end);
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') bridge.adjustDone(false);
+  };
+  document.addEventListener('keydown', onKey);
   overlay.querySelector('.adjust-apply')!.addEventListener('click', () => bridge.adjustDone(true));
   overlay.querySelector('.adjust-cancel')!.addEventListener('click', () => bridge.adjustDone(false));
   root.append(overlay);
-  return { destroy: () => overlay.remove() };
+  return {
+    destroy: () => {
+      document.removeEventListener('keydown', onKey);
+      overlay.remove();
+    },
+  };
 }

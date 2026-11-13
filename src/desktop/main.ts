@@ -2,10 +2,9 @@ import { join } from 'node:path';
 import { app, ipcMain, protocol } from 'electron';
 import { CH } from './api';
 import { parseBool, parseDrag } from './ipc';
-import { isAppUrl } from './protocol';
 import { resolveRuntime } from './runtime';
 import { guardLoginItem, runSmoke } from './smoke';
-import { beginDrag, dragTo, finishAdjust, installSecurity, markQuitting, registerAppProtocol, setInteractive, showWindow, signals, startDesktopWindow } from './window';
+import { beginDrag, dragTo, finishAdjust, installSecurity, isFromWindow, markQuitting, registerAppProtocol, setInteractive, showWindow, signals, startDesktopWindow } from './window';
 
 const rt = resolveRuntime({ env: process.env, isPackaged: app.isPackaged, appPath: app.getAppPath(), appData: app.getPath('appData') });
 app.setPath('userData', rt.profileDir);
@@ -33,20 +32,19 @@ if (!app.requestSingleInstanceLock()) {
     installSecurity();
     ipcMain.on(CH.interactive, (e, on: unknown) => {
       const value = parseBool(on);
-      if (e.senderFrame === e.sender.mainFrame && isAppUrl(e.senderFrame?.url) && value !== null) setInteractive(value);
+      if (isFromWindow(e) && value !== null) setInteractive(value);
     });
     // 창 자리 조정 메시지: 보낸 곳이 앱의 화면이고 값이 맞을 때만 쓴다.
-    const fromApp = (e: Electron.IpcMainEvent) => e.senderFrame === e.sender.mainFrame && isAppUrl(e.senderFrame?.url);
     ipcMain.on(CH.dragStart, (e) => {
-      if (fromApp(e)) beginDrag();
+      if (isFromWindow(e)) beginDrag();
     });
     ipcMain.on(CH.drag, (e, kind: unknown, dx: unknown, dy: unknown) => {
       const drag = parseDrag(kind, dx, dy);
-      if (fromApp(e) && drag) dragTo(drag.kind, drag.dx, drag.dy);
+      if (isFromWindow(e) && drag) dragTo(drag.kind, drag.dx, drag.dy);
     });
     ipcMain.on(CH.adjustDone, (e, apply: unknown) => {
       const value = parseBool(apply);
-      if (fromApp(e) && value !== null) finishAdjust(value);
+      if (isFromWindow(e) && value !== null) finishAdjust(value);
     });
     startDesktopWindow(rt, join(__dirname, 'preload.cjs'));
     if (rt.smoke) void runSmoke(rt);
