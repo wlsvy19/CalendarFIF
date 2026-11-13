@@ -479,7 +479,9 @@ button { touch-action: manipulation; }
 .widget-steps { display: flex; flex-direction: column; gap: 8px; }
 .widget-steps summary { min-height: 44px; display: flex; align-items: center; font-size: 16px; font-weight: 600; cursor: pointer; }
 .widget-steps ol { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 8px; font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
-.widget-steps .settings-note { font-size: 14px; line-height: 1.45; }
+.widget-steps ol { margin-bottom: 12px; }
+.widget-steps .settings-note { font-size: 14px; line-height: 1.45; margin-top: 8px; }
+.settings-btn:disabled { opacity: 0.5; cursor: default; }
 .widget-script {
   box-sizing: border-box;
   width: 100%;
