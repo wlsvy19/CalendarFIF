@@ -12,3 +12,4 @@ build/
 *.log
 *.db
 coverage/
+public/widget/

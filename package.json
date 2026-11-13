@@ -10,6 +10,7 @@
     "dev:emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && vite --mode emulator\"",
     "dev:desktop-emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && vite --mode desktop-emu\"",
     "widget:preview": "tsx scripts/widget-preview.ts",
+    "widget:build": "tsx scripts/build-widget.ts",
     "test": "vitest run --project unit --project dom",
     "typecheck": "tsc --noEmit",
     "rules:build": "tsx scripts/build-rules.ts",
