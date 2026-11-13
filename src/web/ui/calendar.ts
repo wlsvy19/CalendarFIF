@@ -392,7 +392,11 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     release(d.width, 0);
   };
   pager.addEventListener('pointercancel', onCancel);
-  pager.addEventListener('lostpointercapture', onCancel);
+  // 터치는 처음 닿은 칸이 포인터를 붙잡는다. 달력이 넘겨받을 때 그 칸이 내는 lostpointercapture가
+  // 여기까지 올라오므로, 달력 자신이 잃었을 때만 끌기를 그만둔다.
+  pager.addEventListener('lostpointercapture', (e) => {
+    if (e.target === pager) onCancel(e);
+  });
 
   // 읽기 문제는 store가 바뀔 때, 연결 상태는 창의 online/offline 이벤트로 알 수 있다.
   const offChange = store.onChange(() => {

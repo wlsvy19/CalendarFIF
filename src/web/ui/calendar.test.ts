@@ -152,6 +152,31 @@ describe('달 넘기기', () => {
     expect(store.show).toHaveBeenLastCalledWith('2026-12');
     expect([track.style.transform, root.querySelector('.grid.peek')]).toEqual(['', null]);
   });
+  it('터치를 처음 잡은 칸이 붙잡기를 넘겨주며 내는 신호는 끌기를 끊지 않는다', () => {
+    vi.useFakeTimers();
+    const { root, store, track, fire } = swipeMount();
+    const cell = root.querySelector<HTMLElement>('.pager .cell')!;
+    fire('pointerdown', 300, 300, 0);
+    fire('pointermove', 340, 302, 30); // 가로로 정해지고 달력이 포인터를 넘겨받는다
+    // 실제 터치에서는 처음 닿은 칸이 포인터를 잃었다는 신호가 달력까지 올라온다.
+    cell.dispatchEvent(new PointerEvent('lostpointercapture', { pointerId: 1, bubbles: true }));
+    fire('pointermove', 600, 300, 100);
+    expect(track.style.transform).toBe('translate3d(300px, 0px, 0px)');
+    fire('pointerup', 600, 300, 200);
+    vi.advanceTimersByTime(300);
+    expect(store.show).toHaveBeenLastCalledWith('2026-10');
+  });
+  it('달력이 포인터를 잃으면 끌기를 그만두고 제자리로 돌아간다', () => {
+    vi.useFakeTimers();
+    const { store, track, fire } = swipeMount();
+    fire('pointerdown', 300, 300, 0);
+    fire('pointermove', 600, 302, 30);
+    fire('lostpointercapture', 600, 302, 60); // 달력 자신이 잃었다
+    fire('pointermove', 900, 300, 90);
+    vi.advanceTimersByTime(300);
+    expect(store.show).not.toHaveBeenCalled();
+    expect(track.style.transform).toBe('');
+  });
   it('세로로 움직이면 넘기지 않는다', () => {
     const { root, store, track, fire } = swipeMount();
     fire('pointerdown', 500, 300, 0);
