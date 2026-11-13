@@ -1,4 +1,4 @@
-import { splitLines } from './text';
+import { normalizeText, splitLines } from './text';
 import { EMPTY_DAY } from './types';
 import type { DayChange, DayRecord, DayValue, PendingEdit } from './types';
 
@@ -48,7 +48,7 @@ export function mergeText(base: string, mine: string, server: string): string {
     else result.push(line);
   });
 
-  return result.join('\n');
+  return normalizeText(result.join('\n'));
 }
 
 export function mergeColor(

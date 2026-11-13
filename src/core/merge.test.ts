@@ -24,6 +24,12 @@ describe('mergeText', () => {
   ])('%s', (_name, base, mine, server, expected) => {
     expect(mergeText(base, mine, server)).toBe(expected);
   });
+  it('합친 결과의 끝 빈 줄은 저장하지 않는다', () => {
+    expect(mergeText('A\nB', 'A', 'A\n\nB')).toBe('A');
+  });
+  it('합친 결과의 앞 빈 줄은 저장하지 않는다', () => {
+    expect(mergeText('A\nB', 'B', 'A\n\nB')).toBe('B');
+  });
 });
 
 describe('mergeColor', () => {
@@ -60,5 +66,8 @@ describe('resolveEdit', () => {
   it('내용과 색이 모두 비면 날짜를 지운다', () => {
     expect(resolveEdit(E(v('A', 'F12424'), v('', '')), r('A', 'F12424'), 'pc')).toBe('delete');
     expect(resolveEdit(E(v('A'), v('')), null, 'pc')).toBeNull();
+  });
+  it('합친 글에 빈 줄만 남고 색도 없으면 날짜를 지운다', () => {
+    expect(resolveEdit(E(v('A\nB'), v('')), r('A\n\n\nB'), 'pc')).toBe('delete');
   });
 });
