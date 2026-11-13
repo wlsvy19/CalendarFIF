@@ -2,7 +2,12 @@ import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebas
 import './styles.css';
 import './desktop.css';
 import { createApp, type Session } from './app';
+import { screenFor, usersRoute, watchAccess, type AccessState, type MainScreen } from './access';
+import { firestoreAccessSource, firestoreUsersSource } from './accessStore';
+import { firebaseAccountMaker } from './accountMaker';
 import { initFirebase } from './firebase';
+import { changePassword, firebasePasswordDeps, passwordMessage, sendReset } from './password';
+import { addUser, addUserMessage } from './users';
 import { CalendarStore } from './state';
 import { startAutoFlush } from './autoFlush';
 import { deviceLabel } from './device';
@@ -14,9 +19,11 @@ import { mountDesktopSettings } from './desktop/settingsPages';
 import { mountCellMenu } from './desktop/cellMenu';
 import { Interactivity } from './desktop/interactive';
 import { playDoneTone } from './desktop/tone';
+import { mountBlocked, type BlockedKind } from './ui/blocked';
 import { mountCalendar } from './ui/calendar';
 import { mountEditor } from './ui/editor';
 import { mountSettings } from './ui/settings';
+import { mountUsers } from './ui/users';
 import { isBusy, reloadOnUpdate } from './update';
 import { parseHash } from './router';
 import { openStorage } from './storage';
@@ -26,7 +33,11 @@ import { FirestoreMonthStore } from '../sync/firestoreStore';
 import { Outbox } from '../sync/outbox';
 import { SyncEngine } from '../sync/engine';
 
-const { auth, db } = initFirebase(import.meta.env);
+const { app, auth, db } = initFirebase(import.meta.env);
+// 사용자 추가는 두 번째 앱 인스턴스에서 계정을 만든다. 지금 로그인은 바뀌지 않는다.
+const accounts = firebaseAccountMaker(app.options, {
+  emulatorAuthUrl: import.meta.env.VITE_USE_EMULATOR === '1' ? 'http://127.0.0.1:9095' : undefined,
+});
 
 // PC 앱(데스크톱 빌드)에서만 켠다. 웹앱은 이 값들을 쓰지 않는다.
 const DESKTOP = import.meta.env.VITE_DESKTOP === '1';
@@ -37,7 +48,10 @@ const interactivity = new Interactivity((on) => bridge?.setInteractive(on));
 let unsavedOnlyInMemory: () => boolean = () => false;
 let deskActions: { goToday(): void; openSettings(page?: SettingsPage): void; signOut(): void } | null = null;
 
-function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
+type CalendarScreen = { destroy(): void; accessChanged(): void };
+
+// 달력 화면: 달력, 편집, 설정, 사용자 관리와 그 동기화. 접근 상태가 막힘이 되면 통째로 내려간다.
+function mountCalendarScreen(root: HTMLElement, session: Session, getAccess: () => AccessState): CalendarScreen {
   const editedBy = deviceLabel(navigator.userAgent);
   const source = new FirestoreMonthStore(db, session.uid);
   const storage = openStorage();
@@ -95,6 +109,12 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
       return false;
     }
   };
+  const changeMyPassword = async (current: string, next: string): Promise<{ ok: boolean; message: string }> => {
+    const result = await changePassword(firebasePasswordDeps(auth), current, next);
+    return { ok: result.ok, message: passwordMessage(result) };
+  };
+  // 설정 자리를 사용자 관리로 바꾼다(기록을 하나 더 쌓지 않는다). 그래서 사용자 관리를 닫으면 설정이 아니라 달력으로 돌아간다.
+  const manageUsers = (): void => location.replace('#users');
   const openSettings = (): void => {
     const account = {
       email: session.email,
@@ -102,6 +122,9 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
       storageOk: storage.persistent && outbox.persistent,
       corruptFound: outbox.corruptDetected,
       onSignOut: signOutNow,
+      onChangePassword: changeMyPassword,
+      // 관리자인지는 설정을 여는 순간의 접근 상태로 정한다.
+      onManageUsers: getAccess() === 'admin' ? manageUsers : undefined,
     };
     const onClose = (): void => {
       closeSettings(); // 주소가 바뀌기를 기다리지 않고 바로 닫는다
@@ -139,14 +162,53 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
     editor = { dateKey, handle };
     interactivity.begin('editor');
   };
+  let users: { destroy(): void } | null = null;
+  const closeUsers = (): void => {
+    users?.destroy();
+    users = null;
+    interactivity.end('users');
+  };
+  // #users: 관리자로 확인되면 연다. 보통 사용자면 기록을 남기지 않고 달력으로 돌아간다. 확인 중이면 accessChanged가 다시 부른다.
+  const showUsers = (): void => {
+    const action = usersRoute(getAccess());
+    if (action === 'leave') {
+      closeUsers();
+      pushedByApp = false;
+      history.replaceState(null, '', location.pathname + location.search);
+      return;
+    }
+    if (action !== 'open' || users) return;
+    const source = firestoreUsersSource(db);
+    users = mountUsers(root, {
+      watch: source.watchAll,
+      onAdd: async (email, password) => {
+        const result = await addUser({ accounts, users: source, now: Date.now }, email, password);
+        return { ok: result.ok, message: addUserMessage(result) };
+      },
+      onSetDisabled: source.setDisabled,
+      onRemove: source.remove,
+      onReset: (email) => sendReset(auth, email),
+      onClose: () => {
+        closeUsers(); // 주소가 바뀌기를 기다리지 않고 바로 닫는다
+        backToCalendar();
+      },
+    });
+    interactivity.begin('users');
+  };
   const syncRoute = (): void => {
     const route = parseHash(location.hash);
+    if (route.name !== 'users') closeUsers();
     if (route.name === 'settings') {
       closeEditor();
       if (!settings) openSettings();
       return;
     }
     closeSettings();
+    if (route.name === 'users') {
+      closeEditor();
+      showUsers();
+      return;
+    }
     if (route.name !== 'day') {
       pushedByApp = false;
       closeEditor();
@@ -234,6 +296,9 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
   unsavedOnlyInMemory = () => !(storage.persistent && outbox.persistent) && engine.status().pending > 0;
   syncRoute();
   return {
+    accessChanged() {
+      if (parseHash(location.hash).name === 'users') showUsers();
+    },
     destroy() {
       unsavedOnlyInMemory = () => false;
       deskActions = null;
@@ -241,12 +306,58 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
       window.removeEventListener('hashchange', syncRoute);
       closeEditor();
       closeSettings();
+      closeUsers();
       calendar.destroy();
       window.removeEventListener('storage', onStorage);
       offStatus();
       offCommit();
       stopAutoFlush();
       store.destroy();
+    },
+  };
+}
+
+// 로그인 뒤: 달력 화면을 바로 올리고 내 access 문서를 지켜본다. 허가 없음이나 중지면 달력 화면을 내리고 안내를 보인다.
+// 다시 허용되면 안내를 내리고 달력 화면을 새로 올린다(대기 중이던 편집은 저장소에 남아 있다가 다시 올라간다).
+function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
+  let access: AccessState = 'checking';
+  let shown: MainScreen = 'calendar';
+  let screen: CalendarScreen | null = mountCalendarScreen(root, session, () => access);
+  let notice: { setKind(kind: BlockedKind): void; destroy(): void } | null = null;
+  const signOutFromNotice = (): void => {
+    history.replaceState(null, '', location.pathname + location.search); // 다시 로그인했을 때 설정이 열리지 않게 한다
+    void signOut(auth);
+  };
+  const stopWatch = watchAccess(firestoreAccessSource(db), session, (state) => {
+    access = state;
+    const next = screenFor(state, shown);
+    if (next === 'calendar') {
+      if (notice) {
+        notice.destroy();
+        notice = null;
+        interactivity.end('blocked');
+        screen = mountCalendarScreen(root, session, () => access);
+      } else {
+        screen?.accessChanged();
+      }
+    } else if (notice) {
+      notice.setKind(next);
+    } else {
+      screen?.destroy();
+      screen = null;
+      notice = mountBlocked(root, { kind: next, email: session.email, onSignOut: signOutFromNotice });
+      interactivity.begin('blocked'); // PC 앱에서 로그아웃 단추를 누를 수 있게 한다
+    }
+    shown = next;
+  });
+  return {
+    destroy() {
+      stopWatch();
+      screen?.destroy();
+      screen = null;
+      notice?.destroy();
+      notice = null;
+      interactivity.end('blocked');
     },
   };
 }
@@ -285,6 +396,7 @@ createApp({
     await signInWithEmailAndPassword(auth, email, password);
   },
   signOut: () => signOut(auth),
+  resetPassword: (email) => sendReset(auth, email),
   mountMain,
 });
 

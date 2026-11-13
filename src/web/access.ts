@@ -20,6 +20,20 @@ export type AccessSource = {
   claimAdmin(uid: string, email: string): Promise<void>;
 };
 
+/** 로그인 뒤 화면: 달력, 또는 안내('none' 허가 없음, 'blocked' 중지됨). */
+export type MainScreen = 'calendar' | 'none' | 'blocked';
+
+/** 이 접근 상태에서 둘 화면. 확인 중에는 보이던 것을 그대로 둔다(달력은 확인을 기다리지 않고 먼저 뜬다). */
+export function screenFor(state: AccessState, shown: MainScreen): MainScreen {
+  if (state === 'none' || state === 'blocked') return state;
+  return state === 'checking' ? shown : 'calendar';
+}
+
+/** 주소가 #users일 때: 관리자면 사용자 관리를 연다, 보통 사용자면 달력으로 돌아간다, 아직 모르면 기다린다. */
+export function usersRoute(state: AccessState): 'open' | 'leave' | 'wait' {
+  return state === 'admin' ? 'open' : state === 'user' ? 'leave' : 'wait';
+}
+
 const MAX_CLAIM_ATTEMPTS = 2;
 
 /** 로그인한 계정의 접근 상태를 알린다. 처음은 'checking'. 끊는 함수를 돌려준다. */

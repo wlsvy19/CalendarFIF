@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, type FirebaseApp } from 'firebase/app';
 import { browserLocalPersistence, connectAuthEmulator, getAuth, indexedDBLocalPersistence, initializeAuth, type Auth } from 'firebase/auth';
 import {
   connectFirestoreEmulator,
@@ -8,7 +8,8 @@ import {
   type Firestore,
 } from 'firebase/firestore';
 
-export type FirebaseHandles = { auth: Auth; db: Firestore };
+// app은 사용자 추가가 두 번째 앱 인스턴스를 같은 설정(app.options)으로 만들 때 쓴다.
+export type FirebaseHandles = { app: FirebaseApp; auth: Auth; db: Firestore };
 
 export function initFirebase(env: Record<string, string | undefined>): FirebaseHandles {
   const app = initializeApp({
@@ -31,5 +32,5 @@ export function initFirebase(env: Record<string, string | undefined>): FirebaseH
     connectFirestoreEmulator(db, '127.0.0.1', 8085);
     connectAuthEmulator(auth, 'http://127.0.0.1:9095', { disableWarnings: true });
   }
-  return { auth, db };
+  return { app, auth, db };
 }

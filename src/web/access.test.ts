@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseAccess, watchAccess, type AccessDoc, type AccessSnapshot, type AccessSource, type AccessState } from './access';
+import { parseAccess, screenFor, usersRoute, watchAccess, type AccessDoc, type AccessSnapshot, type AccessSource, type AccessState } from './access';
 
 const doc = (extra: Partial<AccessDoc> = {}): AccessDoc => ({ email: 'a@example.com', role: 'user', disabled: false, createdAt: 1, ...extra });
 const server = (d: AccessDoc | null): AccessSnapshot => ({ doc: d, fromCache: false, hasPendingWrites: false });
@@ -174,5 +174,25 @@ describe('watchAccess: 지워진 사용자', () => {
     t.emit(server(doc({ role: 'admin' })));
     t.emit(server(null));
     expect(t.claims).toHaveLength(2);
+  });
+});
+
+describe('screenFor', () => {
+  it('허가 없음과 중지는 안내, 관리자와 사용자는 달력, 확인 중에는 보이던 것을 그대로 둔다', () => {
+    expect(screenFor('none', 'calendar')).toBe('none');
+    expect(screenFor('blocked', 'calendar')).toBe('blocked');
+    expect(screenFor('none', 'blocked')).toBe('none');
+    expect(screenFor('admin', 'blocked')).toBe('calendar');
+    expect(screenFor('user', 'none')).toBe('calendar');
+    expect(screenFor('checking', 'calendar')).toBe('calendar');
+    expect(screenFor('checking', 'blocked')).toBe('blocked');
+  });
+});
+
+describe('usersRoute', () => {
+  it('#users는 관리자면 열고, 사용자면 달력으로 돌아가고, 그 밖에는 기다린다', () => {
+    expect(usersRoute('admin')).toBe('open');
+    expect(usersRoute('user')).toBe('leave');
+    for (const s of ['checking', 'none', 'blocked'] as const) expect(usersRoute(s)).toBe('wait');
   });
 });
