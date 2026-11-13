@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "dev:emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && vite --mode emulator\"",
     "test": "vitest run --project unit --project dom",
     "typecheck": "tsc --noEmit",
     "rules:build": "tsx scripts/build-rules.ts",
