@@ -72,3 +72,14 @@ it('멈춘 채로 끝내면 등록된 것이 없다', () => {
   m.dispose();
   expect(registered.size).toBe(0);
 });
+it('멈춘 채로 화면이 사라지면 그때의 설정으로 다시 등록한다(멈춤 풀기)', () => {
+  const { reg, registered } = fakeRegistrar();
+  const m = new HotkeyManager(reg);
+  m.apply({ hideHotkey: hk('Ctrl+Alt+H'), contentHotkey: hk('Ctrl+Alt+F', false) }, acts());
+  m.setPaused(true);
+  m.apply({ hideHotkey: hk('Ctrl+Alt+H', false), contentHotkey: hk('Ctrl+Alt+F') }, acts());
+  expect(m.setPaused(false)).toEqual({ hide: 'off', content: 'ok' });
+  expect([...registered.keys()]).toEqual(['Ctrl+Alt+F']);
+  expect(m.setPaused(false)).toBeNull(); // 이미 풀려 있으면 아무 일도 없다(첫 불러오기에서도 변화가 없다)
+  expect([...registered.keys()]).toEqual(['Ctrl+Alt+F']);
+});

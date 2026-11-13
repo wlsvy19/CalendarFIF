@@ -42,7 +42,21 @@ function toBottom(hwnd: Hwnd): boolean {
 }
 
 // 창 상태가 바뀌었음을 알리는 곳(트레이 메뉴가 다시 만든다).
-export const events = { onChange: (): void => {} };
+export const events = { onChange: (): void => {}, onPageGone: (): void => {} };
+
+// 입력 상태를 보고하던 화면이 사라졌거나 새로 떴다(다시 불러옴, 렌더러 종료, 창을 닫고 다시 만듦). 새 화면에는 열린 시트가 없으므로
+// 창을 다시 입력을 받지 않는 상태로 돌리고 단축키 멈춤도 푼다. 새 화면이 곧 입력이 필요하면(로그인) 그 화면의 알림이 뒤따라 온다. 끝내는 중에는 하지 않는다.
+function pageGone(win: BrowserWindow): void {
+  if (quitting) return;
+  if (windowState.interactive) {
+    windowState.interactive = false;
+    if (!win.isDestroyed()) {
+      win.setFocusable(false);
+      keepBottom();
+    }
+  }
+  events.onPageGone();
+}
 
 export function registerAppProtocol(root: string): void {
   const headers = (file: string) => ({ 'content-type': contentType(file), 'content-security-policy': CSP });
@@ -311,9 +325,13 @@ export function createDesktopWindow(): BrowserWindow {
   win.once('ready-to-show', once);
   setTimeout(once, ATTACH_FALLBACK_MS);
 
-  win.webContents.on('render-process-gone', () => finishAdjust(false, 'reload'));
+  win.webContents.on('render-process-gone', () => {
+    finishAdjust(false, 'reload');
+    pageGone(win);
+  });
   win.webContents.on('did-finish-load', () => {
     finishAdjust(false, 'reload');
+    pageGone(win);
     sendCommand({ type: 'contentHidden', hidden: settings.contentHidden });
   });
   win.on('focus', keepBottom);
@@ -328,6 +346,7 @@ export function createDesktopWindow(): BrowserWindow {
   });
   win.on('closed', () => {
     if (win !== current) return;
+    pageGone(win);
     current = null;
     mode = null;
     reattacher.closed(quitting);

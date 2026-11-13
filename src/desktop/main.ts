@@ -166,6 +166,9 @@ if (!app.requestSingleInstanceLock()) {
     }
     applyHotkeys();
     events.onChange = refresh;
+    events.onPageGone = () => {
+      hotkeyState = hotkeys.setPaused(false) ?? hotkeyState; // 화면이 사라져 멈춤을 풀 사람이 없다
+    };
     createTray(rt.rendererDir, menuState, runAction, () => {
       if (isHidden()) runAction('toggleHidden');
     });

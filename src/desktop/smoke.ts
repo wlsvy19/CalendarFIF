@@ -334,16 +334,28 @@ async function settings(_rt: Runtime, desk: Desk): Promise<Result> {
   const registeredAfterClose = await until(() => registered() === 1, 3000) ? 1 : registered();
   const hotkey = { accelerator: saved.accelerator, state: hotkeyState, registered: globalShortcut.isRegistered(HIDE_KEY) };
 
+  // 입력 중에 화면이 사라지면(창을 없애고 다시 만드는 길) 멈춘 단축키가 다시 등록되고 창은 입력을 받지 않는다.
+  await js(win, 'window.calfifDesktop.setInteractive(true)');
+  const pausedBeforeRecreate = await until(() => win.isFocusable() && registered() === 0, 3000);
+  const createdBefore = windowsCreated();
+  win.destroy();
+  await until(() => windowsCreated() > createdBefore && getMode() === 'owned', 5000);
+  const win2 = getWindow();
+  if (win2) await until(async () => (await js(win2, RENDERED)) === 'calendar', 15000);
+  const registeredAfterRecreate = await until(() => registered() === 1, 3000) ? 1 : registered();
+  const focusableAfterRecreate = win2 ? win2.isFocusable() : null;
+
   // 시험이 끝나면 단축키를 풀고 설정도 되돌린다.
   desk.applySystem({ hideHotkey: { accelerator: HIDE_KEY, enabled: false } });
   const noneRegistered = registered() === 0;
 
-  const fields = { opened, tabs, interactiveWhileOpen, cellBg, savedTransparency, hotkey, registeredWhileInteractive, registeredWhileInteractiveAfterApply, registeredAfterClose, startSwitchDisabled, noneRegistered, closed, interactiveAfterClose, atBottomAfterClose, loginItemCalls };
+  const fields = { opened, tabs, interactiveWhileOpen, cellBg, savedTransparency, hotkey, registeredWhileInteractive, registeredWhileInteractiveAfterApply, registeredAfterClose, pausedBeforeRecreate, registeredAfterRecreate, focusableAfterRecreate, startSwitchDisabled, noneRegistered, closed, interactiveAfterClose, atBottomAfterClose, loginItemCalls };
   const checks = {
     opened, tabs: JSON.stringify(tabs) === JSON.stringify(['캘린더', '셀', '글꼴 및 색상', '고급', '계정']), interactiveWhileOpen,
     cellBg: cellBg === 'rgba(20, 24, 32, 0.7)', savedTransparency: savedTransparency === 30,
     hotkey: hotkey.accelerator === HIDE_KEY && hotkey.state === 'ok' && hotkey.registered, startSwitchDisabled,
-    registeredWhileInteractive: registeredWhileInteractive === 0 && registeredWhileInteractiveAfterApply === 0, registeredAfterClose: registeredAfterClose === 1, noneRegistered, closed,
+    registeredWhileInteractive: registeredWhileInteractive === 0 && registeredWhileInteractiveAfterApply === 0, registeredAfterClose: registeredAfterClose === 1,
+    pausedBeforeRecreate, registeredAfterRecreate: registeredAfterRecreate === 1, focusableAfterRecreate: focusableAfterRecreate === false, noneRegistered, closed,
     interactiveAfterClose: interactiveAfterClose === false, atBottomAfterClose, loginItemCalls: loginItemCalls === 0,
   };
   return { fields, checks };
