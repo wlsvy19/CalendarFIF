@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { FAKE_HOST_MARKER } from '../src/widget/fakeHost';
-import { bundleProblems, finishBundle, versionText } from './build-widget';
+import { FAKE_HOST_MARKER, makeFakeHost } from '../src/widget/fakeHost';
+import { bundleProblems, finishBundle, startProblems, versionText } from './build-widget';
 
 const iife = 'var CalendarFIFWidget = (function(exports) {\n\texports.run = async () => {};\n\treturn exports;\n})({});';
 const VERSION = '0.4.0 (2026-11-14)';
@@ -83,5 +83,59 @@ describe('bundleProblems', () => {
 
   it('가짜 호스트의 표지', () => {
     expect(problems(`${ok}\n// ${FAKE_HOST_MARKER}`)).toContain('가짜 호스트');
+  });
+});
+
+describe('시작 줄과 Host', () => {
+  it('시작 줄이 넘기는 이름은 가짜 호스트의 키(state 빼고)와 같다', () => {
+    const line = finishBundle(iife, VERSION).split('\n').find((l) => l.startsWith('await CalendarFIFWidget.run('))!;
+    const names = /^await CalendarFIFWidget\.run\(\{ ([^}]*) \}/.exec(line)![1].split(', ');
+    expect(names).toHaveLength(new Set(names).size);
+    expect([...names].sort()).toEqual(Object.keys(makeFakeHost()).filter((k) => k !== 'state').sort());
+  });
+});
+
+describe('startProblems: 묶은 파일을 가짜 Scriptable에서 한 번 실행해 본다', () => {
+  // 로그인 전의 위젯처럼 위젯 하나를 두는 작은 묶음.
+  const good = [
+    'var CalendarFIFWidget = (function(exports) {',
+    '\texports.run = async (host, cfg) => {',
+    '\t\tconst w = new host.ListWidget();',
+    '\t\tw.addText(host.Keychain.contains("calendarfif.refreshToken") ? "로그인됨" : cfg.version);',
+    '\t\thost.Script.setWidget(w);',
+    '\t};',
+    '\treturn exports;',
+    '})({});',
+  ].join('\n');
+  const problems = async (script: string): Promise<string> => (await startProblems(script)).join('\n');
+
+  it('잘 만든 파일은 문제가 없다', async () => {
+    expect(await startProblems(finishBundle(good, VERSION))).toEqual([]);
+  });
+
+  it('시작 줄의 전역 이름이 틀리면', async () => {
+    const script = finishBundle(good, VERSION).replace('ListWidget, FileManager', 'ListWidgets, FileManager');
+    expect(script).toContain('{ Keychain, Request, Alert, DrawContext, ListWidgets, FileManager,');
+    expect(await problems(script)).toContain('ListWidgets is not defined');
+  });
+
+  it('run이 없으면', async () => {
+    const out = await problems(finishBundle(good.replace('exports.run = ', 'exports.start = '), VERSION));
+    expect(out).toContain('CalendarFIFWidget.run is not a function');
+    expect(out).toContain('위젯을 0번 두었다');
+  });
+
+  it('위젯을 두지 않거나 두 번 두면', async () => {
+    expect(await problems(finishBundle(good.replace('host.Script.setWidget(w);', ''), VERSION))).toContain('위젯을 0번 두었다');
+    expect(await problems(finishBundle(good.replace('host.Script.setWidget(w);', 'host.Script.setWidget(w); host.Script.setWidget(w);'), VERSION))).toContain('위젯을 2번 두었다');
+  });
+
+  it('Script.complete()가 없으면', async () => {
+    const script = finishBundle(good, VERSION).replace('Script.complete();', '');
+    expect(await problems(script)).toContain('Script.complete()');
+  });
+
+  it('run이 던지면', async () => {
+    expect(await problems(finishBundle(good.replace('const w = ', 'throw new Error("시작 시험 오류"); const w = '), VERSION))).toContain('시작 시험 오류');
   });
 });
