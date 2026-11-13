@@ -11,7 +11,8 @@
     "rules:build": "tsx scripts/build-rules.ts",
     "emu": "tsx scripts/emu.ts",
     "test:emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"vitest run --project emulator\"",
-    "import": "tsx src/importer/cli.ts"
+    "import": "tsx src/importer/cli.ts",
+    "deploy": "npm run build && tsx scripts/build-rules.ts && firebase deploy --only hosting,firestore:rules"
   },
   "dependencies": {
     "firebase": "^13.3.0"
