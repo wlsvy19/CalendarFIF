@@ -26,7 +26,7 @@ Windows PC와 아이폰에서 날짜별 메모와 날짜 배경색을 양방향�
 | `npm run desktop:pack:emu` | 에뮬레이터용으로 꾼 앱을 `build/release-emu/`에 만든다. 실제 프로젝트에는 붙지 않고 Windows 시작 시 실행도 걸지 않는다. |
 | `npm run desktop:pack:check` | 위에서 꾼 앱을 시험 실행으로 점검한다. `$env:CALFIF_SMOKE='e2e'; npm run desktop:pack:check`로 돌리면 에뮬레이터에서 한 편집이 5초 안에 오가는지까지 본다. |
 
-폰 크기 창은 터치 입력을 흉내 낸 Chromium(Edge)이다. 아이폰 Safari 자체, 아이폰 키보드, 홈 화면에 추가한 앱은 아이폰에서만 확인할 수 있다.
+폰 크기 창은 터치 입력을 흉내 낸 Chromium(Edge)이다. 아이폰 Safari 자체, 아이폰 키보드, 홈 화면에 추가한 앱은 아이폰에서만 확인할 수 있다. 폰 크기 창(Edge)과 아이폰은 넘기는 느낌이 다르다. 부드러운 정도는 아이폰에서 봐야 한다.
 
 에뮬레이터에는 Java 21 이상이 필요하다. PC의 Java가 더 낮으면 `npx tsx scripts/jdk.ts`가 JDK 21을 `.tools/`에 내려받는다.
 
