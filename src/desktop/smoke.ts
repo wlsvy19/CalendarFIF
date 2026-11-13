@@ -426,7 +426,7 @@ async function settings(_rt: Runtime, desk: Desk): Promise<Result> {
 
   // 제목 줄을 진짜 마우스 입력(sendInputEvent)으로 끈다: 옮겨지고, 창 밖으로 끌어도 안에 남고, 닫았다 열면 그 자리이고, 닫기는 여전히 된다.
   const sheetRect = () => js(win, "(() => { const r = document.querySelector('.desk-settings').getBoundingClientRect(); const b = document.querySelector('.desk-settings .sheet-bar').getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, barX: b.left + 20, barY: b.top + b.height / 2, w: window.innerWidth, h: window.innerHeight }; })()") as Promise<SheetBox>;
-  const mouse = (type: 'mouseDown' | 'mouseMove' | 'mouseUp', x: number, y: number) => win.webContents.sendInputEvent({ type, x: Math.round(x), y: Math.round(y), button: 'left', clickCount: 1 });
+  const mouse = (type: 'mouseDown' | 'mouseMove' | 'mouseUp', x: number, y: number) => win.webContents.sendInputEvent({ type, x: Math.round(x), y: Math.round(y), button: 'left', clickCount: 1, modifiers: type === 'mouseUp' ? [] : ['leftButtonDown'] });
   const dragBar = async (from: SheetBox, toX: number, toY: number) => {
     mouse('mouseDown', from.barX, from.barY);
     await sleep(50);
@@ -520,7 +520,7 @@ async function settings(_rt: Runtime, desk: Desk): Promise<Result> {
   desk.applySystem({ hideHotkey: { accelerator: HIDE_KEY, enabled: false } });
   const noneRegistered = registered() === 0;
 
-  const fields = { opened, sheetDragged, sheetClamped, sheetRemembered, closeStillWorks, tabs, interactiveWhileOpen, cellBg, savedTransparency, hotkey, registeredWhileInteractive, registeredWhileInteractiveAfterApply, registeredAfterClose, pausedBeforeRecreate, registeredAfterRecreate, focusableAfterRecreate, reloadFocusable, reloadRegistered, startSwitchDisabled, noneRegistered, closed, interactiveAfterClose, atBottomAfterClose, loginItemCalls };
+  const fields = { before, moved, far, again, opened, sheetDragged, sheetClamped, sheetRemembered, closeStillWorks, tabs, interactiveWhileOpen, cellBg, savedTransparency, hotkey, registeredWhileInteractive, registeredWhileInteractiveAfterApply, registeredAfterClose, pausedBeforeRecreate, registeredAfterRecreate, focusableAfterRecreate, reloadFocusable, reloadRegistered, startSwitchDisabled, noneRegistered, closed, interactiveAfterClose, atBottomAfterClose, loginItemCalls };
   const checks = {
     opened, sheetDragged, sheetClamped, sheetRemembered, closeStillWorks, tabs: JSON.stringify(tabs) === JSON.stringify(['캘린더', '셀', '글꼴 및 색상', '고급', '계정']), interactiveWhileOpen,
     cellBg: cellBg === 'rgba(20, 24, 32, 0.7)', savedTransparency: savedTransparency === 30,
