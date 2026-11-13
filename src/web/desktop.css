@@ -1,0 +1,142 @@
+/* PC 앱(데스크톱 빌드)의 투명한 화면. index.html의 <html>에 desk 클래스가 붙은 빌드에서만 적용된다.
+   --desk-* 변수는 모양 설정(appearanceVars)이 <html>과 달력에 넣는다. 규칙은 모두 :root.desk 아래에 둬서 웹앱에는 닿지 않는다. */
+
+/* index.html의 color-scheme: light dark가 투명한 창에 바탕을 칠하지 않게 한다. */
+:root.desk { color-scheme: normal; overflow: hidden; }
+:root.desk,
+:root.desk body,
+:root.desk #app,
+:root.desk .app,
+:root.desk .login { background: transparent; }
+:root.desk .app { padding: 6px 8px 8px; }
+:root.desk .calendar { height: 100vh; padding-bottom: 8px; }
+
+/* 머리: 한 줄. 왼쪽에 2026년 11월, 단추, 오른쪽 끝에 동기화 상태 */
+:root.desk .app-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px 6px;
+  color: var(--desk-cal-ink);
+}
+:root.desk .app-meta { display: contents; color: inherit; }
+:root.desk .app-head .year { order: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+:root.desk .app-head h2 { order: 1; margin-right: 6px; font-size: 18px; line-height: 1.2; }
+:root.desk .app-nav { order: 2; gap: 4px; }
+:root.desk .app-nav [aria-label^="이전"] { order: 0; }
+:root.desk .app-nav .pill { order: 1; }
+:root.desk .app-nav [aria-label^="다음"] { order: 2; }
+:root.desk .app-nav [aria-label="메뉴"] { order: 3; }
+:root.desk .sync { order: 3; margin-left: auto; font-size: 11px; color: var(--desk-cal-ink); opacity: 0.75; }
+:root.desk .pill,
+:root.desk .iconbtn { color: var(--desk-btn); }
+:root.desk .pill { height: 28px; padding: 0 11px; font-size: 13px; background: color-mix(in srgb, var(--desk-btn) 18%, transparent); }
+:root.desk .iconbtn { width: 30px; height: 30px; }
+:root.desk .iconbtn:hover,
+:root.desk .pill:hover { background: color-mix(in srgb, var(--desk-btn) 28%, transparent); }
+
+/* 요일 줄과 격자 */
+:root.desk .dow {
+  column-gap: var(--desk-gap);
+  padding-bottom: 3px;
+  border-bottom: 0;
+  font-size: var(--desk-cal-size);
+  color: var(--desk-cal-ink);
+}
+:root.desk .dow .sun,
+:root.desk .dow .sat { color: var(--desk-cal-ink); }
+:root.desk .grid { gap: var(--desk-gap); background: transparent; border-bottom: 0; }
+:root.desk .wk { background: transparent; color: var(--desk-cal-ink); font-size: var(--desk-cal-size); }
+:root.desk .calendar .cell {
+  padding: 5px 6px 3px;
+  gap: 2px;
+  border-radius: 4px;
+  background: var(--desk-cell-bg);
+  color: var(--desk-memo-ink);
+  cursor: default;
+}
+:root.desk .calendar .cell.rest { background: var(--desk-rest-bg); }
+:root.desk .calendar .cell[data-color] { background: color-mix(in srgb, var(--day-color) var(--desk-day-pct), transparent); }
+:root.desk .calendar .cell.today { box-shadow: inset 0 0 0 2px var(--desk-today); }
+:root.desk .calendar.month-gap .m-top { margin-top: 6px; }
+:root.desk .calendar.month-gap .m-left { margin-left: 6px; }
+
+/* 날짜 머리: 숫자, 공휴일 이름, 음력을 한 줄에 */
+:root.desk .calendar .head { display: flex; align-items: baseline; gap: 4px; min-width: 0; }
+:root.desk .calendar .cell .num {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: var(--desk-cal-size);
+  line-height: 1.25;
+  color: var(--desk-cal-ink);
+}
+:root.desk .calendar .cell.rest .num,
+:root.desk .calendar .hname { color: var(--desk-holiday-ink); }
+:root.desk .calendar .hname { font-size: calc(var(--desk-cal-size) - 2px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:root.desk .calendar .lunar { margin-left: auto; font-size: calc(var(--desk-cal-size) - 2px); color: var(--desk-lunar-ink); white-space: nowrap; }
+
+/* 메모 줄 */
+:root.desk .calendar .ln {
+  height: calc(var(--desk-memo-size) * var(--desk-line));
+  font-size: var(--desk-memo-size);
+  line-height: calc(var(--desk-memo-size) * var(--desk-line));
+  letter-spacing: normal;
+  color: var(--desk-memo-ink);
+}
+:root.desk .calendar.shadow { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85); }
+:root.desk .calendar[data-bullet="number"] .memo { counter-reset: ln; }
+:root.desk .calendar[data-bullet="number"] .ln:not(.more)::before { counter-increment: ln; content: counter(ln) ". "; }
+:root.desk .calendar[data-bullet="dot"] .ln:not(.more)::before { content: "• "; }
+:root.desk.content-hidden .memo { visibility: hidden; }
+
+/* 편집과 설정 시트: 창 폭과 상관없이 가운데 상자. 창이 520px보다 좁으면 가장자리에 12px씩 남긴다. */
+:root.desk .sheet {
+  top: 50%;
+  left: 50%;
+  right: auto;
+  width: 480px;
+  height: auto;
+  max-height: min(640px, calc(100vh - 48px));
+  transform: translate(-50%, -50%);
+  border-radius: 18px;
+  padding-bottom: 20px;
+  animation: none;
+}
+:root.desk .memo-input { min-height: 200px; }
+@media (max-width: 519.98px) {
+  :root.desk .sheet { width: calc(100vw - 24px); }
+}
+
+/* 칸 메뉴 */
+:root.desk .cellmenu {
+  position: fixed;
+  z-index: 30;
+  min-width: 160px;
+  max-width: calc(100vw - 8px);
+  padding: 4px;
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 8px 24px var(--shadow);
+}
+:root.desk .cellmenu-item {
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+:root.desk .cellmenu-item:hover,
+:root.desk .cellmenu-item:focus-visible { background: var(--surface-2); outline: none; }
+:root.desk .cellmenu-swatches { display: grid; grid-template-columns: repeat(6, 22px); gap: 6px; padding: 6px 10px; }
+:root.desk .cellmenu .swatch { width: 22px; height: 22px; }

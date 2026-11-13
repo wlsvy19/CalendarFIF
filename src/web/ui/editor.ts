@@ -28,7 +28,7 @@ export function mountEditor(
     onSave(next: DayValue): void;
     onCancel(): void;
   },
-  env?: { visualViewport?: VisualViewportLike | null },
+  env?: { visualViewport?: VisualViewportLike | null; focusText?: boolean },
 ): { destroy(): void } {
   const viewport = env?.visualViewport === undefined ? (window.visualViewport ?? null) : env.visualViewport;
   const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -167,7 +167,7 @@ export function mountEditor(
 
   root.append(scrim, sheet);
   document.documentElement.classList.add('sheet-open');
-  if (window.innerWidth >= WIDE_PX) {
+  if (env?.focusText || window.innerWidth >= WIDE_PX) {
     area.focus();
     area.setSelectionRange(area.value.length, area.value.length);
   } else {

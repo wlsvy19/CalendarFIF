@@ -112,3 +112,12 @@ it('보이는 영역의 높이와 위치를 편집 화면에 넘긴다', () => {
   handle.destroy();
   expect([...listeners.values()].every((set) => set.size === 0)).toBe(true);
 });
+it('PC 앱에서는 창이 좁아도 메모 칸에 바로 입력한다', () => {
+  vi.stubGlobal('innerWidth', 600);
+  const root = document.createElement('div');
+  document.body.append(root);
+  const handle = mountEditor(root, { dateKey: '2026-11-13', value: { text: '가', color: '' }, onSave: vi.fn(), onCancel: vi.fn() }, { visualViewport: null, focusText: true });
+  expect(document.activeElement).toBe(root.querySelector('textarea'));
+  handle.destroy();
+  vi.unstubAllGlobals();
+});

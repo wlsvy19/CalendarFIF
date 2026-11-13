@@ -2,6 +2,7 @@ import { shiftMonth } from '../../core/dates';
 import { holidayLabel } from '../../core/holidays';
 import { buildPage, pageMonths, stepPage, type Page } from '../../core/layout';
 import { lunarLabel } from '../../core/lunar';
+import type { Point } from '../../desktop/api';
 import { parseLine, splitLines } from '../../core/text';
 import type { SyncStatus } from '../../sync/engine';
 import { applyAppearance, pageOptions, WEB_APPEARANCE, type Appearance } from '../appearance';
@@ -15,6 +16,8 @@ const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
 const chevron = (path: string): string =>
   `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"></path></svg>`;
+const DOTS =
+  '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="19" cy="12" r="2"></circle></svg>';
 const GEAR =
   '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg>';
 
@@ -40,6 +43,8 @@ export type CalendarDeps = {
   onOpenDay(dateKey: string): void;
   onOpenSettings(): void;
   appearance?: Appearance;
+  /** PC 앱에서만 준다. 두 번 눌러 열고, 오른쪽 클릭은 칸 메뉴, 설정 단추 대신 메뉴 단추를 둔다. */
+  desktop?: { onDayMenu(dateKey: string, at: Point): void; onOpenMenu(at: Point): void };
 };
 
 export type CalendarHandle = { destroy(): void; setAppearance(a: Appearance): void; goToday(): void; showMonth(monthId: string): void };
@@ -73,7 +78,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
         <button type="button" class="pill">오늘</button>
         <button type="button" class="iconbtn" aria-label="이전 달">${chevron('M15 5l-7 7 7 7')}</button>
         <button type="button" class="iconbtn" aria-label="다음 달">${chevron('M9 5l7 7-7 7')}</button>
-        <button type="button" class="iconbtn" aria-label="설정">${GEAR}</button>
+        <button type="button" class="iconbtn" aria-label="${deps.desktop ? '메뉴' : '설정'}">${deps.desktop ? DOTS : GEAR}</button>
       </div>
     </div>
     <div class="dow" aria-hidden="true"></div>
@@ -234,17 +239,33 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   };
 
   pager.addEventListener('click', (event) => {
-    if (swiped) return;
+    if (swiped || deps.desktop) return; // PC 앱은 한 번 눌러서는 열지 않는다
     // 누르는 사이에 칸이 다시 그려지면 target이 격자가 된다. 누른 자리의 칸을 찾아 쓴다.
     let cell = (event.target as Element).closest<HTMLElement>('.cell');
     if (!cell) cell = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('.cell') ?? null;
     if (cell?.dataset.key) deps.onOpenDay(cell.dataset.key);
   });
+  if (deps.desktop) {
+    const desktop = deps.desktop;
+    const cellKey = (event: MouseEvent): string | undefined => (event.target as Element).closest<HTMLElement>('.cell')?.dataset.key;
+    pager.addEventListener('dblclick', (event) => {
+      const key = cellKey(event);
+      if (key) deps.onOpenDay(key);
+    });
+    pager.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      const key = cellKey(event);
+      if (key) desktop.onDayMenu(key, { x: event.clientX, y: event.clientY });
+    });
+  }
   // 미끄러지는 중에 버튼을 누르면 그 미끄러짐을 먼저 끝내고 그 달에서 이어 간다.
   prevBtn.addEventListener('click', () => { settle?.finish(); showAnchor(step(-1), true); });
   nextBtn.addEventListener('click', () => { settle?.finish(); showAnchor(step(1), true); });
   todayBtn.addEventListener('click', goToday);
-  settingsBtn.addEventListener('click', () => deps.onOpenSettings());
+  settingsBtn.addEventListener('click', (event) => {
+    if (deps.desktop) deps.desktop.onOpenMenu({ x: event.clientX, y: event.clientY });
+    else deps.onOpenSettings();
+  });
 
   const frame = env.frame ?? ((cb: () => void) => void requestAnimationFrame(cb));
   const reducedMotion = env.reducedMotion ?? (() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -311,6 +332,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
 
   pager.addEventListener('pointerdown', (e) => {
     settle?.finish();
+    if (deps.desktop && e.pointerType === 'mouse') return; // 마우스 끌기가 달을 넘기지 않게 한다
     if (drag) {
       // 놓은 신호를 못 받은 낡은 끌기는 버리고 새로 시작한다.
       drag = null;
@@ -422,11 +444,12 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     },
     goToday,
     // 열려는 날짜의 달로 간다. 전체 월은 늘 그 달로 넘어가고, 다른 배치는 이미 구독 중이면(보이는 쪽에 있으면) 그대로 둔다.
+    // 넘어갈 때는 탐색과 같은 길(showAnchor)로 가야 쪽이 걸친 달도 구독한다.
     showMonth(monthId) {
       if (appearance.layout !== 'month' && store.covers(monthId)) return;
-      store.show(monthId);
-      extraMonths = [];
-      render();
+      settle?.finish();
+      const today = deps.today();
+      showAnchor(monthId === today.slice(0, 7) ? today : `${monthId}-01`, true);
     },
     destroy() {
       offChange();

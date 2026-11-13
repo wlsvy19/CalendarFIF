@@ -1,5 +1,8 @@
 node_modules/
 dist/
+dist-desktop/
+dist-desktop-emu/
+release/
 build/
 .tools/
 .superpowers/

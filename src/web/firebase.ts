@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { connectAuthEmulator, getAuth, type Auth } from 'firebase/auth';
+import { browserLocalPersistence, connectAuthEmulator, getAuth, indexedDBLocalPersistence, initializeAuth, type Auth } from 'firebase/auth';
 import {
   connectFirestoreEmulator,
   initializeFirestore,
@@ -22,7 +22,11 @@ export function initFirebase(env: Record<string, string | undefined>): FirebaseH
     localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
     ...(forceLongPolling ? { experimentalForceLongPolling: true } : { experimentalAutoDetectLongPolling: true }),
   });
-  const auth = getAuth(app);
+  // PC 앱은 팝업과 리디렉트 처리기 없이 만든다. 그 처리기가 Auth 도메인의 페이지를 읽기 때문이다.
+  const auth =
+    env.VITE_DESKTOP === '1'
+      ? initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] })
+      : getAuth(app);
   if (env.VITE_USE_EMULATOR === '1') {
     connectFirestoreEmulator(db, '127.0.0.1', 8085);
     connectAuthEmulator(auth, 'http://127.0.0.1:9095', { disableWarnings: true });

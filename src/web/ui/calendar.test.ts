@@ -280,3 +280,49 @@ describe('구독과 날짜 열기', () => {
     expect([store.current(), title(root)]).toEqual(['2027-06', '6월']);
   });
 });
+it('PC 앱에서는 두 번 눌러야 열고, 오른쪽 클릭은 칸 메뉴, 메뉴 단추는 앱 메뉴', () => {
+  const root = document.createElement('div');
+  const onOpenDay = vi.fn(), onDayMenu = vi.fn(), onOpenMenu = vi.fn();
+  mountCalendar(root, { store: fakeStore({}), status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} }, today: () => '2026-11-13', onOpenDay, onOpenSettings: vi.fn(), appearance: DEFAULT_APPEARANCE, desktop: { onDayMenu, onOpenMenu } });
+  const day = cell(root, '2026-11-20');
+  day.click();
+  expect(onOpenDay).not.toHaveBeenCalled();
+  day.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+  expect(onOpenDay).toHaveBeenCalledWith('2026-11-20');
+  const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 50 });
+  day.dispatchEvent(ev);
+  expect([ev.defaultPrevented, onDayMenu.mock.calls[0], root.querySelector('[aria-label="설정"]')]).toEqual([true, ['2026-11-20', { x: 40, y: 50 }], null]);
+  root.querySelector('[aria-label="메뉴"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 600, clientY: 20 }));
+  expect(onOpenMenu).toHaveBeenCalledWith({ x: 600, y: 20 });
+});
+it('PC 앱에서 마우스 끌기는 달을 넘기지 않는다', () => {
+  const root = document.createElement('div');
+  const store = fakeStore({});
+  const onOpenDay = vi.fn();
+  mountCalendar(root, { store, status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} }, today: () => '2026-11-13', onOpenDay, onOpenSettings: vi.fn(), appearance: { ...DEFAULT_APPEARANCE, layout: 'month' }, desktop: { onDayMenu: vi.fn(), onOpenMenu: vi.fn() } }, { reducedMotion: () => true });
+  const pager = root.querySelector<HTMLElement>('.pager')!;
+  const at = (type: string, x: number) => pager.dispatchEvent(Object.assign(new MouseEvent(type, { bubbles: true, clientX: x, clientY: 100 }), { pointerId: 1, pointerType: 'mouse' }));
+  at('pointerdown', 300); at('pointermove', 100); at('pointerup', 100);
+  expect([store.current(), root.querySelector('.month')!.textContent]).toEqual(['2026-11', '11월']);
+});
+it('덮여 있지 않은 달을 열면 쪽의 여분 달도 구독한다', () => {
+  const root = document.createElement('div');
+  let month = '2026-11';
+  const subscribed = new Set<string>();
+  const store = {
+    current: () => month,
+    show: vi.fn((m: string, also: string[] = []) => {
+      month = m;
+      subscribed.clear();
+      for (const x of [shiftMonth(m, -1), m, shiftMonth(m, 1), ...also]) subscribed.add(x);
+    }),
+    covers: (m: string) => subscribed.has(m),
+    days: () => ({}),
+    onChange: () => () => {},
+    readProblem: () => null,
+  } as unknown as CalendarStore & { show: ReturnType<typeof vi.fn> };
+  const handle = mountCalendar(root, { store, status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} }, today: () => '2026-11-13', onOpenDay: vi.fn(), onOpenSettings: vi.fn(), appearance: { ...DEFAULT_APPEARANCE, layout: 'floating', maxRows: 8, pastWeeks: 0 } });
+  handle.showMonth('2027-06');
+  handle.showMonth('2026-11'); // 오늘의 달: 쪽은 오늘 주부터 시작해 2027-01까지 간다
+  expect([store.show.mock.lastCall, subscribed.has('2027-01')]).toEqual([['2026-11', ['2027-01']], true]);
+});
