@@ -77,7 +77,6 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
     void signOut(auth);
   };
   const openSettings = (): void => {
-    interactivity.begin('settings');
     settings = mountSettings(root, {
       email: session.email,
       pending: engine.status().pending,
@@ -89,6 +88,7 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
       },
       onSignOut: signOutNow,
     });
+    interactivity.begin('settings');
   };
   const backToCalendar = (): void => {
     if (pushedByApp) history.back();
@@ -98,7 +98,6 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
     const { monthId, day } = splitDateKey(dateKey)!;
     // 편집 화면이 처음 보여 준 값이 base다. 서버 문서를 따로 읽지 않는다.
     const base = store.days(monthId)[day] ?? EMPTY_DAY;
-    interactivity.begin('editor');
     const handle = mountEditor(root, {
       dateKey,
       value: base,
@@ -115,6 +114,7 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
       },
     }, DESKTOP ? { focusText: true } : undefined);
     editor = { dateKey, handle };
+    interactivity.begin('editor');
   };
   const syncRoute = (): void => {
     const route = parseHash(location.hash);
@@ -189,14 +189,18 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
     appearance,
     desktop: DESKTOP ? { onDayMenu: openCellMenu, onOpenMenu: (at) => bridge?.showMenu(at) } : undefined,
   });
+  // 앱 메뉴의 명령으로 여는 설정은 열려 있던 편집 화면을 먼저 닫고, 닫으면 늘 달력으로 간다(앞 기록의 날짜 주소로 돌아가지 않는다).
+  const openSettingsFromCommand = (): void => {
+    closeEditor();
+    pushedByApp = false;
+    location.hash = 'settings';
+  };
   if (DESKTOP) {
     deskActions = {
       goToday: () => calendar.goToday(),
-      openSettings: () => {
-        location.hash = 'settings';
-      },
+      openSettings: openSettingsFromCommand,
       // 보내지 못한 편집이 남아 있으면 로그아웃으로 잃지 않도록 설정 화면(대기 건수 안내)을 연다.
-      signOut: () => (engine.status().pending === 0 ? signOutNow() : void (location.hash = 'settings')),
+      signOut: () => (engine.status().pending === 0 ? signOutNow() : openSettingsFromCommand()),
     };
   }
   syncRoute();

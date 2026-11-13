@@ -271,6 +271,7 @@ describe('구독과 날짜 열기', () => {
     const { root, store, handle } = mountS(undefined);
     handle.showMonth('2026-12');
     expect([store.current(), title(root)]).toEqual(['2026-12', '12월']);
+    expect(store.show.mock.calls).toEqual([['2026-12']]); // 22f46ba와 같은 호출
   });
   it('다른 배치는 보이는 쪽에 있는 날짜를 열어도 쪽을 바꾸지 않는다', () => {
     const { root, store, handle } = mountS({ layout: 'floating' });

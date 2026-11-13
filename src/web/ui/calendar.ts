@@ -446,7 +446,13 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     // 열려는 날짜의 달로 간다. 전체 월은 늘 그 달로 넘어가고, 다른 배치는 이미 구독 중이면(보이는 쪽에 있으면) 그대로 둔다.
     // 넘어갈 때는 탐색과 같은 길(showAnchor)로 가야 쪽이 걸친 달도 구독한다.
     showMonth(monthId) {
-      if (appearance.layout !== 'month' && store.covers(monthId)) return;
+      if (appearance.layout === 'month') {
+        store.show(monthId);
+        extraMonths = [];
+        render();
+        return;
+      }
+      if (store.covers(monthId)) return;
       settle?.finish();
       const today = deps.today();
       showAnchor(monthId === today.slice(0, 7) ? today : `${monthId}-01`, true);
