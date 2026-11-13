@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Config } from './api';
-import { drawnTexts, makeFakeHost, nativeTexts, widgetRecord, type FakeAnswer, type FakeNode, type FakeHost, type FakeOptions, type FakeRequest } from './fakeHost';
+import { drawnTexts, makeFakeHost, nativeTexts, widgetRecord, type FakeAnswer, type FakeNode, type FakeHost, type FakeOptions, type FakeRequest, type FakeWidgetRecord } from './fakeHost';
 import { readCache, run } from './main';
 
 const cfg: Config = { projectId: 'demo-calfif', apiKey: 'demo-key', appUrl: 'https://example.test/' };
@@ -25,6 +25,14 @@ const make = (o: FakeOptions, b?: Backend): FakeHost => makeFakeHost({ handler: 
 const makeNative = (o: FakeOptions, b?: Backend): FakeHost => makeFakeHost({ handler: backend(b), ...o });
 const loggedIn = { [REFRESH]: 'RT1', [UID]: 'owner-test-uid' };
 const lastWidget = (h: FakeHost) => widgetRecord(h.state.setWidgets.at(-1));
+/** 위젯 하나에 놓인 글자(상자 안까지, 놓은 차례대로). */
+const textsOf = (rec: FakeWidgetRecord): string[] => {
+  const walk = (nodes: FakeNode[]): string[] => nodes.flatMap((n) => (n.kind === 'text' ? [n.text] : n.kind === 'stack' ? walk(n.children) : []));
+  return walk(rec.children);
+};
+const shownInApp = (h: FakeHost): FakeWidgetRecord => h.state.widgets.find((w) => w.presented !== null)!;
+/** 앱에서 보여 준 위젯의 크기들. 한 번만 보여 줘야 한다. */
+const presented = (h: FakeHost) => h.state.widgets.filter((w) => w.presented !== null).map((w) => w.presented);
 
 describe('위젯으로 실행', () => {
   it('토큰이 없으면 요청 없이 로그인 안내 위젯', async () => {
@@ -112,13 +120,13 @@ describe('위젯으로 실행', () => {
     expect(drawnTexts(host)).toContain('그리기 시험 오류');
   });
 
-  it('오류 메시지는 28자씩 3줄까지만 쓴다', async () => {
+  it('오류 메시지는 28자씩 5줄까지만 쓴다', async () => {
     const host = make({ keychain: loggedIn });
-    host.Keychain.get = () => { throw new Error('나'.repeat(120)); };
+    host.Keychain.get = () => { throw new Error('나'.repeat(200)); };
     await run(host, cfg, now);
-    // 28자 3줄 = 84자만 남고(장면이 폭에 맞춰 다시 나눈다) 나머지는 버린다.
+    // 28자 5줄 = 140자만 남고(장면이 폭에 맞춰 다시 나눈다) 나머지는 버린다.
     const lines = drawnTexts(host).filter((t) => t.startsWith('나'));
-    expect(lines.join('')).toBe('나'.repeat(84));
+    expect(lines.join('')).toBe('나'.repeat(140));
   });
 });
 
@@ -290,18 +298,28 @@ describe('일시적인 거절은 로그아웃시키지 않는다', () => {
 });
 
 describe('마지막 수단', () => {
-  it('오류 위젯도 그리지 못하면 빈 위젯을 두고 던지지 않는다', async () => {
+  it('그림 오류 위젯도 그리지 못하면 기본 부품으로 오류 내용을 보이고 던지지 않는다', async () => {
     const host = make({ keychain: loggedIn, failDrawing: 99 });
     await expect(run(host, cfg, now)).resolves.toBeUndefined();
     expect(host.state.setWidgets).toHaveLength(1);
     expect(host.state.contexts).toEqual([]);
+    expect(textsOf(lastWidget(host))).toEqual(['오류', '그리기 시험 오류']);
     expect(widgetRecord(host.state.setWidgets[0]).props.url).toBe('https://example.test/');
   });
 
-  it('앱에서도 빈 위젯을 보여 준다', async () => {
+  it('앱에서도 기본 부품으로 오류 내용을 보여 준다', async () => {
     const host = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: 0 }], failDrawing: 99 });
     await expect(run(host, cfg, now)).resolves.toBeUndefined();
-    expect(host.state.widgets.at(-1)!.presented).toBe('large');
+    expect(presented(host)).toEqual(['large']);
+    expect(host.state.setWidgets).toEqual([]);
+    expect(nativeTexts(host)).toEqual(['오류', '그리기 시험 오류']);
+  });
+
+  it('그림도 기본 부품도 안 되면 글자만 있는 위젯에 오류와 메시지', async () => {
+    const host = make({ keychain: loggedIn, failDrawing: 99, failTexts: 1 });
+    await expect(run(host, cfg, now)).resolves.toBeUndefined();
+    expect(host.state.setWidgets).toHaveLength(1);
+    expect(textsOf(lastWidget(host))).toEqual(['오류', '그리기 시험 오류']);
   });
 });
 
@@ -394,13 +412,14 @@ describe('기본 부품 위젯(기본)', () => {
     expect(nativeTexts(denied)).toContain('권한이 없습니다');
   });
 
-  it('오류가 나면 오류 위젯, 메시지는 28자씩 3줄까지', async () => {
+  it('오류가 나면 오류 위젯, 메시지는 28자씩 5줄까지', async () => {
     const host = makeNative({ keychain: loggedIn });
-    host.Keychain.get = () => { throw new Error('나'.repeat(120)); };
+    host.Keychain.get = () => { throw new Error('나'.repeat(200)); };
     await run(host, cfg, now);
     const texts = nativeTexts(host);
     expect(texts[0]).toBe('오류');
-    expect(texts.slice(1).join('')).toBe('나'.repeat(84));
+    expect(texts.slice(1)).toHaveLength(5);
+    expect(texts.slice(1).join('')).toBe('나'.repeat(140));
   });
 
   it('앱에서의 미리 보기도 기본 부품 위젯', async () => {
@@ -462,16 +481,24 @@ describe('그림 위젯(매개변수 image)', () => {
 });
 
 describe('마지막 수단(기본 부품)', () => {
-  it('위젯을 못 만들면 빈 위젯에 오류 글자를 둔다', async () => {
+  it('기본 부품 오류 위젯을 못 만들면 그림 오류 위젯을 둔다', async () => {
     const host = makeNative({ keychain: loggedIn, failWidgets: 2 });
     await expect(run(host, cfg, now)).resolves.toBeUndefined();
     expect(host.state.setWidgets).toHaveLength(1);
-    expect(nativeTexts(host)).toEqual(['오류']);
+    expect(lastWidget(host).props.backgroundImage).not.toBeNull();
+    expect(drawnTexts(host)).toEqual(['오류', '위젯 시험 오류']);
+  });
+
+  it('그림 오류 위젯도 못 만들면 빈 위젯에 오류 글자와 메시지를 둔다', async () => {
+    const host = makeNative({ keychain: loggedIn, failWidgets: 3 });
+    await expect(run(host, cfg, now)).resolves.toBeUndefined();
+    expect(host.state.setWidgets).toHaveLength(1);
+    expect(nativeTexts(host)).toEqual(['오류', '위젯 시험 오류']);
     expect(lastWidget(host).props.url).toBe('https://example.test/');
   });
 
   it('글자도 안 들어가면 주소만 있는 빈 위젯, 아무것도 못 만들면 아무것도 두지 않는다', async () => {
-    const noText = makeNative({ keychain: loggedIn, failWidgets: 2 });
+    const noText = makeNative({ keychain: loggedIn, failWidgets: 3 });
     const Base = noText.ListWidget;
     noText.ListWidget = class extends Base {
       constructor() {
@@ -489,9 +516,76 @@ describe('마지막 수단(기본 부품)', () => {
   });
 
   it('앱에서도 오류 글자 위젯을 보여 준다', async () => {
-    const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [{ button: 0 }], failWidgets: 2 });
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [{ button: 0 }], failWidgets: 3 });
     await expect(run(host, cfg, now)).resolves.toBeUndefined();
-    expect(host.state.widgets.at(-1)!.presented).toBe('large');
-    expect(nativeTexts(host)).toEqual(['오류']);
+    expect(presented(host)).toEqual(['large']);
+    expect(nativeTexts(host)).toEqual(['오류', '위젯 시험 오류']);
+  });
+});
+
+describe('기본 부품 그리기가 깨지면(오류 내용은 끝까지 보인다)', () => {
+  // failTexts: 2 = 달 위젯의 첫 글자와 기본 부품 오류 위젯의 첫 글자가 실패한다.
+  it('위젯: 그림으로 오류 위젯을 두고, 그 글에 오류 내용이 있다', async () => {
+    const host = makeNative({ keychain: loggedIn, failTexts: 2 });
+    await expect(run(host, cfg, now)).resolves.toBeUndefined();
+    expect(host.state.setWidgets).toHaveLength(1);
+    expect(lastWidget(host).props.backgroundImage).not.toBeNull();
+    expect(lastWidget(host).props.url).toBe('https://example.test/');
+    expect(drawnTexts(host)).toEqual(['오류', '글자 시험 오류']);
+  });
+
+  it('앱: 그림 오류 위젯을 한 번 보여 준다', async () => {
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [{ button: 0 }], failTexts: 2 });
+    await expect(run(host, cfg, now)).resolves.toBeUndefined();
+    expect(presented(host)).toEqual(['large']);
+    expect(host.state.setWidgets).toEqual([]);
+    expect(drawnTexts(host)).toEqual(['오류', '글자 시험 오류']);
+  });
+
+  it('그림의 밝기는 매개변수의 light나 dark, 없으면 기기 설정', async () => {
+    const firstFill = (h: FakeHost) => h.state.contexts[0].calls[0];
+    for (const [options, hex] of [
+      [{ widgetParameter: 'dark', dark: false }, '#161B22'],
+      [{ widgetParameter: 'light', dark: true }, '#FFFFFF'],
+      [{ dark: true }, '#161B22'],
+      [{ dark: false }, '#FFFFFF'],
+    ] as const) {
+      const host = makeNative({ keychain: loggedIn, failTexts: 2, ...options });
+      await run(host, cfg, now);
+      expect(firstFill(host)).toEqual(['setFillColor', { hex, alpha: 1 }]);
+    }
+  });
+
+  it('그림도 그리지 못하면 글자만 있는 위젯에 오류와 메시지 줄', async () => {
+    const host = makeNative({ keychain: loggedIn, failTexts: 2, failDrawing: 99 });
+    await expect(run(host, cfg, now)).resolves.toBeUndefined();
+    expect(host.state.setWidgets).toHaveLength(1);
+    expect(textsOf(lastWidget(host))).toEqual(['오류', '글자 시험 오류']);
+    expect(lastWidget(host).props.url).toBe('https://example.test/');
+  });
+
+  it('앱에서도 글자만 있는 위젯을 한 번 보여 준다', async () => {
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [{ button: 0 }], failTexts: 2, failDrawing: 99 });
+    await expect(run(host, cfg, now)).resolves.toBeUndefined();
+    expect(presented(host)).toEqual(['large']);
+    expect(textsOf(shownInApp(host))).toEqual(['오류', '글자 시험 오류']);
+  });
+
+  it('크기를 알 수 없어도(환경을 못 만들면) 글자만 있는 위젯에 오류 내용', async () => {
+    const host = makeNative({ keychain: loggedIn });
+    host.Device.screenSize = () => { throw new Error('화면 크기 시험 오류'); };
+    await expect(run(host, cfg, now)).resolves.toBeUndefined();
+    expect(host.state.setWidgets).toHaveLength(1);
+    expect(textsOf(lastWidget(host))).toEqual(['오류', '화면 크기 시험 오류']);
+  });
+
+  it('버전을 알면 오류 줄의 마지막에 (버전)을 적는다', async () => {
+    const host = makeNative({ keychain: loggedIn });
+    host.Keychain.get = () => { throw new Error('깨짐'); };
+    await run(host, { ...cfg, version: '0.4.0 (2026-11-14)' }, now);
+    expect(textsOf(lastWidget(host))).toEqual(['오류', '깨짐', '(0.4.0 (2026-11-14))']);
+    const bare = makeNative({ keychain: loggedIn, failTexts: 2, failDrawing: 99 });
+    await run(bare, { ...cfg, version: '0.4.0 (2026-11-14)' }, now);
+    expect(textsOf(lastWidget(bare))).toEqual(['오류', '글자 시험 오류', '(0.4.0 (2026-11-14))']);
   });
 });

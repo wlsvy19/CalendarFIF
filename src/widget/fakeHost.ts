@@ -30,6 +30,8 @@ export type FakeOptions = {
   failDrawing?: number;
   /** 처음 이만큼의 ListWidget은 만들 때 오류를 낸다. */
   failWidgets?: number;
+  /** 처음 이만큼의 addText(위젯과 상자 모두)는 오류를 낸다. 기본 부품 그리기가 깨진 경우다. */
+  failTexts?: number;
 };
 
 export type FakeState = {
@@ -55,6 +57,7 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
   const answers = [...(opts.alerts ?? [])];
   let failures = opts.failDrawing ?? 0;
   let widgetFailures = opts.failWidgets ?? 0;
+  let textFailures = opts.failTexts ?? 0;
 
   class Size { constructor(public width: number, public height: number) {} }
   class Rect { constructor(public x: number, public y: number, public width: number, public height: number) {} }
@@ -152,6 +155,10 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
   /** 위젯과 상자가 같이 쓰는 "안에 넣기": 기록의 children에 쌓는다. */
   const adders = (children: FakeNode[]) => ({
     addText(text: string): WidgetTextLike {
+      if (textFailures > 0) {
+        textFailures -= 1;
+        throw new Error('글자 시험 오류');
+      }
       const node: Extract<FakeNode, { kind: 'text' }> = { kind: 'text', text };
       children.push(node);
       return node as unknown as WidgetTextLike;
