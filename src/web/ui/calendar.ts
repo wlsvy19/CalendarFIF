@@ -168,9 +168,10 @@ export function mountCalendar(
     if (!cell) cell = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('.cell') ?? null;
     if (cell?.dataset.key) deps.onOpenDay(cell.dataset.key);
   });
-  prevBtn.addEventListener('click', () => go(shiftMonth(store.current(), -1)));
-  nextBtn.addEventListener('click', () => go(shiftMonth(store.current(), 1)));
-  todayBtn.addEventListener('click', () => go(splitDateKey(deps.today())!.monthId));
+  // 미끄러지는 중에 버튼을 누르면 그 미끄러짐을 먼저 끝내고 그 달에서 이어 간다.
+  prevBtn.addEventListener('click', () => { settle?.finish(); go(shiftMonth(store.current(), -1)); });
+  nextBtn.addEventListener('click', () => { settle?.finish(); go(shiftMonth(store.current(), 1)); });
+  todayBtn.addEventListener('click', () => { settle?.finish(); go(splitDateKey(deps.today())!.monthId); });
   settingsBtn.addEventListener('click', () => deps.onOpenSettings());
 
   const frame = env.frame ?? ((cb: () => void) => void requestAnimationFrame(cb));
@@ -180,6 +181,8 @@ export function mountCalendar(
   type Drag = { id: number; x0: number; y0: number; width: number; axis: 'x' | 'y' | null; samples: Sample[]; x: number; queued: boolean };
   let drag: Drag | null = null;
   let swiped = false;
+  let destroyed = false;
+  const MAX_SAMPLES = 16;
   let swipedTimer: ReturnType<typeof setTimeout> | undefined;
   let settle: { finish(): void; timer: ReturnType<typeof setTimeout> } | null = null;
 
@@ -211,6 +214,7 @@ export function mountCalendar(
       return;
     }
     if (outcome !== 0) ensurePeek(outcome === 1 ? 'next' : 'prev');
+    const target = shiftMonth(store.current(), outcome);
     track.style.transition = `transform ${SWIPE.durationMs}ms ease-out`;
     setTransform(-outcome * width);
     let done = false;
@@ -218,21 +222,31 @@ export function mountCalendar(
       if (done) return;
       done = true;
       clearTimeout(timer);
-      track.removeEventListener('transitionend', finish);
+      track.removeEventListener('transitionend', onEnd);
       settle = null;
       track.style.transition = '';
       track.style.transform = '';
       track.querySelector('.peek')?.remove();
-      if (outcome !== 0) go(shiftMonth(store.current(), outcome));
+      if (outcome !== 0 && !destroyed) go(target);
     };
     const timer = setTimeout(finish, SWIPE.durationMs + 60);
-    track.addEventListener('transitionend', finish);
+    const onEnd = (e: TransitionEvent): void => {
+      if (e.target === track && e.propertyName === 'transform') finish();
+    };
+    track.addEventListener('transitionend', onEnd);
     settle = { finish, timer };
   }
 
   pager.addEventListener('pointerdown', (e) => {
-    if (drag) return;
     settle?.finish();
+    if (drag) {
+      // 놓은 신호를 못 받은 낡은 끌기는 버리고 새로 시작한다.
+      drag = null;
+      swiped = false;
+      clearTimeout(swipedTimer);
+      track.style.transform = '';
+      track.querySelector('.peek')?.remove();
+    }
     // 레이아웃은 여기서 한 번만 읽는다.
     drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, width: pager.clientWidth || window.innerWidth, axis: null, samples: [{ x: e.clientX, t: now() }], x: 0, queued: false };
   });
@@ -253,6 +267,7 @@ export function mountCalendar(
     }
     if (d.axis !== 'x') return;
     d.samples.push({ x: e.clientX, t: now() });
+    if (d.samples.length > MAX_SAMPLES) d.samples.shift();
     if (reducedMotion() || dx === 0) return;
     ensurePeek(dx < 0 ? 'next' : 'prev');
     d.x = dragOffset(dx, d.width);
@@ -270,17 +285,20 @@ export function mountCalendar(
     drag = null;
     if (d.axis !== 'x') return;
     d.samples.push({ x: e.clientX, t: now() });
+    if (d.samples.length > MAX_SAMPLES) d.samples.shift();
     holdClicks();
     release(d.width, swipeOutcome(e.clientX - d.x0, d.width, velocity(d.samples)));
   });
-  pager.addEventListener('pointercancel', (e) => {
+  const onCancel = (e: PointerEvent): void => {
     const d = drag;
     if (!d || e.pointerId !== d.id) return;
     drag = null;
     if (d.axis !== 'x') return;
     holdClicks();
     release(d.width, 0);
-  });
+  };
+  pager.addEventListener('pointercancel', onCancel);
+  pager.addEventListener('lostpointercapture', onCancel);
 
   // 읽기 문제는 store가 바뀔 때, 연결 상태는 창의 online/offline 이벤트로 알 수 있다.
   const offChange = store.onChange(() => {
@@ -326,6 +344,8 @@ export function mountCalendar(
       window.removeEventListener('resize', onResize);
       document.removeEventListener('visibilitychange', onVisibility);
       if (midnightTimer !== undefined) clearTimeout(midnightTimer);
+      destroyed = true;
+      drag = null;
       clearTimeout(swipedTimer);
       if (settle) clearTimeout(settle.timer);
       el.remove();

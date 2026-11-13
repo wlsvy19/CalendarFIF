@@ -167,4 +167,28 @@ describe('달 넘기기', () => {
     cell(root, '2026-12-10').click();
     expect(onOpenDay).not.toHaveBeenCalled();
   });
+  it('놓은 신호 없이 끝난 세로 끌기가 남아 있어도 다음 가로 끌기는 달을 넘긴다', () => {
+    vi.useFakeTimers();
+    const { store, fire } = swipeMount();
+    fire('pointerdown', 500, 300, 0);
+    fire('pointermove', 505, 380, 30); // 세로로 정해지고 pointerup은 오지 않는다
+    fire('pointerdown', 600, 300, 100);
+    fire('pointermove', 500, 302, 130);
+    fire('pointermove', 300, 300, 200);
+    fire('pointerup', 300, 300, 230);
+    vi.advanceTimersByTime(300);
+    expect(store.show).toHaveBeenLastCalledWith('2026-12');
+  });
+  it('미끄러지는 중에 다음 달 버튼을 누르면 두 달 뒤에서 멈추고, 오늘 버튼이면 오늘의 달이다', () => {
+    vi.useFakeTimers();
+    for (const label of ['다음 달', '오늘']) {
+      const { root, store, fire } = swipeMount();
+      fire('pointerdown', 600, 300, 0);
+      fire('pointermove', 300, 300, 100);
+      fire('pointerup', 300, 300, 200);
+      [...root.querySelectorAll<HTMLElement>('.app-nav button')].find((b) => b.getAttribute('aria-label') === label || b.textContent === label)!.click();
+      vi.advanceTimersByTime(300);
+      expect(store.current()).toBe(label === '오늘' ? '2026-11' : '2027-01');
+    }
+  });
 });
