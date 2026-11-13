@@ -60,10 +60,22 @@ it('사용자 관리 단추는 onManageUsers를 부른다', () => {
   button('사용자 관리').click();
   expect(onManageUsers).toHaveBeenCalledTimes(1);
 });
+const widget = { load: () => new Promise<string>(() => {}), config: { projectId: 'demo-calfif', apiKey: 'k', appUrl: 'https://example.test' }, copy: async () => {} };
 it('사용자와 비밀번호 칸은 동기화 뒤, 위젯 앞에 있다', () => {
-  const { root } = mount({ onManageUsers: vi.fn(), onChangePassword: vi.fn() });
+  const { root } = mount({ onManageUsers: vi.fn(), onChangePassword: vi.fn(), widget });
   const labels = [...root.querySelectorAll('.field-label')].map((l) => l.textContent);
   expect(labels).toEqual(['계정', '동기화', '사용자', '비밀번호', '위젯']);
+});
+
+it('widget을 주지 않으면 위젯 칸이 없다', () => {
+  const { root } = mount();
+  expect(root.textContent).not.toContain('위젯');
+});
+it('widget을 주면 위젯 칸이 로그아웃 앞에 있다', () => {
+  const { root } = mount({ widget });
+  const fields = [...root.querySelectorAll('.sheet > .field, .sheet > div > .field')];
+  const labels = fields.map((f) => f.querySelector('.field-label')?.textContent);
+  expect(labels.at(-2)).toBe('위젯');
 });
 
 function pwSetup(onChangePassword: (c: string, n: string) => Promise<{ ok: boolean; message: string }>) {

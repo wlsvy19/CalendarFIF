@@ -25,6 +25,7 @@ import { mountCalendar } from './ui/calendar';
 import { mountEditor } from './ui/editor';
 import { mountSettings } from './ui/settings';
 import { mountUsers } from './ui/users';
+import type { WidgetInstallDeps } from './ui/widgetInstall';
 import { isBusy, reloadOnUpdate } from './update';
 import { parseHash } from './router';
 import { openStorage } from './storage';
@@ -118,6 +119,20 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     void signOut(auth);
   };
   let settingsPage: SettingsPage | undefined;
+  // 위젯 스크립트는 웹앱의 설정에서 공개 설정을 채워 복사한다. 채운 글은 이 화면의 메모리와 클립보드에만 있다.
+  const widgetInstall: WidgetInstallDeps = {
+    load: async () => {
+      const response = await fetch('/widget/calendarfif-widget.js');
+      if (!response.ok) throw new Error(`위젯 스크립트를 받지 못했습니다 (${response.status})`);
+      return response.text();
+    },
+    config: {
+      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+      apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+      appUrl: location.origin,
+    },
+    copy: (text) => (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error('클립보드를 쓸 수 없습니다.'))),
+  };
   // 설정에서 바꾼 모양은 바로 달력과 <html>에 반영하고 이 기기에 저장한다. 저장하지 못하면 false(값은 화면에 그대로 둔다).
   const changeAppearance = (next: Appearance): boolean => {
     appearance = next;
@@ -157,7 +172,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     };
     settings = appearance
       ? mountDesktopSettings(root, { appearance, onAppearance: changeAppearance, bridge, account, page: settingsPage, onClose })
-      : mountSettings(root, { ...account, onClose });
+      : mountSettings(root, { ...account, onClose, widget: widgetInstall });
     settingsPage = undefined;
     interactivity.begin('settings');
   };

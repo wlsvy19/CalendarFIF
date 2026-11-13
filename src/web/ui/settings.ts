@@ -1,4 +1,5 @@
 import { dismiss } from './sheetMotion';
+import { widgetSection, type WidgetInstallDeps } from './widgetInstall';
 
 export type AccountProps = {
   email: string;
@@ -184,15 +185,6 @@ export function accountSection(props: AccountProps, extra?: HTMLElement, onClean
   return el;
 }
 
-function widgetNote(): HTMLElement {
-  const field = document.createElement('div');
-  field.className = 'field';
-  field.innerHTML = `
-      <span class="field-label">위젯</span>
-      <p class="settings-note">아이폰 위젯은 다음 단계에서 추가됩니다.</p>`;
-  return field;
-}
-
 export function mountSettings(
   root: HTMLElement,
   props: {
@@ -205,6 +197,8 @@ export function mountSettings(
     onChangePassword?: AccountProps['onChangePassword'];
     onManageUsers?: AccountProps['onManageUsers'];
     onPasswordBusy?: AccountProps['onPasswordBusy'];
+    /** 주면 "위젯" 칸(스크립트 복사와 설치 방법)을 보인다. 웹앱의 설정 화면만 준다. */
+    widget?: WidgetInstallDeps;
   },
 ): { destroy(): void } {
   const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -239,7 +233,7 @@ export function mountSettings(
   closeBtn.addEventListener('click', close);
   scrim.addEventListener('click', close);
   const cleanups: Array<() => void> = [];
-  sheet.append(accountSection({ ...props, onSignOut: signOut }, widgetNote(), (fn) => cleanups.push(fn)));
+  sheet.append(accountSection({ ...props, onSignOut: signOut }, props.widget ? widgetSection(props.widget) : undefined, (fn) => cleanups.push(fn)));
   sheet.addEventListener('keydown', (e) => {
     if (e.isComposing) return;
     if (e.key === 'Escape') {
