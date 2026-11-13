@@ -67,4 +67,4 @@ CalendarFIF를 실제로 쓰려면 Firebase 프로젝트가 하나 있어야 한
 
 ## 끝난 뒤
 
-저장소 폴더의 `.env.local`에 설정값 네 개와 `OWNER_UID`(3단계의 UID)를 넣고 `npm run deploy`로 배포한다. `.env.local`은 git에 올라가지 않는다. 비밀번호는 어느 파일에도 적지 않는다.
+저장소 폴더의 `.env.local`에 설정값 네 개와 `OWNER_UID`(3단계의 UID)를 넣는다. 처음 한 번은 저장소 폴더에서 `npx firebase use --add`를 실행해 목록에서 내 프로젝트를 고르고, 별칭을 물으면 `default`를 입력한다(5단계의 `npx firebase login`을 먼저 해 두어야 한다). 이 단계가 커밋하지 않는 `.firebaserc`를 만든다. 그다음 `npm run deploy`로 배포한다. `.env.local`은 git에 올라가지 않는다. 비밀번호는 어느 파일에도 적지 않는다.

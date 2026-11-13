@@ -22,6 +22,8 @@ Windows PC와 아이폰에서 날짜별 메모와 날짜 배경색을 양방향�
 
 ## 배포
 
+처음 한 번은 저장소 폴더에서 `npx firebase use --add`를 실행해 목록에서 내 프로젝트를 고르고, 별칭을 물으면 `default`를 입력한다. 이 단계가 커밋하지 않는 `.firebaserc`를 만든다. 먼저 `npx firebase login`을 해 두어야 한다([docs/firebase-setup.md](docs/firebase-setup.md) 5단계).
+
 `npm run deploy`는 웹앱을 빌드하고, `OWNER_UID`로 보안 규칙을 만들고, 호스팅과 규칙을 배포한다. 배포가 끝나면 앱은 `https://<프로젝트 ID>.web.app`에 있다.
 
 - 배포는 이 명령으로만 한다. 다른 명령이 `dist/`와 `build/firestore.rules`에 에뮬레이터용 빌드와 시험용 UID를 남겨 둘 수 있기 때문이다.
@@ -33,8 +35,8 @@ Windows PC와 아이폰에서 날짜별 메모와 날짜 배경색을 양방향�
 |---|---|
 | `npm run import -- --preview` | 읽고 변환한 결과만 보여 준다. 클라우드에 접속하지 않는다(기본). |
 | `npm run import -- --preview --show <YYYY-MM-DD>` | 그 날짜의 변환 결과를 화면에 보여 준다. 여러 번 줄 수 있다. |
-| `npm run import -- --upload` | 바뀐 날짜를 클라우드에 올리고 대조한다. |
-| `npm run import -- --follow` | 올린 뒤 DesktopCal 파일을 지켜보며 바뀔 때마다 올린다. 끝내려면 Ctrl+C를 누른다. |
+| `npm run import -- --upload` | 바뀐 날짜를 클라우드에 올리고 대조한다. 먼저 `클라우드에 올릴까요? (y/N)`를 묻고, `--yes`를 붙이면 묻지 않는다. |
+| `npm run import -- --follow` | 올린 뒤 DesktopCal 파일을 지켜보며 바뀔 때마다 올린다. 끝내려면 Ctrl+C를 누른다. 올리기 전에 같은 질문을 하고, `--yes`로 건너뛴다. |
 
 - 가져오기는 DesktopCal 데이터 파일(`%APPDATA%\CalendarTask\Db\calendar.db`)의 복사본만 읽고, 원본에는 쓰지 않는다.
 - 내 PowerShell이나 Windows 터미널에서 실행한다. 비밀번호를 가려서 입력받고(`CALFIF_EMAIL`, `CALFIF_PASSWORD` 환경 변수가 있으면 그 값을 쓴다), `--show`는 메모 내용을 화면에 출력한다.
