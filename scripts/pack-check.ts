@@ -10,3 +10,22 @@ export function bundleProblem(emu: boolean, bundleText: string): string | null {
 export function hasTopLevelKoffiRequire(mainBundleText: string): boolean {
   return /^\S.*require\(["']koffi["']\)/m.test(mainBundleText);
 }
+
+// 실행 중인 CalendarFIF.exe의 경로 가운데 dir 안에 있는 것이 있는지 본다(대소문자 무시, 폴더 이름이 겹치기만 하는 것은 제외).
+export function runningInside(paths: string[], dir: string): boolean {
+  const norm = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+  const prefix = `${norm(dir)}\\`;
+  return paths.some((p) => norm(p).startsWith(prefix));
+}
+
+export type GuardDecision = { ok: true } | { ok: false; message: string };
+
+// 꾸리기 전에 실행 중인 앱을 본 결과(PowerShell 실행 결과)로 계속할지 정한다. 확인하지 못했으면 멈춘다(열린 채로 지우지 않기 위해).
+// 위치를 읽지 못한 CalendarFIF(다른 사용자의 프로세스)는 줄이 '?'로 온다. 실행 중인 것이 없으면 종료 코드 0에 출력이 없다.
+export function guardDecision(ps: { error?: unknown; status: number | null; stdout: string | null }, dir: string): GuardDecision {
+  if (ps.error || ps.status !== 0 || ps.stdout === null) return { ok: false, message: '실행 중인 앱을 확인하지 못했습니다. 꾸리기를 멈춥니다.' };
+  const lines = ps.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.includes('?')) return { ok: false, message: '실행 중인 CalendarFIF의 위치를 알 수 없습니다. 앱을 끄고 다시 실행하세요.' };
+  if (runningInside(lines, dir)) return { ok: false, message: `그 폴더의 앱이 실행 중입니다. 앱을 끄고 다시 실행하세요: ${dir}` };
+  return { ok: true };
+}

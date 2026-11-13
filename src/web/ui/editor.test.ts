@@ -121,3 +121,15 @@ it('PC 앱에서는 창이 좁아도 메모 칸에 바로 입력한다', () => {
   handle.destroy();
   vi.unstubAllGlobals();
 });
+it('끌기 연결 함수를 받았을 때만(PC 앱) 시트와 제목 줄을 넘겨 부르고, destroy에서 끝낸다', () => {
+  const { root } = mount({ text: '', color: '' });
+  expect(root.querySelector('.sheet-bar')!.classList.contains('drag-handle')).toBe(false);
+  const pc = document.createElement('div');
+  document.body.append(pc);
+  const end = vi.fn();
+  const attachDrag = vi.fn(() => ({ destroy: end }));
+  const handle = mountEditor(pc, { dateKey: '2026-11-13', value: { text: '', color: '' }, onSave: () => {}, onCancel: () => {} }, { attachDrag });
+  expect(attachDrag).toHaveBeenCalledWith(pc.querySelector('.sheet'), pc.querySelector('.sheet-bar'));
+  handle.destroy();
+  expect(end).toHaveBeenCalled();
+});

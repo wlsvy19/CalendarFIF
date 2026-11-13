@@ -204,3 +204,7 @@ it('닫기를 누르면 적고 아직 반영하지 않은 16진수 값을 반영
   expect(onAppearance.mock.lastCall![0].calendarBg).toBe('00FF7F');
   expect(onClose).toHaveBeenCalledTimes(1);
 });
+it('PC 앱의 설정 상자는 제목 줄을 끌어 옮길 수 있다', () => {
+  const { root } = mount();
+  expect(root.querySelector('.sheet-bar')!.classList.contains('drag-handle')).toBe(true);
+});

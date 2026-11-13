@@ -29,7 +29,7 @@ export function mountEditor(
     onSave(next: DayValue): void;
     onCancel(): void;
   },
-  env?: { visualViewport?: VisualViewportLike | null; focusText?: boolean },
+  env?: { visualViewport?: VisualViewportLike | null; focusText?: boolean; attachDrag?: (sheet: HTMLElement, handle: HTMLElement) => { destroy(): void } },
 ): { destroy(): void } {
   const viewport = env?.visualViewport === undefined ? (window.visualViewport ?? null) : env.visualViewport;
   const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -168,6 +168,7 @@ export function mountEditor(
 
   root.append(scrim, sheet);
   document.documentElement.classList.add('sheet-open');
+  const drag = env?.attachDrag?.(sheet, sheet.querySelector<HTMLElement>('.sheet-bar')!);
   if (env?.focusText || window.innerWidth >= WIDE_PX) {
     area.focus();
     area.setSelectionRange(area.value.length, area.value.length);
@@ -180,6 +181,7 @@ export function mountEditor(
       viewport?.removeEventListener('resize', followViewport);
       viewport?.removeEventListener('scroll', followViewport);
       document.documentElement.classList.remove('sheet-open');
+      drag?.destroy();
       dismiss(scrim, sheet);
       if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
     },

@@ -1,10 +1,34 @@
 import { expect, it } from 'vitest';
 import { BottomLimiter, Reattacher, adjustStep, isAtBottom, shouldKeepBottom } from './policy';
 
-const P = 100n, own = (hwnd: bigint) => ({ hwnd, desktopOwned: true }), other = (hwnd: bigint) => ({ hwnd, desktopOwned: false });
+const P = 100n, own = (hwnd: bigint) => ({ hwnd, owner: 0n, visible: true, desktopOwned: true }), other = (hwnd: bigint) => ({ hwnd, owner: 0n, visible: true, desktopOwned: false });
 it('바탕화면에 붙은 창(DesktopCal 같은)들 말고는 아래에 아무것도 없어야 맨 아래다', () => {
   expect([isAtBottom([other(P)], P), isAtBottom([own(7n), other(P)], P), isAtBottom([other(8n), other(P)], P), isAtBottom([other(8n)], P), isAtBottom([], 0n), isAtBottom([other(8n)], 0n)])
     .toEqual([true, true, false, false, true, false]);
+});
+
+// 목록은 위에서 아래 순서다(달력 바로 아래 창부터 Progman까지). Windows는 소유된 창을 늘 소유자보다 위에 둔다.
+// 각 경우의 첫 창(맨 위)이 그 경우가 보는 창이고, 그 아래 창들은 모두 받아들여지는 창이다(일반 창 경우는 그 창이 맨 아래 쪽이다).
+const progman = { hwnd: P, owner: 0n, visible: true, desktopOwned: true };
+const cal = { hwnd: 20n, owner: P, visible: true, desktopOwned: true }; // 다른 달력 창(Progman이 소유)
+const dcal = { hwnd: 40n, owner: 41n, visible: true, desktopOwned: true }; // DesktopCal의 달력 창(소유자가 Progman의 자손)
+const explorerIme = { hwnd: 11n, owner: P, visible: false, desktopOwned: true }; // 탐색기의 입력기 창(Progman이 소유, 숨김)
+const hidden = (hwnd: bigint, owner: bigint) => ({ hwnd, owner, visible: false, desktopOwned: false });
+const shown = (hwnd: bigint, owner: bigint) => ({ hwnd, owner, visible: true, desktopOwned: false });
+it.each([
+  ['다른 달력 창의 숨은 입력기 창(IME)', true, [hidden(21n, 20n), cal, progman]],
+  ['숨은 창이 소유한 숨은 창(MSCTFIME UI), 그 숨은 창의 소유자는 다른 달력 창', true, [hidden(22n, 21n), hidden(21n, 20n), cal, progman]],
+  ['DesktopCal 창의 숨은 입력기 창', true, [hidden(42n, 40n), dcal, progman]],
+  ['Progman이 직접 소유한 숨은 창(탐색기의 입력기 창)이 소유한 숨은 창', true, [hidden(12n, 11n), explorerIme, progman]],
+  ['다른 달력 창이 소유한 보이는 창(대화 상자)', false, [shown(23n, 20n), cal, progman]],
+  ['숨은 창 줄의 가운데 창이 보이는 창(위의 숨은 창까지 가지 않고 거기서 아니다)', false, [hidden(22n, 21n), shown(21n, 20n), cal, progman]],
+  ['일반 창(Progman 바로 위)', false, [shown(30n, 0n), progman]],
+  ['소유자 없는 숨은 창', false, [hidden(50n, 0n), cal, progman]],
+  ['일반 창이 소유한 숨은 창(그 일반 창은 목록에 없다)', false, [hidden(31n, 30n), cal, progman]],
+  // Windows에서는 생기지 않는 순서다. 아래에서부터 보므로 소유자를 아직 모르고, 남의 창으로 본다(맨 아래가 아니라고 본다).
+  ['소유자가 소유된 숨은 창보다 위에 적힌 목록', false, [cal, hidden(21n, 20n), progman]],
+] as const)('%s → %s', (_name, expected, below) => {
+  expect(isAtBottom([...below], P)).toBe(expected);
 });
 it('입력 중, 맨 위에 보기, 위치 조정, 숨김 중에는 맨 아래로 보내지 않는다', () => {
   const idle = { interactive: false, alwaysOnTop: false, adjusting: false, hidden: false };

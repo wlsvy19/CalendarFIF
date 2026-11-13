@@ -55,6 +55,30 @@ it('IsWindow는 창이면 참, 창이 아니면 거짓, 핸들이 0이면 거짓
   expect([w.isWindow(5n), w.isWindow(6n), w.isWindow(0n)]).toEqual([true, false, false]);
 });
 
+it('아래 창 목록에 소유자와 보이는지(WS_VISIBLE)를 적는다. 모양을 읽지 못하면(0) 보이는 창으로 본다', () => {
+  const P = 9n;
+  const next: Record<string, number> = { 1: 2, 2: 3, 3: 4, 4: 9 };
+  const owner: Record<string, number> = { 2: 9, 3: 2, 4: 0, 9: 0 };
+  // 2: 보이는 팝업(32비트 부호가 붙어 음수로 온다), 3: 숨은 창(WS_CLIPSIBLINGS만), 4: 읽기 실패(0), 9: Progman(보임)
+  const style: Record<string, number> = { 2: 0x90000000 - 2 ** 32, 3: 0x04000000, 4: 0, 9: 0x10000000 };
+  const indexes = new Set<number>();
+  const w = createWin32(() => fakeApi({
+    GetWindow: (h: bigint, cmd: number) => (cmd === 2 ? next[String(h)] : owner[String(h)]) ?? 0,
+    GetWindowLongPtrW: (h: bigint, i: number) => {
+      indexes.add(i);
+      return style[String(h)] ?? 0;
+    },
+  }), () => {});
+  expect(w.windowsBelow(1n, P)).toEqual([
+    { hwnd: 2n, owner: 9n, visible: true, desktopOwned: true },
+    { hwnd: 3n, owner: 2n, visible: false, desktopOwned: false },
+    { hwnd: 4n, owner: 0n, visible: true, desktopOwned: false },
+    { hwnd: 9n, owner: 0n, visible: true, desktopOwned: true },
+  ]);
+  expect([...indexes]).toEqual([-16]);
+  expect(w.nestedNativeCalls()).toBe(0);
+});
+
 it('도구 창 모양만 다시 건다: WS_EX_TOOLWINDOW를 켜고 WS_EX_APPWINDOW를 끄며 소유자는 건드리지 않는다', () => {
   const sets: [bigint, number, bigint][] = [];
   const w = createWin32(() => fakeApi({

@@ -355,6 +355,9 @@ async function tray(rt: Runtime, desk: Desk): Promise<Result> {
   onTop.push(win.isAlwaysOnTop());
   const atBottomAfterOnTopOff = await until(bottom, 3000);
 
+  // 화면이 입력을 받는 동안(로그인 화면 포함)은 단축키가 멈춰 등록되지 않는다. 달력이 뜨고 입력이 끝난 뒤에 등록을 본다.
+  // 끝나지 않으면 단축키 실패가 아니라 이것으로 알린다.
+  const inputEndedBeforeHotkeys = await until(async () => (await js(win, RENDERED)) === 'calendar' && !win.isFocusable(), 15000);
   // 설정 바꾸기는 화면의 다리(IPC)로 보낸다.
   const bridge = (patch: string) => js(win, `window.calfifDesktop.setSystem(${patch})`) as Promise<SystemState>;
   const hotkeyPatch = (key: string, name: 'hideHotkey' | 'contentHotkey', enabled: boolean) => `{ ${name}: { accelerator: '${key}', enabled: ${enabled} } }`;
@@ -386,7 +389,7 @@ async function tray(rt: Runtime, desk: Desk): Promise<Result> {
   const fields = {
     trayCreated, trayMenu: menuNames, startItem, labelWhenHidden, hiddenState, labelWhenShown, contentLabelWhenHidden, visible, contentHidden,
     contentHiddenSaved: contentSaved.every((v, i) => v === contentHidden[i]), alwaysOnTop: onTop, onTopSaved, onTopChecked, atBottomAfterOnTopOff,
-    hotkeys: both.hotkeys, registeredBoth, hotkeysAfterOff: off.hotkeys, hideRegisteredAfterOff, contentRegisteredAfterOff, badPatchIgnored,
+    inputEndedBeforeHotkeys, hotkeys: both.hotkeys, registeredBoth, hotkeysAfterOff: off.hotkeys, hideRegisteredAfterOff, contentRegisteredAfterOff, badPatchIgnored,
     startWithWindowsAfterPatch: startPatch.settings.startWithWindows, canStartWithWindows: system.canStartWithWindows, noneRegistered, hiddenSurvivesRecreate, shownAfterRecreate, loginItemCalls,
   };
   const checks = {
@@ -395,7 +398,7 @@ async function tray(rt: Runtime, desk: Desk): Promise<Result> {
     visible: visible[0] === false && visible[1] === true, hiddenState, labels: labelWhenHidden === '캘린더 보이기' && labelWhenShown === '캘린더 숨기기' && contentLabelWhenHidden === '내용 보이기',
     contentHidden: contentHidden[0] === true && contentHidden[1] === false, contentHiddenSaved: fields.contentHiddenSaved,
     alwaysOnTop: onTop[0] === true && onTop[1] === false, onTopSaved, onTopChecked: onTopChecked === true, atBottomAfterOnTopOff,
-    hotkeys: both.hotkeys.hide === 'ok' && both.hotkeys.content === 'ok', registeredBoth: registeredBoth[0] && registeredBoth[1],
+    inputEndedBeforeHotkeys, hotkeys: both.hotkeys.hide === 'ok' && both.hotkeys.content === 'ok', registeredBoth: registeredBoth[0] && registeredBoth[1],
     hideOff: off.hotkeys.hide === 'off' && !hideRegisteredAfterOff && contentRegisteredAfterOff, badPatchIgnored,
     startIgnored: startPatch.settings.startWithWindows === null && system.canStartWithWindows === false, noneRegistered, hiddenSurvivesRecreate, shownAfterRecreate,
     loginItemCalls: loginItemCalls === 0,
@@ -404,6 +407,7 @@ async function tray(rt: Runtime, desk: Desk): Promise<Result> {
 }
 
 // 설정 화면을 앱 안의 길(openSettings 명령, 화면의 입력 이벤트, 다리)로 열어 보고 닫는다. 단축키는 끝날 때 모두 푼다.
+type SheetBox = { left: number; top: number; right: number; bottom: number; barX: number; barY: number; w: number; h: number };
 async function settings(_rt: Runtime, desk: Desk): Promise<Result> {
   const win = getWindow();
   if (!win) return { fields: {}, checks: { window: false } };
@@ -419,6 +423,41 @@ async function settings(_rt: Runtime, desk: Desk): Promise<Result> {
   const opened = await sheet(true);
   const tabs = (await js(win, "[...document.querySelectorAll('[role=\"tab\"]')].map((t) => t.textContent)")) as string[];
   const interactiveWhileOpen = await until(() => win.isFocusable(), 3000);
+
+  // 제목 줄을 진짜 마우스 입력(sendInputEvent)으로 끈다: 옮겨지고, 창 밖으로 끌어도 안에 남고, 닫았다 열면 그 자리이고, 닫기는 여전히 된다.
+  const sheetRect = () => js(win, "(() => { const r = document.querySelector('.desk-settings').getBoundingClientRect(); const b = document.querySelector('.desk-settings .sheet-bar').getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, barX: b.left + 20, barY: b.top + b.height / 2, w: window.innerWidth, h: window.innerHeight }; })()") as Promise<SheetBox>;
+  const mouse = (type: 'mouseDown' | 'mouseMove' | 'mouseUp', x: number, y: number) => win.webContents.sendInputEvent({ type, x: Math.round(x), y: Math.round(y), button: 'left', clickCount: 1, modifiers: type === 'mouseUp' ? [] : ['leftbuttondown'] });
+  const dragBar = async (from: SheetBox, toX: number, toY: number) => {
+    mouse('mouseDown', from.barX, from.barY);
+    await sleep(50);
+    for (let i = 1; i <= 6; i++) {
+      mouse('mouseMove', from.barX + ((toX - from.barX) * i) / 6, from.barY + ((toY - from.barY) * i) / 6);
+      await sleep(30);
+    }
+    mouse('mouseUp', toX, toY);
+    await sleep(100);
+  };
+  const near = (a: number, b: number) => Math.abs(a - b) <= 1;
+  const before = await sheetRect();
+  const dx = Math.max(0, Math.min(30, before.w - 8 - before.right));
+  const dy = Math.max(0, Math.min(20, before.h - 8 - before.bottom));
+  await dragBar(before, before.barX + dx, before.barY + dy);
+  const moved = await sheetRect();
+  const sheetDragged = (dx > 0 || dy > 0) && near(moved.left, before.left + dx) && near(moved.top, before.top + dy);
+  await dragBar(moved, before.w - 1, before.h - 1);
+  const far = await sheetRect();
+  const fitsX = far.right - far.left + 16 <= far.w;
+  const fitsY = far.bottom - far.top + 16 <= far.h;
+  const sheetClamped = (!fitsX || (far.left >= 7 && far.right <= far.w - 7)) && (!fitsY || (far.top >= 7 && far.bottom <= far.h - 7)) && (far.left > moved.left || far.top > moved.top);
+  const closeAt = (await js(win, "(() => { const r = [...document.querySelectorAll('.desk-settings .textbtn')].find((b) => b.textContent === '닫기').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()")) as { x: number; y: number };
+  mouse('mouseDown', closeAt.x, closeAt.y);
+  await sleep(50);
+  mouse('mouseUp', closeAt.x, closeAt.y);
+  const closeStillWorks = await sheet(false);
+  sendCommand({ type: 'openSettings' });
+  await sheet(true);
+  const again = await sheetRect();
+  const sheetRemembered = near(again.left, far.left) && near(again.top, far.top);
 
   await clickTab('글꼴 및 색상');
   await js(win, `(() => { const i = ${rowOf('투명도')}.querySelector('input[type="range"]'); i.value = '30'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
@@ -484,9 +523,9 @@ async function settings(_rt: Runtime, desk: Desk): Promise<Result> {
   desk.applySystem({ hideHotkey: { accelerator: HIDE_KEY, enabled: false } });
   const noneRegistered = registered() === 0;
 
-  const fields = { opened, tabs, interactiveWhileOpen, cellBg, savedTransparency, hotkey, registeredWhileInteractive, registeredWhileInteractiveAfterApply, registeredAfterClose, pausedBeforeRecreate, registeredAfterRecreate, focusableAfterRecreate, reloadFocusable, reloadRegistered, startSwitchDisabled, noneRegistered, closed, interactiveAfterClose, atBottomAfterClose, loginItemCalls };
+  const fields = { before, moved, far, again, opened, sheetDragged, sheetClamped, sheetRemembered, closeStillWorks, tabs, interactiveWhileOpen, cellBg, savedTransparency, hotkey, registeredWhileInteractive, registeredWhileInteractiveAfterApply, registeredAfterClose, pausedBeforeRecreate, registeredAfterRecreate, focusableAfterRecreate, reloadFocusable, reloadRegistered, startSwitchDisabled, noneRegistered, closed, interactiveAfterClose, atBottomAfterClose, loginItemCalls };
   const checks = {
-    opened, tabs: JSON.stringify(tabs) === JSON.stringify(['캘린더', '셀', '글꼴 및 색상', '고급', '계정']), interactiveWhileOpen,
+    opened, sheetDragged, sheetClamped, sheetRemembered, closeStillWorks, tabs: JSON.stringify(tabs) === JSON.stringify(['캘린더', '셀', '글꼴 및 색상', '고급', '계정']), interactiveWhileOpen,
     cellBg: cellBg === 'rgba(20, 24, 32, 0.7)', savedTransparency: savedTransparency === 30,
     hotkey: hotkey.accelerator === HIDE_KEY && hotkey.state === 'ok' && hotkey.registered, startSwitchDisabled,
     registeredWhileInteractive: registeredWhileInteractive === 0 && registeredWhileInteractiveAfterApply === 0, registeredAfterClose: registeredAfterClose === 1,
