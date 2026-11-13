@@ -52,13 +52,17 @@ vi.mock('../sync/firestoreStore', () => ({
   },
 }));
 // 내 access 문서는 시험이 직접 보낸다. 관리자 표시 만들기는 늘 거부된다(관리자가 아닌 계정).
-const access: { emit?: (s: AccessSnapshot) => void } = {};
+const access: { emit?: (s: AccessSnapshot) => void; fail?: (code: string) => void; subscribed: number } = { subscribed: 0 };
 vi.mock('./accessStore', () => ({
   firestoreAccessSource: () => ({
-    watch: (_uid: string, onSnap: (s: AccessSnapshot) => void) => {
+    watch: (_uid: string, onSnap: (s: AccessSnapshot) => void, onError: (code: string) => void) => {
+      access.subscribed += 1;
       access.emit = onSnap;
+      access.fail = onError;
       return () => {
+        if (access.emit !== onSnap) return;
         access.emit = undefined;
+        access.fail = undefined;
       };
     },
     claimAdmin: () => Promise.reject({ code: 'permission-denied' }),
@@ -311,4 +315,12 @@ it('접근 상태를 <html data-access>에 적고, 로그아웃하면 지운다'
   expect(html.dataset.access).toBe('user');
   app.destroy();
   expect(html.dataset.access).toBeUndefined();
+});
+
+it('내 허가 문서를 지켜보다 거부돼도 허가 없음 안내를 띄우지 않는다(규칙 배포 직후)', async () => {
+  const html = document.documentElement;
+  const { root, notice } = await start('watch-denied');
+  access.fail!('permission-denied');
+  await tick();
+  expect([notice(), root.querySelector('.calendar') !== null, html.dataset.access]).toEqual([null, true, 'checking']);
 });

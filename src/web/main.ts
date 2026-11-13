@@ -389,15 +389,16 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
     }
     shown = next;
   }
-  const stopWatch = watchAccess(firestoreAccessSource(db), session, (state) => {
+  // 허가 없음인 동안 화면이 다시 보이거나 연결이 돌아오면 다시 확인한다.
+  const watch = watchAccess(firestoreAccessSource(db), session, (state) => {
     access = state;
     document.documentElement.dataset.access = state; // 실제 브라우저 확인이 접근 상태가 왔는지 알 수 있게 한다
     apply();
-  });
+  }, { target: window, doc: document });
   return {
     destroy() {
       stopped = true;
-      stopWatch();
+      watch.stop();
       screen?.destroy();
       screen = null;
       notice?.destroy();
