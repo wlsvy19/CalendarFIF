@@ -5,7 +5,7 @@ import type { MonthDoc } from '../../src/core/types';
 import { FirestoreMonthStore, monthDocRef } from '../../src/sync/firestoreStore';
 import { parseMonthDoc } from '../../src/sync/monthDoc';
 import { rec } from '../../src/sync/testing';
-import { OWNER, createEnv, ownerDb } from './env';
+import { OWNER, createEnv, otherDb, ownerDb } from './env';
 
 let env: RulesTestEnvironment;
 let db: Firestore;
@@ -56,5 +56,12 @@ it('다른 기기가 쓴 내용이 5초 안에 구독자에게 온다', async ()
   await other.transactMonth('2026-11', () => ({ '13': rec('A') }));
   await vi.waitFor(() => expect(seen.at(-1)?.days['13']?.text).toBe('A'), { timeout: 5000 });
   expect(Date.now() - started).toBeLessThan(5000);
+  stop();
+});
+it('읽을 권한이 없으면 오류 코드를 알린다', async () => {
+  const intruder = new FirestoreMonthStore(otherDb(env), OWNER);
+  const onError = vi.fn();
+  const stop = intruder.subscribeMonth('2026-11', () => {}, onError);
+  await vi.waitFor(() => expect(onError).toHaveBeenCalledWith('permission-denied'), { timeout: 5000 });
   stop();
 });

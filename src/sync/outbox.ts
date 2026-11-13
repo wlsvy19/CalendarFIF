@@ -8,6 +8,7 @@ export interface KeyValueStore {
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 const isDayValue = (v: unknown): v is DayValue => isObject(v) && typeof v.text === 'string' && typeof v.color === 'string';
+const sameValue = (a: DayValue, b: DayValue): boolean => a.text === b.text && a.color === b.color;
 const isPendingEdit = (v: unknown): v is PendingEdit =>
   isObject(v) &&
   typeof v.monthId === 'string' &&
@@ -19,8 +20,10 @@ const isPendingEdit = (v: unknown): v is PendingEdit =>
 
 /**
  * Queue of edits not yet uploaded, in order; one day may have several entries.
- * An entry is `sent` once an upload has read it (the server may already hold it),
- * and a later edit for that day is then queued as its own entry.
+ * A new edit is merged into the day's last entry only when that entry is not `sent`
+ * and the edit was made on top of it (its `base` is the entry's `next`); otherwise
+ * it is queued as its own entry with its own `base`.
+ * An entry is `sent` once an upload has read it (the server may already hold it).
  * It never caches: every read and write goes through storage so that tabs
  * sharing one storage do not erase each other. Once storage cannot be written,
  * a memory list takes over.
@@ -72,11 +75,12 @@ export class Outbox {
     list.forEach((e, i) => {
       if (e.monthId === edit.monthId && e.day === edit.day) at = i;
     });
-    if (at < 0 || list[at].sent) {
+    const last = at < 0 ? undefined : list[at];
+    if (!last || last.sent || !sameValue(edit.base, last.next)) {
       list.push(edit);
     } else {
-      const merged: PendingEdit = { ...list[at], next: edit.next, editedAt: edit.editedAt };
-      if (merged.next.text === merged.base.text && merged.next.color === merged.base.color) list.splice(at, 1);
+      const merged: PendingEdit = { ...last, next: edit.next, editedAt: edit.editedAt };
+      if (sameValue(merged.next, merged.base)) list.splice(at, 1);
       else list[at] = merged;
     }
     this.write(list);

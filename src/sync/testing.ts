@@ -27,6 +27,8 @@ export class FakeMonthStore implements MonthStore {
   failAfterDecide = new Set<string>();
   failAfterCommit = new Set<string>();
   afterCommit?: () => void;
+  /** When set, a failing month rejects with an error carrying this `code` (like a FirestoreError). */
+  failCode?: string;
 
   constructor(docs: Record<string, MonthDoc> = {}) {
     this.docs = new Map(Object.entries(docs));
@@ -35,7 +37,10 @@ export class FakeMonthStore implements MonthStore {
   async transactMonth(monthId: string, decide: (server: MonthDoc | null) => Record<string, DayChange>): Promise<void> {
     this.calls.push(monthId);
     if (this.hold) await this.hold;
-    if (this.failMonths.has(monthId)) throw new Error(`transaction failed: ${monthId}`);
+    if (this.failMonths.has(monthId)) {
+      const error = new Error(`transaction failed: ${monthId}`);
+      throw this.failCode === undefined ? error : Object.assign(error, { code: this.failCode });
+    }
     if (this.beforeSecondDecide) {
       decide(this.docs.get(monthId) ?? null);
       const hook = this.beforeSecondDecide;

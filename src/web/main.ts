@@ -30,6 +30,8 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
   });
   const stopAutoFlush = startAutoFlush(engine, window, document);
   const offStatus = engine.subscribe(() => store.refresh());
+  // 트랜잭션은 SDK의 로컬 캐시를 거치지 않으므로, 올린 값을 다음 스냅숏이 올 때까지 화면에 남긴다.
+  const offCommit = engine.onCommit((monthId, changes) => store.noteCommitted(monthId, changes));
   const onStorage = (event: StorageEvent) => {
     if (event.key === null || event.key.startsWith('calfif.outbox.')) store.refresh();
   };
@@ -149,6 +151,7 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
       calendar.destroy();
       window.removeEventListener('storage', onStorage);
       offStatus();
+      offCommit();
       stopAutoFlush();
       store.destroy();
     },

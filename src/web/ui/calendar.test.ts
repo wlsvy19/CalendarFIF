@@ -11,6 +11,7 @@ function fakeStore(days: Record<string, DayValue>) {
     show: vi.fn((m: string) => { month = m; }),
     days: (m: string) => (m === '2026-11' ? days : {}),
     onChange: () => () => {},
+    readProblem: () => null,
   } as unknown as CalendarStore & { show: ReturnType<typeof vi.fn> };
 }
 function mount(days: Record<string, DayValue> = {}, status: SyncStatus = { state: 'synced', pending: 0 }) {
@@ -59,4 +60,19 @@ it('달을 넘기고, 날짜를 누르면 알린다', () => {
 });
 it('대기 중이면 건수를 보여 준다', () => {
   expect(mount({}, { state: 'waiting', pending: 2 }).root.textContent).toContain('오프라인 (대기 2건)');
+});
+it('읽기 문제를 보여 주고, 연결이 끊기거나 이어지면 상태를 다시 그린다', () => {
+  const problem = mount();
+  (problem.store as unknown as { readProblem: () => string | null }).readProblem = () => 'denied';
+  window.dispatchEvent(new Event('offline'));
+  expect(problem.root.querySelector('.sync-text')!.textContent).toBe('권한이 없어 읽지 못했습니다');
+
+  const { root } = mount();
+  const onLine = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+  window.dispatchEvent(new Event('offline'));
+  expect(root.querySelector('.sync-text')!.textContent).toBe('오프라인');
+  onLine.mockReturnValue(true);
+  window.dispatchEvent(new Event('online'));
+  expect(root.querySelector('.sync-text')!.textContent).toBe('동기화됨');
+  onLine.mockRestore();
 });

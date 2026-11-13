@@ -1,8 +1,8 @@
 import { expect, it, vi } from 'vitest';
-import type { MonthDoc } from '../core/types';
+import type { DayChange, MonthDoc } from '../core/types';
 import { SyncEngine } from './engine';
 import { Outbox } from './outbox';
-import { FakeMonthStore, MemoryStorage, rec, val } from './testing';
+import { FakeMonthStore, MemoryStorage, edit, rec, val } from './testing';
 
 function setup(docs: Record<string, MonthDoc> = {}) {
   const store = new FakeMonthStore(docs);
@@ -126,4 +126,83 @@ it('decide 뒤에 실패하면 두 편집이 모두 남아 다음에 한 번에 
   expect(store.docs.get('2026-11')!.days['13'].text).toBe('A\nB\nC');
   expect(engine.status().pending).toBe(0);
   expect(store.calls).toEqual(['2026-11']);
+});
+it('같은 날짜의 따로 넣은 편집 두 개가 모두 반영된다', async () => {
+  const { store, outbox, engine } = setup({ '2026-11': { days: { '13': rec('A') } } });
+  outbox.put(edit('2026-11', '13', 'A', 'A\nX', 100));
+  outbox.put(edit('2026-11', '13', 'A', 'A\nY', 200));
+  await engine.flush();
+  expect(store.docs.get('2026-11')!.days['13'].text).toBe('A\nY\nX');
+  expect(outbox.list()).toEqual([]);
+});
+it('올린 달의 변경을 알리고, 실패했거나 바뀐 것이 없으면 알리지 않는다', async () => {
+  const { store, outbox, engine } = setup({ '2026-12': { days: { '01': rec('B') } } });
+  const seen: [string, Record<string, DayChange>, number][] = [];
+  engine.onCommit((monthId, changes) => seen.push([monthId, changes, outbox.list().length]));
+  store.failMonths.add('2026-11');
+  engine.saveEdit('2026-11', '13', val(''), val('A'));
+  await engine.flush();
+  expect(seen).toEqual([]);
+  store.failMonths.clear();
+  await engine.flush();
+  expect(seen).toEqual([['2026-11', { '13': { text: 'A', color: '', editedAt: 1000, editedBy: 'pc' } }, 0]]);
+  outbox.put(edit('2026-12', '01', '', 'B'));
+  await engine.flush();
+  expect(seen).toHaveLength(1);
+  expect(outbox.list()).toEqual([]);
+});
+it('트랜잭션이 다시 돌면 마지막 decide의 변경을 알린다', async () => {
+  const { store, engine } = setup({ '2026-11': { days: { '13': rec('A\nB') } } });
+  const seen: Record<string, DayChange>[] = [];
+  engine.onCommit((_monthId, changes) => seen.push(changes));
+  store.beforeSecondDecide = () => { store.docs.set('2026-11', { days: { '13': rec('A\nB2', '', 300) } }); };
+  engine.saveEdit('2026-11', '13', val('A\nB'), val('A\nB\nC'));
+  await engine.flush();
+  expect(seen).toEqual([{ '13': { text: 'A\nB2\nC', color: '', editedAt: 1000, editedBy: 'pc' } }]);
+});
+it('권한 오류로 실패하면 이유를 알리고, 성공하거나 대기열이 비면 지운다', async () => {
+  const { store, outbox, engine } = setup();
+  store.failMonths.add('2026-11');
+  store.failCode = 'permission-denied';
+  engine.saveEdit('2026-11', '13', val(''), val('A'));
+  await engine.flush();
+  expect(engine.status()).toEqual({ state: 'waiting', pending: 1, reason: 'denied' });
+  store.failCode = 'unavailable';
+  await engine.flush();
+  expect(engine.status()).toEqual({ state: 'waiting', pending: 1 });
+  store.failCode = 'unauthenticated';
+  await engine.flush();
+  expect(engine.status().reason).toBe('denied');
+  store.failMonths.clear();
+  await engine.flush();
+  expect(engine.status()).toEqual({ state: 'synced', pending: 0 });
+
+  store.failMonths.add('2026-11');
+  store.failCode = 'permission-denied';
+  engine.saveEdit('2026-11', '14', val(''), val('B'));
+  await engine.flush();
+  expect(engine.status().reason).toBe('denied');
+  outbox.put(edit('2026-11', '14', 'B', ''));
+  expect(outbox.list()).toEqual([]);
+  engine.saveEdit('2026-11', '15', val(''), val('C'));
+  expect(engine.status().reason).toBeUndefined();
+  await engine.flush();
+});
+it('실패한 뒤 다시 올리는 동안에는 계속 대기로 알린다', async () => {
+  const { store, engine } = setup();
+  const states: string[] = [];
+  engine.subscribe((s) => states.push(s.state));
+  store.failMonths.add('2026-11');
+  engine.saveEdit('2026-11', '13', val(''), val('A'));
+  await engine.flush();
+  expect(states).toContain('sending');
+  expect(states.at(-1)).toBe('waiting');
+  const afterFirstFailure = states.length;
+  await engine.flush();
+  await engine.flush();
+  expect(states.slice(afterFirstFailure)).not.toContain('sending');
+  expect(states.at(-1)).toBe('waiting');
+  store.failMonths.clear();
+  await engine.flush();
+  expect(states.at(-1)).toBe('synced');
 });

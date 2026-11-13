@@ -58,9 +58,12 @@ export function mountCalendar(
   const grid = q('.grid');
   const [todayBtn, prevBtn, nextBtn, settingsBtn] = [...el.querySelectorAll<HTMLButtonElement>('.app-nav button')];
 
-  function renderStatus(status: SyncStatus): void {
-    syncEl.dataset.state = status.state === 'synced' ? 'ok' : status.state === 'sending' ? 'busy' : 'wait';
-    syncText.textContent = statusText(status);
+  function renderStatus(status: SyncStatus = deps.status.status()): void {
+    const readProblem = store.readProblem();
+    const online = navigator.onLine;
+    const trouble = readProblem !== null || (status.state === 'synced' && !online);
+    syncEl.dataset.state = (trouble || status.state === 'waiting') ? 'wait' : status.state === 'sending' ? 'busy' : 'ok';
+    syncText.textContent = statusText(status, readProblem, online);
   }
 
   function render(): void {
@@ -170,9 +173,16 @@ export function mountCalendar(
     }
   });
 
-  const offChange = store.onChange(render);
-  renderStatus(deps.status.status());
+  // 읽기 문제는 store가 바뀔 때, 연결 상태는 창의 online/offline 이벤트로 알 수 있다.
+  const offChange = store.onChange(() => {
+    render();
+    renderStatus();
+  });
+  renderStatus();
   const offStatus = deps.status.subscribe(renderStatus);
+  const onConnection = (): void => renderStatus();
+  window.addEventListener('online', onConnection);
+  window.addEventListener('offline', onConnection);
   const onResize = (): void => render();
   window.addEventListener('resize', onResize);
   root.appendChild(el);
@@ -182,6 +192,8 @@ export function mountCalendar(
     destroy() {
       offChange();
       offStatus();
+      window.removeEventListener('online', onConnection);
+      window.removeEventListener('offline', onConnection);
       window.removeEventListener('resize', onResize);
       el.remove();
     },

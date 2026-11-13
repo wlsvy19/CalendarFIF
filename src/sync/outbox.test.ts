@@ -7,8 +7,21 @@ const KEY = 'calfif.outbox.u1';
 it('같은 날짜의 편집은 base를 두고 next와 editedAt만 바꾼다', () => {
   const o = new Outbox(new MemoryStorage(), 'u1');
   o.put(edit('2026-11', '13', 'A', 'A\nB', 100));
-  o.put(edit('2026-11', '13', 'ignored', 'A\nB\nC', 200));
+  o.put(edit('2026-11', '13', 'A\nB', 'A\nB\nC', 200));
   expect(o.list()).toEqual([edit('2026-11', '13', 'A', 'A\nB\nC', 200)]);
+});
+it('대기 중인 편집 위에서 고친 것이 아니면 따로 넣는다', () => {
+  const o = new Outbox(new MemoryStorage(), 'u1');
+  o.put(edit('2026-11', '13', 'A', 'A\nX', 100));
+  o.put(edit('2026-11', '13', 'A', 'A\nY', 200));
+  expect(o.list()).toEqual([edit('2026-11', '13', 'A', 'A\nX', 100), edit('2026-11', '13', 'A', 'A\nY', 200)]);
+});
+it('같은 날짜의 마지막 항목 위에서 고친 것만 합친다', () => {
+  const o = new Outbox(new MemoryStorage(), 'u1');
+  o.put(edit('2026-11', '13', 'A', 'A\nX', 100));
+  o.put(edit('2026-11', '13', 'A', 'A\nY', 200));
+  o.put(edit('2026-11', '13', 'A\nY', 'A\nY\nZ', 300));
+  expect(o.list()).toEqual([edit('2026-11', '13', 'A', 'A\nX', 100), edit('2026-11', '13', 'A', 'A\nY\nZ', 300)]);
 });
 it('base로 되돌린 편집은 대기열에서 빠진다', () => {
   const o = new Outbox(new MemoryStorage(), 'u1');
@@ -27,7 +40,7 @@ it('탭 두 개가 같은 저장소를 써도 서로의 편집을 지우지 않�
 it('보낸 뒤 바뀌지 않은 편집만 지운다', () => {
   const o = new Outbox(new MemoryStorage(), 'u1');
   const sent = o.put(edit('2026-11', '13', 'A', 'B', 100));
-  o.put(edit('2026-11', '13', 'A', 'C', 200));
+  o.put(edit('2026-11', '13', 'B', 'C', 200));
   o.remove(sent);
   expect(o.list()).toEqual([edit('2026-11', '13', 'A', 'C', 200)]);
 });
