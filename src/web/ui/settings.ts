@@ -1,3 +1,5 @@
+import { dismiss } from './sheetMotion';
+
 export type AccountProps = { email: string; pending: number; storageOk: boolean; corruptFound: boolean; onSignOut(): void };
 
 // 계정, 동기화, (extra), 로그아웃. 웹앱 설정 화면과 PC 앱 설정의 계정 쪽이 함께 쓴다.
@@ -123,8 +125,7 @@ export function mountSettings(
   return {
     destroy() {
       document.documentElement.classList.remove('sheet-open');
-      scrim.remove();
-      sheet.remove();
+      dismiss(scrim, sheet);
       if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
     },
   };

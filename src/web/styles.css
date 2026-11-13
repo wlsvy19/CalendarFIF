@@ -157,7 +157,7 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 .cell:focus-visible { outline-offset: -2px; }
-.scrim { position: fixed; z-index: 20; inset: 0; background: var(--scrim); }
+.scrim { position: fixed; z-index: 20; inset: 0; background: var(--scrim); animation: scrim-in 0.24s ease-out; }
 .sheet {
   position: fixed;
   z-index: 21;
@@ -174,11 +174,12 @@ body {
   border-radius: 18px 18px 0 0;
   background: var(--surface);
   box-shadow: 0 -10px 30px -16px var(--shadow);
-  animation: sheet-in 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: sheet-in 0.42s cubic-bezier(0.32, 0.72, 0, 1);
 }
 .sheet:focus { outline: none; }
 
-@keyframes sheet-in { from { transform: translateY(28px); opacity: 0; } }
+@keyframes sheet-in { from { transform: translateY(100%); } }
+@keyframes scrim-in { from { opacity: 0; } }
 :root.sheet-open { overflow: hidden; }
 .sheet-bar {
   flex: none;
@@ -436,11 +437,18 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
     padding-bottom: 20px;
     animation: none;
   }
+  .scrim { animation: none; }
   .memo-input { min-height: 200px; }
   .calendar { padding-bottom: 0; }
   .calendar .cell { padding: 6px 6px 3px; }
   .calendar .ln { height: 17px; font-size: 13px; line-height: 17px; }
 }
+
+/* 손가락으로 누르는 동안 단추가 반응한다(마우스가 없는 화면에서만). */
+@media (hover: none) {
+  .pill:active, .iconbtn:active, .textbtn:active, .donebtn:active, .settings-btn:active, button.primary:active, .swatch:active { opacity: 0.55; }
+}
+button { touch-action: manipulation; }
 
 @media (prefers-reduced-motion: reduce) {
   .sheet { animation: none; }

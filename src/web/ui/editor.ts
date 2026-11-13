@@ -1,6 +1,7 @@
 import { PALETTE } from '../../core/color';
 import { normalizeText, toggleDoneInRange } from '../../core/text';
 import type { DayValue } from '../../core/types';
+import { dismiss } from './sheetMotion';
 
 const WEEKDAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 const WIDE_PX = 880;
@@ -179,8 +180,7 @@ export function mountEditor(
       viewport?.removeEventListener('resize', followViewport);
       viewport?.removeEventListener('scroll', followViewport);
       document.documentElement.classList.remove('sheet-open');
-      scrim.remove();
-      sheet.remove();
+      dismiss(scrim, sheet);
       if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
     },
   };
