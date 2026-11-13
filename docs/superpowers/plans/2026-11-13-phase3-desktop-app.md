@@ -1,5 +1,7 @@
 # CalendarFIF ③ 단계: PC 바탕화면 앱 Implementation Plan
 
+> **상태:** 2026-11-13에 Task 1~10과 전체 검토 수정을 끝냈다. 실제 바탕화면에서의 확인은 사용자가 한다. 결과와 미뤄 둔 것은 `docs/superpowers/phase3-results.md`에 있다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 웹앱 화면을 투명한 Electron 창에 담아 Windows 바탕화면에 붙이고, DesktopCal의 설정 대부분과 트레이·전역 단축키·자동 실행을 갖춘 PC 앱을 만든다. 아이폰 웹앱의 달 넘기기를 손가락을 따라 움직이게 고친다.

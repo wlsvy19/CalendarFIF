@@ -16,13 +16,18 @@ PC(Windows)와 아이폰에서 날짜별 메모를 양방향으로 동기화하�
 | `README.md` | 실행 방법, 배포, DesktopCal 기록 가져오기와 따라가기 사용법. |
 | `docs/firebase-setup.md` | Firebase 프로젝트를 처음 만드는 순서(화면별). |
 | `docs/superpowers/specs/2026-11-13-pc-desktop-app-design.md` | ③ 단계(PC 바탕화면 앱) 설계. 조사 결과, 창을 바탕화면에 붙이는 방식, 넣을 설정 목록. |
+| `docs/superpowers/plans/2026-11-13-phase3-desktop-app.md` | ③ 단계 구현 계획. 작업 10개. |
+| `docs/superpowers/phase3-results.md` | ③ 단계 결과. 확인된 것, 사람이 봐야 하는 것, 진행하면서 정한 것, 미뤄 둔 것. |
 
 ## 지금 상태 (2026-11-13)
 
 - ① 단계가 끝났다. 웹앱이 배포되어 있고, DesktopCal 기록 789일을 옮겼고, 사용자가 PC와 아이폰에서 확인했다.
 - 이 폴더는 사용자의 실제 Firebase 프로젝트에 연결되어 있다. 프로젝트 ID와 설정값은 `.env.local`과 `.firebaserc`에 있고 git에는 없다.
 - 사용자는 PC에서 DesktopCal을 계속 쓰면서 따라가기(`npm run import -- --follow`)로 CalendarFIF에 넘긴다.
-- 사용자가 순서를 맡겨서(2026-11-13) ③ 단계(PC 바탕화면 앱)를 ② 단계(아이폰 위젯)보다 먼저 한다. ③은 브랜치 `phase-3-desktop-app`에서 진행한다. 사용자가 자리를 비우며 알아서 계속 만들라고 해서 화면 시안 확인 없이 설계했다. 작성자가 정한 것은 ③ 설계 문서 14절에 있고 사용자가 돌아와서 바꿀 수 있다.
+- 사용자가 순서를 맡겨서(2026-11-13) ③ 단계(PC 바탕화면 앱)를 ② 단계(아이폰 위젯)보다 먼저 했다. 브랜치 `phase-3-desktop-app`에 작업 10개와 전체 검토 수정까지 들어 있고 GitHub에 올라가 있다. `main`에는 아직 합치지 않았다. 화면이 잠긴 채로 만들어서 실제 바탕화면에서 눌러 본 사람이 없기 때문이다. 사용자가 써 본 뒤에 합친다. 결과와 남은 것은 `docs/superpowers/phase3-results.md`에 있다.
+- 꾸린 실제 앱은 `release\CalendarFIF-win32-x64\CalendarFIF.exe`다(git에 없다). 사용자가 직접 실행한다. 세션이 이 실행 파일이나 `npm run desktop`을 띄우지 않는다. 이 둘은 사용자의 실제 프로필(`%APPDATA%\CalendarFIF`)과 실제 프로젝트를 쓰고, 꾸린 앱은 처음 실행할 때 Windows 시작 프로그램에 등록한다.
+- PC 앱의 시험은 `npm run desktop:smoke`(에뮬레이터, 저장소 안의 프로필)로 한다. `src/desktop/win32.ts`나 `window.ts`를 고친 뒤에는 여러 번 돌려 상태 파일의 `nestedNativeCalls`가 0인지 본다. 창 메시지 처리 안에서 Windows 기능을 부르면 앱이 죽는다.
+- 화면 시안 확인 없이 설계했다. 작성자가 정한 것은 ③ 설계 문서 14절과 결과 문서에 있고 사용자가 바꿀 수 있다.
 - 사용자가 자리에 없는 동안에는 실제 웹앱에 다시 배포하지 않고, 가져오기를 실행하지 않고, DesktopCal을 건드리지 않는다.
 
 ## 사용자가 정한 것
