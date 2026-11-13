@@ -80,6 +80,14 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   d = await right();
   record('오른쪽으로 한 번 더 끌면 한 달 더 전으로 간다', followsFinger(d.samples, 'right') && d.after !== start && d.after !== next, describe(d));
 
+  // 사용자가 "살짝 밀어도 넘어가야 한다"고 했다: 40px이면 넘어가고, 12px을 천천히 움직인 것은 넘어가지 않는다.
+  d = await drag([220, pagerY], [180, pagerY]);
+  record('40px만 밀어도 다음 달이 된다', d.after !== d.before, describe(d));
+  d = await drag([180, pagerY], [220, pagerY]);
+  record('40px만 반대로 밀어도 이전 달이 된다', d.after !== d.before, describe(d));
+  d = await drag([200, pagerY], [212, pagerY]);
+  record('12px을 천천히 움직인 것은 달을 넘기지 않는다', d.after === d.before, describe(d));
+
   const cell = await cdp.evaluate<{ x: number; y: number }>(
     "(() => { const c = document.querySelectorAll('.cell:not(.other)')[14].getBoundingClientRect(); return { x: Math.round(c.left + c.width / 2), y: Math.round(c.top + c.height / 2) }; })()",
   );

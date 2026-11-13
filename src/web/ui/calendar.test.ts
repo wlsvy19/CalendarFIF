@@ -166,6 +166,16 @@ describe('달 넘기기', () => {
     vi.advanceTimersByTime(300);
     expect(store.show).toHaveBeenLastCalledWith('2026-10');
   });
+  it('살짝만 밀어도 넘어간다', () => {
+    vi.useFakeTimers();
+    const { store, fire } = swipeMount();
+    fire('pointerdown', 300, 300, 0);
+    fire('pointermove', 315, 301, 200);
+    fire('pointermove', 330, 301, 400);
+    fire('pointerup', 330, 301, 600); // 30px을 천천히 밀었다
+    vi.advanceTimersByTime(300);
+    expect(store.show).toHaveBeenLastCalledWith('2026-10');
+  });
   it('달력이 포인터를 잃으면 끌기를 그만두고 제자리로 돌아간다', () => {
     vi.useFakeTimers();
     const { store, track, fire } = swipeMount();
