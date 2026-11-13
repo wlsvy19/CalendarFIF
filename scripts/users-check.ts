@@ -1,6 +1,7 @@
 // 관리자의 사용자 추가 흐름을 실제 브라우저(헤드리스 Edge)에서 사람이 하듯 눌러 가며 확인한다.
 // 에뮬레이터와 씨앗 자료가 필요하다: 관리자 test@example.com / test-password, 사용자 user@example.com / user-password.
-// 단추는 화면에 보이는 가운데를 실제 마우스로 눌렀다 뗀다(Input.dispatchMouseEvent). 가려졌거나 화면 밖이면 누르지 못한 것으로 친다.
+// 단추는 화면에 보이는 가운데를 실제 터치로 누른다(Input.dispatchTouchEvent의 탭). 가려졌거나 화면 밖이면 누르지 못한 것으로 친다.
+// 마우스 누름(Input.dispatchMouseEvent)은 폰 흉내 아래에서 터치로 바뀌기만 하고 클릭이 되지 않으며 명령이 돌아오지 않는다(2026-11-14 확인).
 // 칸은 초점을 준 뒤 Input.insertText로 적는다. 단계 사이에 시트를 닫을 때만 요소의 click()을 쓴다. 앱의 함수는 부르지 않는다.
 // 편집 중에 중지되는 단계(17)는 관리자의 변경을 에뮬레이터의 관리자 경로(REST, Bearer owner)로 쓴다. 사용 중지 단추 자체는 7단계에서 본다.
 // 사용법: npx tsx scripts/users-check.ts --url <주소> [--with-vite]
@@ -106,8 +107,20 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
       await sleep(100);
     }
   }
+  /** 입력 명령이 돌아오지 않으면 확인 전체가 멈추므로 시간을 정해 둔다. */
+  async function input(method: string, params: object): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<never>((_, fail) => {
+      timer = setTimeout(() => fail(new Error(`${method}가 5초 안에 돌아오지 않았다`)), 5000);
+    });
+    try {
+      await Promise.race([cdp.send(method, params), late]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   /**
-   * 사람처럼 누른다: 요소를 화면에 들이고 자리가 멎을 때까지(시트가 미끄러지는 중이면) 기다린 뒤, 가운데를 실제 마우스로 눌렀다 뗀다.
+   * 사람처럼 누른다: 요소를 화면에 들이고 자리가 멎을 때까지(시트가 미끄러지는 중이면) 기다린 뒤, 가운데를 실제 터치로 누르고 뗀다.
    * 꺼져 있거나 가려졌거나 화면 밖이면 누르지 않는다. 그 요소에 클릭이 닿았으면 true.
    */
   async function press(element: string, timeoutMs = 5000): Promise<boolean> {
@@ -137,9 +150,8 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     }
     await js(`__uc.arm(() => ${element})`);
     const { x, y } = spot;
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+    await input('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] });
+    await input('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     const clicked = (await waitFor<boolean>('window.__ucClicked === true', 2000)) === true;
     await js('window.__ucOff?.()').catch(() => {});
     if (!clicked) console.log('  (눌렀지만 그 요소에 클릭이 닿지 않았다)');
@@ -153,10 +165,10 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     );
     if (!ready) return false;
     if (text === '') {
-      await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 });
-      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 });
+      await input('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 });
+      await input('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 });
     } else {
-      await cdp.send('Input.insertText', { text });
+      await input('Input.insertText', { text });
     }
     return (await js<string | null>(`${element}?.value ?? null`)) === text;
   }
