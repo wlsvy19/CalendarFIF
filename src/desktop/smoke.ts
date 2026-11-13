@@ -355,6 +355,8 @@ async function tray(rt: Runtime, desk: Desk): Promise<Result> {
   onTop.push(win.isAlwaysOnTop());
   const atBottomAfterOnTopOff = await until(bottom, 3000);
 
+  // 화면이 입력을 받는 동안(로그인 화면 포함)은 단축키가 멈춰 등록되지 않는다. 달력이 뜨고 입력이 끝난 뒤에 등록을 본다.
+  await until(async () => (await js(win, RENDERED)) === 'calendar' && !win.isFocusable(), 15000);
   // 설정 바꾸기는 화면의 다리(IPC)로 보낸다.
   const bridge = (patch: string) => js(win, `window.calfifDesktop.setSystem(${patch})`) as Promise<SystemState>;
   const hotkeyPatch = (key: string, name: 'hideHotkey' | 'contentHotkey', enabled: boolean) => `{ ${name}: { accelerator: '${key}', enabled: ${enabled} } }`;
