@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { app, globalShortcut, type BrowserWindow, type MenuItem } from 'electron';
+import { BrowserWindow, Menu, app, globalShortcut, type MenuItem } from 'electron';
 import type { SystemPatch, SystemState } from './api';
 import type { MenuAction } from './menu';
 import { trayMenu } from './tray';
@@ -9,14 +9,18 @@ import { clampBounds, defaultBounds, layoutKey, resolveBounds, type Rect } from 
 import { isAtBottom } from './policy';
 import type { Runtime, Scenario } from './runtime';
 import { loadDesktopSettings } from './settings';
-import { getExStyle, getOwner, nativeLoaded, nestedNativeCalls, windowsBelow } from './win32';
-import { blocked, displayInfos, getHwnd, getMode, getProgman, getSettings, getWindow, sendCommand, signals, startAdjust, windowState, windowsCreated } from './window';
+import { findProgman, getExStyle, getOwner, isWindow, nativeLoaded, nestedNativeCalls, windowsBelow } from './win32';
+import {
+  blocked, displayInfos, getHwnd, getMode, getProgman, getSettings, getWindow, sendCommand, setStaleProgmanForSmoke, signals, startAdjust, windowState, windowsCreated,
+} from './window';
 
 // main.ts가 메뉴 항목과 단축키가 부르는 길을 시험 실행에 건넨다.
 export type Desk = { runAction(a: MenuAction): void; applySystem(p: SystemPatch): SystemState };
 type Result = { fields: Record<string, unknown>; checks: Record<string, boolean> };
-const TOTAL_MS = 45000;
+const TOTAL_MS = 60000;
 const BRIDGE_KEYS = ['adjustDone', 'drag', 'dragStart', 'getSystem', 'onCommand', 'setInteractive', 'setSystem', 'showMenu'];
+const HIDE_KEY = 'Ctrl+Alt+Shift+F9';
+const CONTENT_KEY = 'Ctrl+Alt+Shift+F10';
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 async function until(test: () => boolean | Promise<boolean>, ms: number): Promise<boolean> {
@@ -37,6 +41,20 @@ export function guardLoginItem(): void {
 }
 
 const js = (win: BrowserWindow, code: string): Promise<unknown> => win.webContents.executeJavaScript(code, true);
+// 화면이 죽어 있는 동안에는 executeJavaScript가 던지거나 끝나지 않을 수 있다. 1초 안에 답이 없으면 fallback이다.
+async function jsOr(win: BrowserWindow, code: string, fallback: unknown): Promise<unknown> {
+  try {
+    return await Promise.race([js(win, code), sleep(1000).then(() => fallback)]);
+  } catch {
+    return fallback;
+  }
+}
+const bottomNow = (): boolean => isAtBottom(windowsBelow(getHwnd(), getProgman()), getProgman());
+// 도구 창 모양: WS_EX_TOOLWINDOW가 켜져 있고 WS_EX_APPWINDOW가 꺼져 있다(작업 표시줄과 Alt+Tab에서 빠짐).
+const toolStyle = (): boolean => {
+  const ex = getExStyle(getHwnd());
+  return (ex & 0x80) !== 0 && (ex & 0x40000) === 0;
+};
 
 const RENDERED = "document.querySelector('.app.calendar') ? 'calendar' : (document.querySelector('form') ? 'login' : '')";
 
@@ -81,18 +99,22 @@ function secondInstance(): Promise<{ exitCode: number | null; notified: boolean 
   });
 }
 
-async function attach(): Promise<Result> {
+async function attach(_rt: Runtime, desk: Desk): Promise<Result> {
   let win = getWindow();
   if (!win) return { fields: {}, checks: { window: false } };
   const first0 = win;
+  const firstHwnd = getHwnd();
   await until(() => getMode() !== null, 10000);
   await until(async () => (await js(first0, RENDERED)) === 'calendar', 15000);
   const rendered = (await js(first0, RENDERED)) as string;
   // 로그인 화면은 입력을 위해 창을 활성화 가능하게 둔다. 달력으로 넘어가 입력이 끝나면 다시 맨 아래로 간다.
-  await until(() => !first0.isFocusable() && isAtBottom(windowsBelow(getHwnd(), getProgman()), getProgman()), 3000);
+  await until(() => !first0.isFocusable() && bottomNow(), 3000);
   const first = await measure(win);
   const bridgeKeys = (await js(win, 'Object.keys(window.calfifDesktop || {}).sort()')) as string[];
   const rendererGlobals = (await js(win, '[typeof require, typeof process].join(",")')) as string;
+  // Electron의 기본 메뉴가 없고(그 단축키도 없다) 창은 최소화할 수 없다.
+  const applicationMenu = Menu.getApplicationMenu() === null ? null : 'installed';
+  const minimizable = first0.isMinimizable();
 
   const navBefore = blocked.navigations;
   const popBefore = blocked.popups;
@@ -102,13 +124,17 @@ async function attach(): Promise<Result> {
   const navigationBlocked = stayed && blocked.navigations > navBefore;
   const popupBlocked = popup === true && blocked.popups > popBefore;
 
+  // 입력을 받는 동안과 끝난 뒤에도 도구 창 모양이 남는다(Electron의 setFocusable이 작업 표시줄 단추를 되살리므로 앱이 다시 뺀다).
   const interactive: boolean[] = [];
+  const toolWindowDuring: boolean[] = [];
   for (const on of [true, false]) {
     await js(first0, `window.calfifDesktop.setInteractive(${on})`);
     await until(() => first0.isFocusable() === on, 2000);
     interactive.push(first0.isFocusable());
+    await sleep(200); // 도구 창 모양은 다음 턴에 다시 건다
+    toolWindowDuring.push(toolStyle());
   }
-  const atBottomAfterInteractive = await until(() => isAtBottom(windowsBelow(getHwnd(), getProgman()), getProgman()), 2000);
+  const atBottomAfterInteractive = await until(bottomNow, 2000);
 
   const shotInfo = await capture(first0, 'attach');
 
@@ -118,22 +144,101 @@ async function attach(): Promise<Result> {
   const recreated = await until(() => windowsCreated() > createdBefore && getMode() === 'owned', 5000);
   win = getWindow();
   const second = win ? await measure(win) : null;
+  // 맨 아래로 보낸 횟수는 여기까지(보통의 동작)만 센다. 아래 시험은 일부러 맨 아래가 아닌 상태를 만든다.
+  const bottomAssertsNormal = blocked.bottomAsserts;
+
+  // 앱이 끝나는 중이 아니면 창을 닫을 수 없다(Alt+F4와 같은 길). 닫혔으면 다시 만든 창으로 이어 간다.
+  let closeBlocked = false;
+  if (win) {
+    const closesBefore = blocked.closes;
+    const createdBeforeClose = windowsCreated();
+    win.close();
+    await sleep(500);
+    closeBlocked = !win.isDestroyed() && win.isVisible() && getWindow() === win && windowsCreated() === createdBeforeClose && blocked.closes > closesBefore;
+    if (!closeBlocked) await until(() => windowsCreated() > createdBeforeClose && getMode() === 'owned', 5000);
+  }
+
+  let minimizeRestored = false;
+  let crash: Record<string, unknown> = { crashRecovered: false };
+  let ownerLost: Record<string, unknown> = { ownerLostRecovered: false };
+  const w = getWindow();
+  if (w) {
+    await until(async () => (await jsOr(w, RENDERED, '')) === 'calendar' && !w.isFocusable(), 15000);
+    // 그래도 최소화되면 활성화하지 않고 되돌린다.
+    w.minimize();
+    minimizeRestored = await until(() => !w.isMinimized() && w.isVisible() && !w.isFocusable(), 2000);
+    crash = await crashAndRecover(w, desk);
+    ownerLost = await loseOwner(firstHwnd);
+  }
 
   const instance = await secondInstance();
   const fields = {
-    ...first, rendered, bridgeKeys, rendererGlobals, navigationBlocked, popupBlocked, interactive, atBottomAfterInteractive,
-    recreated, ownerIsProgmanAfterRecreate: second?.ownerIsProgman ?? false, atBottomAfterRecreate: second?.atBottom ?? false,
-    loginItemCalls, nativeLoaded: nativeLoaded(), nestedNativeCalls: nestedNativeCalls(), bottomAsserts: blocked.bottomAsserts, secondInstance: instance, ...shotInfo,
+    ...first, rendered, bridgeKeys, rendererGlobals, applicationMenu, minimizable, navigationBlocked, popupBlocked, interactive,
+    toolWindowWhileInteractive: toolWindowDuring[0], toolWindowAfterInteractive: toolWindowDuring[1], atBottomAfterInteractive, closeBlocked,
+    recreated, ownerIsProgmanAfterRecreate: second?.ownerIsProgman ?? false, atBottomAfterRecreate: second?.atBottom ?? false, minimizeRestored, ...crash, ...ownerLost,
+    loginItemCalls, nativeLoaded: nativeLoaded(), nestedNativeCalls: nestedNativeCalls(), bottomAsserts: bottomAssertsNormal, bottomAssertsTotal: blocked.bottomAsserts,
+    secondInstance: instance, ...shotInfo,
   };
   const checks = {
     mode: first.mode === 'owned', ownerIsProgman: first.ownerIsProgman, atBottom: first.atBottom, toolWindow: first.toolWindow,
     appWindow: !first.appWindow, focusable: !first.focusable, visible: first.visible, rendered: rendered === 'calendar',
     bridgeKeys: JSON.stringify(bridgeKeys) === JSON.stringify(BRIDGE_KEYS), rendererGlobals: rendererGlobals === 'undefined,undefined',
+    applicationMenu: applicationMenu === null, minimizable: minimizable === false, closeBlocked, minimizeRestored,
     navigationBlocked, popupBlocked, interactive: interactive[0] === true && interactive[1] === false, atBottomAfterInteractive,
-    recreated, ownerIsProgmanAfterRecreate: fields.ownerIsProgmanAfterRecreate, loginItemCalls: loginItemCalls === 0, nativeLoaded: fields.nativeLoaded, nestedNativeCalls: fields.nestedNativeCalls === 0,
-    secondInstance: instance.exitCode === 0 && instance.notified, bottomAsserts: blocked.bottomAsserts <= 20,
+    toolWindowWhileInteractive: toolWindowDuring[0] === true, toolWindowAfterInteractive: toolWindowDuring[1] === true,
+    recreated, ownerIsProgmanAfterRecreate: fields.ownerIsProgmanAfterRecreate, crashRecovered: crash.crashRecovered === true, ownerLostRecovered: ownerLost.ownerLostRecovered === true,
+    loginItemCalls: loginItemCalls === 0, nativeLoaded: fields.nativeLoaded, nestedNativeCalls: fields.nestedNativeCalls === 0,
+    secondInstance: instance.exitCode === 0 && instance.notified, bottomAsserts: bottomAssertsNormal <= 20,
   };
   return { fields, checks };
+}
+
+const registeredHotkeys = (): number => [HIDE_KEY, CONTENT_KEY].filter((k) => globalShortcut.isRegistered(k)).length;
+
+// 화면(렌더러)을 Electron의 길로 죽인다. 입력 중(단축키 멈춤)이었어도 죽은 뒤 5초 안에 같은 창에 달력이 다시 그려지고,
+// 창은 입력을 받지 않으며 맨 아래에 있고, 켜 둔 단축키(하나)가 다시 등록되어야 한다. 시간은 render-process-gone에서 잰다.
+async function crashAndRecover(win: BrowserWindow, desk: Desk): Promise<Record<string, unknown>> {
+  desk.applySystem({ hideHotkey: { accelerator: HIDE_KEY, enabled: true } });
+  await js(win, 'window.calfifDesktop.setInteractive(true)');
+  const pausedBeforeCrash = await until(() => win.isFocusable() && registeredHotkeys() === 0, 3000);
+  let goneAt = 0;
+  let reloadStartedMs: number | null = null;
+  let loaded = false;
+  const gone = new Promise<string>((resolve) =>
+    win.webContents.once('render-process-gone', (_e, d) => {
+      goneAt = Date.now();
+      win.webContents.once('did-start-navigation', () => (reloadStartedMs = Date.now() - goneAt));
+      win.webContents.once('did-finish-load', () => (loaded = true));
+      resolve(d.reason);
+    }),
+  );
+  win.webContents.forcefullyCrashRenderer();
+  const crashReason = await Promise.race([gone, sleep(3000).then(() => 'none')]);
+  if (crashReason === 'none') return { crashRecovered: false, crashReason, pausedBeforeCrash };
+  // 죽은 화면이나 읽는 중인 화면에는 묻지 않는다(executeJavaScript가 늦게 답해 잰 시간이 늘어난다).
+  const recovered = async () =>
+    loaded && getWindow() === win && !win.isFocusable() && registeredHotkeys() === 1 && bottomNow() && (await jsOr(win, RENDERED, '')) === 'calendar';
+  const ok = await until(recovered, Math.max(0, 5000 - (Date.now() - goneAt)));
+  const crashRecoveredMs = Date.now() - goneAt;
+  desk.applySystem({ hideHotkey: { accelerator: HIDE_KEY, enabled: false } });
+  return { crashRecovered: pausedBeforeCrash && ok && crashRecoveredMs <= 5000, crashReason, crashRecoveredMs, reloadStartedMs, pausedBeforeCrash };
+}
+
+// 탐색기 재시작 흉내(실제 길): 붙어 있는 Progman 핸들을 이미 없어진 창(앞에서 없앤 첫 창)의 핸들로 바꾼다.
+// 주기적인 확인이 이를 알아채고 8초 안에 실제 Progman이 소유한, 보이고 입력을 받지 않으며 맨 아래인 창 하나가 있어야 한다.
+async function loseOwner(stale: bigint): Promise<Record<string, unknown>> {
+  const staleIsWindow = isWindow(stale);
+  const before = getWindow();
+  const createdBefore = windowsCreated();
+  setStaleProgmanForSmoke(stale);
+  const lostAt = Date.now();
+  const ok = await until(() => {
+    const w = getWindow();
+    if (!w || w === before || windowsCreated() <= createdBefore || getMode() !== 'owned') return false;
+    const real = findProgman();
+    return real !== 0n && getProgman() === real && getOwner(getHwnd()) === real && w.isVisible() && !w.isFocusable() && bottomNow() && BrowserWindow.getAllWindows().length === 1;
+  }, 8000);
+  return { ownerLostRecovered: staleIsWindow === false && ok, ownerLostRecoveredMs: Date.now() - lostAt, staleIsWindow, windowsAfterOwnerLost: BrowserWindow.getAllWindows().length };
 }
 
 const same = (a: Rect, b: Rect | null | undefined) => !!b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
@@ -202,8 +307,6 @@ async function bounds(rt: Runtime): Promise<Result> {
 const trayLabels = (): string[] => (trayMenu()?.items ?? []).map((i) => (i.type === 'separator' ? '-' : i.label));
 const trayItem = (label: string): MenuItem | undefined => trayMenu()?.items.find((i) => i.label === label);
 const TRAY_EXPECTED = ['캘린더 숨기기', '내용 숨기기', '맨 위에 보기', '-', '위치 및 크기', '설정', 'Windows 시작 시 실행', '-', '제품 정보', '닫기'];
-const HIDE_KEY = 'Ctrl+Alt+Shift+F9';
-const CONTENT_KEY = 'Ctrl+Alt+Shift+F10';
 
 // 트레이 메뉴 항목을 실제 Menu의 항목으로 눌러 본다. 단축키는 눌러 볼 수 없으므로 같은 동작 함수를 부른다.
 async function tray(rt: Runtime, desk: Desk): Promise<Result> {
@@ -270,11 +373,21 @@ async function tray(rt: Runtime, desk: Desk): Promise<Result> {
   desk.applySystem({ hideHotkey: { accelerator: HIDE_KEY, enabled: false }, contentHotkey: { accelerator: CONTENT_KEY, enabled: false } });
   const noneRegistered = !globalShortcut.isRegistered(HIDE_KEY) && !globalShortcut.isRegistered(CONTENT_KEY);
 
+  // 숨긴 채로 창이 다시 만들어져도(탐색기 재시작과 같은 길) 새 창은 보이지 않게 붙고, 보이기를 누르면 보인다.
+  click('캘린더 숨기기');
+  const createdBefore = windowsCreated();
+  win.destroy();
+  await until(() => windowsCreated() > createdBefore && getMode() === 'owned', 5000);
+  const win2 = getWindow();
+  const hiddenSurvivesRecreate = !!win2 && win2 !== win && getMode() === 'owned' && !win2.isVisible() && windowState.hidden && trayLabels()[0] === '캘린더 보이기';
+  click('캘린더 보이기');
+  const shownAfterRecreate = !!win2 && (await until(() => win2.isVisible() && getOwner(getHwnd()) === getProgman(), 2000));
+
   const fields = {
     trayCreated, trayMenu: menuNames, startItem, labelWhenHidden, hiddenState, labelWhenShown, contentLabelWhenHidden, visible, contentHidden,
     contentHiddenSaved: contentSaved.every((v, i) => v === contentHidden[i]), alwaysOnTop: onTop, onTopSaved, onTopChecked, atBottomAfterOnTopOff,
     hotkeys: both.hotkeys, registeredBoth, hotkeysAfterOff: off.hotkeys, hideRegisteredAfterOff, contentRegisteredAfterOff, badPatchIgnored,
-    startWithWindowsAfterPatch: startPatch.settings.startWithWindows, canStartWithWindows: system.canStartWithWindows, noneRegistered, loginItemCalls,
+    startWithWindowsAfterPatch: startPatch.settings.startWithWindows, canStartWithWindows: system.canStartWithWindows, noneRegistered, hiddenSurvivesRecreate, shownAfterRecreate, loginItemCalls,
   };
   const checks = {
     trayCreated, trayMenu: JSON.stringify(menuNames) === JSON.stringify(TRAY_EXPECTED),
@@ -284,7 +397,8 @@ async function tray(rt: Runtime, desk: Desk): Promise<Result> {
     alwaysOnTop: onTop[0] === true && onTop[1] === false, onTopSaved, onTopChecked: onTopChecked === true, atBottomAfterOnTopOff,
     hotkeys: both.hotkeys.hide === 'ok' && both.hotkeys.content === 'ok', registeredBoth: registeredBoth[0] && registeredBoth[1],
     hideOff: off.hotkeys.hide === 'off' && !hideRegisteredAfterOff && contentRegisteredAfterOff, badPatchIgnored,
-    startIgnored: startPatch.settings.startWithWindows === null && system.canStartWithWindows === false, noneRegistered, loginItemCalls: loginItemCalls === 0,
+    startIgnored: startPatch.settings.startWithWindows === null && system.canStartWithWindows === false, noneRegistered, hiddenSurvivesRecreate, shownAfterRecreate,
+    loginItemCalls: loginItemCalls === 0,
   };
   return { fields, checks };
 }

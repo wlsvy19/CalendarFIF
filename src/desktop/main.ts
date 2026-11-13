@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { app, dialog, globalShortcut, ipcMain, protocol } from 'electron';
+import { Menu, app, dialog, globalShortcut, ipcMain, protocol } from 'electron';
 import { CH, type SystemPatch, type SystemState } from './api';
 import { HotkeyManager } from './hotkeys';
 import { parseBool, parseDrag, parsePoint, parseSystemPatch } from './ipc';
@@ -20,10 +20,10 @@ const rt = resolveRuntime({ env: process.env, isPackaged: app.isPackaged, appPat
 app.setPath('userData', rt.profileDir);
 app.enableSandbox();
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }]);
-if (rt.smoke) {
-  app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
-  guardLoginItem();
-}
+// 모든 실행(개발, 시험, 꾸린 앱)에서 같은 Chromium 설정을 쓴다. 다른 창에 가려졌다고 보고 그리기를 멈추면
+// Win+D나 잠금을 풀고 난 뒤 바탕화면의 달력이 비어 보일 수 있다.
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+if (rt.smoke) guardLoginItem();
 
 const hotkeys = new HotkeyManager({
   register: (accelerator, fn) => {
@@ -124,6 +124,8 @@ if (!app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => {});
 
   void app.whenReady().then(() => {
+    // Electron의 기본 메뉴를 없앤다. 그 단축키(Ctrl+W, Ctrl+R, Ctrl+M, 확대·축소 등)가 입력 중인 창을 닫거나 다시 읽지 않게, 창을 만들기 전에 한다.
+    Menu.setApplicationMenu(null);
     registerAppProtocol(rt.rendererDir);
     installSecurity();
     ipcMain.on(CH.interactive, (e, on: unknown) => {
@@ -162,7 +164,8 @@ if (!app.requestSingleInstanceLock()) {
 
     });
     startDesktopWindow(rt, join(__dirname, 'preload.cjs'));
-    const startup = startupAction({ manage: rt.manageLoginItem, saved: getSettings().startWithWindows });
+    // 꾸린 앱의 실제 실행이면 시작할 때마다 본다. 켜 두었는데 이 실행 파일로 걸려 있지 않으면(폴더를 옮김) 다시 건다.
+    const startup = startupAction({ manage: rt.manageLoginItem, saved: getSettings().startWithWindows, system: loginItemOn() });
     // 걸지 못하면 저장하지 않아 다음 시작에 다시 시도한다.
     if (startup.register === null || setLoginItem(startup.register)) {
       if (startup.save !== null) updateSettings({ startWithWindows: startup.save });

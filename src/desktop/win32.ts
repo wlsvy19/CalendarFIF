@@ -76,19 +76,21 @@ export function createWin32(load: () => Api = loadUser32, log: (message: string)
     }
   }
 
-  function isWindow(h: Hwnd): boolean {
+  // 창이면 true, 창이 아니면 false. 확인하지 못했으면(읽기 실패, 호출이 던짐, 다른 호출 중) null이다.
+  function isWindow(h: Hwnd): boolean | null {
+    if (h === 0n) return false;
     const f = u();
-    if (!f || h === 0n) return false;
+    if (!f) return null;
     if (busy) {
       nested += 1;
-      return false;
+      return null;
     }
     busy = true;
     try {
       return f.IsWindow(h) !== 0;
     } catch (e) {
       fail('IsWindow', e);
-      return false;
+      return null;
     } finally {
       busy = false;
     }
@@ -153,6 +155,28 @@ export function createWin32(load: () => Api = loadUser32, log: (message: string)
     }
   }
 
+  // 도구 창 모양(WS_EX_TOOLWINDOW 켬, WS_EX_APPWINDOW 끔)만 다시 건다. 소유자는 건드리지 않는다. 못 하면 false다.
+  function setToolStyle(h: Hwnd): boolean {
+    const f = u();
+    if (!f) return false;
+    if (busy) {
+      nested += 1;
+      return false;
+    }
+    busy = true;
+    try {
+      const style = Number(BigInt(f.GetWindowLongPtrW(h, GWL_EXSTYLE)) & 0xffffffffn);
+      f.SetWindowLongPtrW(h, GWL_EXSTYLE, (style | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW);
+      f.SetWindowPos(h, 0, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+      return true;
+    } catch (e) {
+      fail('도구 창 모양', e);
+      return false;
+    } finally {
+      busy = false;
+    }
+  }
+
   function sendToBottom(h: Hwnd): boolean {
     const f = u();
     if (!f) return false;
@@ -199,7 +223,7 @@ export function createWin32(load: () => Api = loadUser32, log: (message: string)
     return out;
   }
 
-  return { nativeLoaded: (): boolean => u() !== null, nestedNativeCalls: (): number => nested, findProgman, isWindow, getOwner, getExStyle, adopt, sendToBottom, windowsBelow };
+  return { nativeLoaded: (): boolean => u() !== null, nestedNativeCalls: (): number => nested, findProgman, isWindow, getOwner, getExStyle, adopt, setToolStyle, sendToBottom, windowsBelow };
 }
 
-export const { nativeLoaded, nestedNativeCalls, findProgman, isWindow, getOwner, getExStyle, adopt: adoptWindow, sendToBottom, windowsBelow } = createWin32();
+export const { nativeLoaded, nestedNativeCalls, findProgman, isWindow, getOwner, getExStyle, adopt: adoptWindow, setToolStyle, sendToBottom, windowsBelow } = createWin32();

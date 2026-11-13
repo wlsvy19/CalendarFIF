@@ -72,3 +72,56 @@ it('앱 주소로 가는 주 프레임의 문서 이동만 지금 화면이 떠�
     leavesPage({ ...nav, url: 'app://other/' }), // 다른 호스트
   ]).toEqual([true, false, false, false, false]);
 });
+
+import { CrashBackoff, isBlockedKey, ownerStatus } from './policy';
+it('맨 아래로 보내기를 거절당하면 다시 해 볼 때는 리미터가 다음에 허락하는 때다', () => {
+  const l = new BottomLimiter();
+  expect(l.nextAllowedAt(50)).toBe(50); // 아무것도 안 했으면 지금
+  [0, 100, 200].forEach((t) => l.allow(t));
+  expect([l.nextAllowedAt(300), l.allow(999), l.allow(1000)]).toEqual([1000, false, true]); // 가장 오래된 시도가 1초 창을 벗어날 때
+  expect(l.nextAllowedAt(1001)).toBe(1100);
+  // 15번 내리 닿지 못해 물러섰다: 마지막 시도(4002)에서 30초 뒤
+  const b = new BottomLimiter();
+  for (let s = 0; s < 5; s++) for (let i = 0; i < 3; i++) b.allow(s * 1000 + i);
+  expect([b.nextAllowedAt(5000), b.allow(4002 + 29999), b.allow(4002 + 30000)]).toEqual([4002 + 30000, false, true]);
+  b.reached();
+  expect(b.nextAllowedAt(40000)).toBe(40000);
+});
+
+it('화면이 죽으면 1초, 5초, 30초, 그 뒤로는 60초 뒤에 다시 띄우고, 60초 넘게 살아 있었으면 처음부터 센다', () => {
+  const b = new CrashBackoff();
+  const delays: number[] = [];
+  let now = 0;
+  for (let i = 0; i < 6; i++) {
+    const d = b.crashed(now);
+    delays.push(d);
+    now += d;
+    b.reloaded(now);
+    now += 2000; // 다시 띄운 뒤 2초 만에 또 죽는다
+  }
+  expect(delays).toEqual([1000, 5000, 30000, 60000, 60000, 60000]);
+  b.reloaded(100000);
+  expect(b.crashed(100000 + 59999)).toBe(60000); // 60초가 못 되면 그대로
+  b.reloaded(300000);
+  expect(b.crashed(360000)).toBe(1000); // 60초 살아 있었으면 처음부터
+  b.reloaded(361000);
+  expect(b.crashed(362000)).toBe(5000);
+});
+
+it('Progman 핸들 확인: 창이면 살아 있고, 창이 아니면 잃은 것이고, 확인하지 못했으면 살아 있는 것으로 본다', () => {
+  expect([ownerStatus(true), ownerStatus(false), ownerStatus(null)]).toEqual(['alive', 'lost', 'alive']);
+});
+
+it('다시 읽기(Ctrl+R, F5, Ctrl+Shift+R)와 확대·축소 키는 창이 받지 않고, 나머지는 화면으로 간다', () => {
+  const key = (k: string, mods: Partial<{ control: boolean; shift: boolean; alt: boolean; meta: boolean }> = {}, type = 'keyDown', code = '') =>
+    isBlockedKey({ type, key: k, code, control: false, shift: false, alt: false, meta: false, ...mods });
+  expect([
+    key('r', { control: true }), key('R', { control: true, shift: true }), key('F5'), key('F5', { control: true }), key('F5', { shift: true }),
+    key('=', { control: true }), key('+', { control: true, shift: true }), key('-', { control: true }), key('0', { control: true }),
+    key('Add', { control: true }, 'keyDown', 'NumpadAdd'), key('Subtract', { control: true }, 'keyDown', 'NumpadSubtract'),
+  ]).toEqual(Array(11).fill(true));
+  expect([
+    key('r'), key('r', { control: true, alt: true }), key('F5', { alt: true }), key('r', { control: true }, 'keyUp'),
+    key('c', { control: true }), key('v', { control: true }), key('0'), key('-', { control: true, alt: true }), key('F9', { control: true, alt: true, shift: true }),
+  ]).toEqual(Array(9).fill(false));
+});

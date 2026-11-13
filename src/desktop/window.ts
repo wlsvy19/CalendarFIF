@@ -4,10 +4,10 @@ import { BrowserWindow, app, protocol, screen, session } from 'electron';
 import { CH, type DesktopCommand, type DragKind } from './api';
 import { applyDrag, clampBounds, layoutKey, resolveBounds, type DisplayInfo, type Rect } from './bounds';
 import { CSP, contentType, isAppUrl, resolveAppPath } from './protocol';
-import { BottomLimiter, PageInput, Reattacher, adjustStep, isAtBottom, leavesPage, shouldKeepBottom } from './policy';
+import { BottomLimiter, CrashBackoff, PageInput, Reattacher, adjustStep, isAtBottom, isBlockedKey, leavesPage, ownerStatus, shouldKeepBottom } from './policy';
 import type { Runtime } from './runtime';
 import { loadDesktopSettings, saveDesktopSettings, type DesktopSettings } from './settings';
-import { adoptWindow, findProgman, isWindow, sendToBottom, windowsBelow, type Hwnd } from './win32';
+import { adoptWindow, findProgman, isWindow, sendToBottom, setToolStyle, windowsBelow, type Hwnd } from './win32';
 
 const WM_WINDOWPOSCHANGED = 0x47;
 const ATTACH_FALLBACK_MS = 2000;
@@ -17,9 +17,10 @@ const DISPLAY_DEBOUNCE_MS = 500;
 export type AttachMode = 'owned' | 'bottom';
 
 // 뒤의 Task들이 바꾸는 상태. keepBottom이 읽는다.
+// hidden은 사용자가 캘린더를 숨겼는지다. 프로세스가 사는 동안 메인 프로세스가 갖고, 다시 만든 창에도 그대로 쓴다(저장하지 않는다).
 export const windowState = { interactive: false, alwaysOnTop: false, adjusting: false, hidden: false };
 // 시험 실행이 읽는 숫자.
-export const blocked = { navigations: 0, popups: 0, bottomAsserts: 0 };
+export const blocked = { navigations: 0, popups: 0, bottomAsserts: 0, closes: 0, keys: 0 };
 
 let runtime: Runtime;
 let settings: DesktopSettings;
@@ -35,6 +36,17 @@ let quitting = false;
 let created = 0;
 const reattacher = new Reattacher();
 const limiter = new BottomLimiter();
+const crashes = new CrashBackoff();
+// 지금 창에 걸린 타이머: 거절당한 맨 아래 보내기를 다시 해 보기, 죽은 화면을 다시 띄우기. 창이 없어지거나 앱이 끝나면 지운다.
+let bottomRetry: ReturnType<typeof setTimeout> | null = null;
+let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearTimers(): void {
+  if (bottomRetry) clearTimeout(bottomRetry);
+  if (reloadTimer) clearTimeout(reloadTimer);
+  bottomRetry = null;
+  reloadTimer = null;
+}
 
 function toBottom(hwnd: Hwnd): boolean {
   blocked.bottomAsserts += 1;
@@ -53,10 +65,7 @@ function pageGone(win: BrowserWindow, navigation: boolean): void {
   if (quitting || win !== current) return;
   if (navigation ? pageInput.navigationStart() : pageInput.reset(pageInput.generation)) {
     windowState.interactive = false;
-    if (!win.isDestroyed()) {
-      win.setFocusable(false);
-      keepBottom();
-    }
+    if (!win.isDestroyed()) endInput(win);
   }
   events.onPageGone();
 }
@@ -105,9 +114,11 @@ export const windowsCreated = (): number => created;
 
 export function markQuitting(): void {
   quitting = true;
+  clearTimers();
 }
 
 // "맨 아래 지키기". 입력 중이 아니고 맨 아래가 아닐 때만 맨 아래로 보낸다.
+// 리미터가 거절하면 리미터가 다음에 허락하는 때에 한 번 다시 해 본다.
 export function keepBottom(): void {
   const win = getWindow();
   if (!win || !shouldKeepBottom({ ...windowState, hidden: windowState.hidden || !win.isVisible() })) return;
@@ -116,10 +127,20 @@ export function keepBottom(): void {
     limiter.reached();
     return;
   }
-  if (!limiter.allow(Date.now())) return;
+  const now = Date.now();
+  if (!limiter.allow(now)) return retryBottom(limiter.nextAllowedAt(now) - now);
   setImmediate(() => {
     if (win === current && !win.isDestroyed()) toBottom(hwnd);
   });
+}
+
+// 기다리는 다시 해 보기는 하나뿐이다. 창이 없어지거나 앱이 끝나면 clearTimers가 지운다.
+function retryBottom(delay: number): void {
+  if (bottomRetry || quitting) return;
+  bottomRetry = setTimeout(() => {
+    bottomRetry = null;
+    keepBottom();
+  }, delay);
 }
 
 // 창 메시지 처리(Electron이 창 프로시저 안에서 동기로 부른다) 안에서는 Win32를 부르지 않는다. 확인은 다음 턴으로 미룬다.
@@ -127,17 +148,34 @@ const scheduleKeepBottom = (): void => {
   setImmediate(keepBottom);
 };
 
+// Electron은 Windows에서 setFocusable을 부를 때마다 작업 표시줄 단추를 되살린다(skipTaskbar를 끈다).
+// 바꿀 때마다 작업 표시줄에서 다시 빼고, 붙어 있는 창이면 도구 창 모양(Alt+Tab에서 빠짐)을 다음 턴에 다시 건다.
+function setFocusable(win: BrowserWindow, on: boolean): void {
+  win.setFocusable(on);
+  win.setSkipTaskbar(true);
+  setImmediate(() => {
+    if (win === current && !win.isDestroyed() && mode === 'owned') setToolStyle(currentHwnd);
+  });
+}
+
+// 입력을 받는 상태가 끝났다(편집이나 설정을 닫음, 화면이 사라짐). 사용자가 한 동작 뒤이므로 맨 아래로 보내는 횟수를
+// 처음부터 세고, 다음 턴에 맨 아래인지 본다.
+function endInput(win: BrowserWindow): void {
+  setFocusable(win, false);
+  limiter.reached();
+  scheduleKeepBottom();
+}
+
 export function setInteractive(on: boolean): void {
   const win = getWindow();
   if (!win) return;
   pageInput.report(on);
   windowState.interactive = on;
   if (on) {
-    win.setFocusable(true);
+    setFocusable(win, true);
     win.focus();
   } else {
-    win.setFocusable(false);
-    keepBottom();
+    endInput(win);
   }
 }
 
@@ -196,9 +234,12 @@ export function startAdjust(): void {
   adjustBefore = win.getBounds();
   adjustBase = null;
   windowState.adjusting = step.adjusting;
-  win.setFocusable(true); // 덮개에서 Esc를 받으려면 눌렀을 때 활성화될 수 있어야 한다
+  setFocusable(win, true); // 덮개에서 Esc를 받으려면 눌렀을 때 활성화될 수 있어야 한다
   win.setAlwaysOnTop(true);
-  if (!win.isVisible()) win.showInactive();
+  if (!win.isVisible()) {
+    windowState.hidden = false; // 조정하려고 보인 캘린더는 숨김이 풀린 것으로 둔다
+    win.showInactive();
+  }
   sendAdjust(win, true);
 }
 
@@ -232,7 +273,7 @@ export function finishAdjust(apply: boolean, event: 'finish' | 'reload' = 'finis
   adjustBefore = null;
   adjustBase = null;
   windowState.adjusting = step.adjusting;
-  win.setFocusable(windowState.interactive);
+  setFocusable(win, windowState.interactive);
   win.setAlwaysOnTop(settings.alwaysOnTop);
   windowState.alwaysOnTop = settings.alwaysOnTop;
   limiter.reached(); // 사용자가 직접 한 동작 뒤이므로 맨 아래로 보내는 횟수를 처음부터 센다.
@@ -273,16 +314,21 @@ function adopt(progman: Hwnd): boolean {
   return true;
 }
 
+// 붙인 창을 보인다. 사용자가 숨겨 둔 캘린더면 보이지 않은 채로 둔다(보이기를 누르면 showWindow가 보인다).
+function reveal(win: BrowserWindow): void {
+  if (windowState.hidden) return;
+  win.showInactive();
+  if (shouldKeepBottom(windowState)) toBottom(currentHwnd);
+}
+
 function attach(win: BrowserWindow): void {
   const progman = findProgman();
   if (progman !== 0n && adopt(progman)) {
-    win.showInactive();
-    if (shouldKeepBottom(windowState)) toBottom(currentHwnd);
+    reveal(win);
     return;
   }
   mode = 'bottom';
-  win.showInactive();
-  if (shouldKeepBottom(windowState)) toBottom(currentHwnd);
+  reveal(win);
   const poll = setInterval(() => {
     if (win !== current || win.isDestroyed()) return clearInterval(poll);
     const found = findProgman();
@@ -293,10 +339,32 @@ function attach(win: BrowserWindow): void {
   }, PROGMAN_POLL_MS);
 }
 
+const startUrl = (): string => `app://calfif/index.html${runtime.emulator ? '?autologin=1' : ''}`;
+
+// 화면(렌더러)이 죽었다. 투명한 창이 자리를 덮고 동기화도 멈추므로 잠시 뒤 같은 창에 화면을 다시 띄운다.
+// 기다리는 시간은 CrashBackoff가 정한다. 끝내는 중이거나 그 사이 창이 바뀌었으면 하지 않는다.
+function scheduleReload(win: BrowserWindow): void {
+  if (quitting || win !== current) return;
+  if (reloadTimer) clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => {
+    reloadTimer = null;
+    if (quitting || win !== current || win.isDestroyed()) return;
+    crashes.reloaded(Date.now());
+    win.loadURL(startUrl()).catch(() => {}); // 다시 죽으면 render-process-gone이 다음 시도를 건다
+  }, crashes.crashed(Date.now()));
+}
+
+// 화면 확대·축소는 늘 1이다(키는 isBlockedKey가 막고, 손가락 확대도 막는다).
+function resetZoom(win: BrowserWindow): void {
+  win.webContents.setZoomFactor(1);
+  win.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {});
+}
+
 export function createDesktopWindow(): BrowserWindow {
   const old = getWindow();
+  clearTimers(); // 옛 창의 타이머는 새 창에 쓰지 않는다
   if (old) {
-    current = null; // closed 처리기가 예기치 않은 닫힘으로 보지 않게 먼저 뗀다.
+    current = null; // closed 처리기가 예기치 않은 닫힘으로 보지 않게 먼저 뗀다. destroy()는 close 사건을 내지 않는다.
     old.destroy();
   }
   const placed = resolveBounds(settings.bounds, displayInfos());
@@ -337,56 +405,67 @@ export function createDesktopWindow(): BrowserWindow {
   win.webContents.on('render-process-gone', () => {
     finishAdjust(false, 'reload');
     pageGone(win, false);
+    scheduleReload(win);
   });
   win.webContents.on('did-start-navigation', (details) => {
     if (leavesPage(details)) pageGone(win, true);
   });
   win.webContents.on('did-finish-load', () => {
     finishAdjust(false, 'reload');
+    resetZoom(win);
     sendCommand({ type: 'contentHidden', hidden: settings.contentHidden });
+  });
+  // 다시 읽기와 확대·축소 키는 화면에 보내지 않는다(편집 중에 누르면 쓰던 글이 없어진다).
+  win.webContents.on('before-input-event', (e, input) => {
+    if (!isBlockedKey(input)) return;
+    e.preventDefault();
+    blocked.keys += 1;
+  });
+  // 사용자는 창을 닫을 수 없다(Alt+F4, 화면의 window.close). 앱이 끝날 때만 닫힌다.
+  win.on('close', (e) => {
+    if (quitting) return;
+    e.preventDefault();
+    blocked.closes += 1;
+  });
+  // 최소화할 수 없는 창이지만 그래도 최소화되면 활성화하지 않고 되돌린다. 창 메시지 처리 안이므로 다음 턴에 한다.
+  win.on('minimize', () => {
+    setImmediate(() => {
+      if (win === current && !win.isDestroyed() && win.isMinimized() && !windowState.hidden) win.showInactive();
+    });
   });
   win.on('focus', scheduleKeepBottom);
   win.hookWindowMessage(WM_WINDOWPOSCHANGED, scheduleKeepBottom);
-  win.on('show', () => {
-    windowState.hidden = false;
-    events.onChange();
-  });
-  win.on('hide', () => {
-    windowState.hidden = true;
-    events.onChange();
-  });
+  win.on('show', () => events.onChange());
+  win.on('hide', () => events.onChange());
   win.on('closed', () => {
     if (win !== current) return;
+    clearTimers();
     pageGone(win, false);
     current = null;
     mode = null;
     reattacher.closed(quitting);
   });
 
-  void win.loadURL(`app://calfif/index.html${runtime.emulator ? '?autologin=1' : ''}`);
+  void win.loadURL(startUrl());
   return win;
 }
 
+// 캘린더를 보인다(보이기, 설정 열기, 두 번째 실행). 아직 붙이지 않은 창은 붙일 때 보인다.
 export function showWindow(): void {
+  windowState.hidden = false;
   const win = getWindow();
-  if (win && !win.isVisible()) win.showInactive();
+  if (win && mode !== null && !win.isVisible()) win.showInactive();
   keepBottom();
 }
 
-export const isHidden = (): boolean => {
-  const win = getWindow();
-  return !win || !win.isVisible();
-};
+export const isHidden = (): boolean => windowState.hidden;
 
 // 캘린더 숨기기와 보이기. 숨김은 저장하지 않는다. 위치 조정 중에는 숨기지 않는다.
 export function toggleHidden(): void {
-  const win = getWindow();
-  if (!win) return;
-  if (win.isVisible()) {
-    if (!windowState.adjusting) win.hide();
-  } else {
-    showWindow();
-  }
+  if (windowState.hidden) return showWindow();
+  if (windowState.adjusting) return;
+  windowState.hidden = true;
+  getWindow()?.hide();
 }
 
 // 맨 위에 보기. 켜면 맨 아래 지키기가 멈추고, 끄면 다시 맨 아래로 보낸다. 위치 조정 중에는 조정이 끝날 때 반영된다.
@@ -407,6 +486,12 @@ export function setContentHidden(hidden: boolean): void {
   sendCommand({ type: 'contentHidden', hidden });
 }
 
+// 시험 실행에서만 쓴다: 붙어 있는 Progman 핸들을 이미 없어진 창의 핸들로 바꾼다.
+// 탐색기가 다시 시작되어 Progman이 바뀌었을 때처럼, 주기적인 확인이 이를 알아채고 창을 다시 만들어야 한다.
+export function setStaleProgmanForSmoke(stale: Hwnd): void {
+  if (runtime.smoke) currentProgman = stale;
+}
+
 // 창 만들기와 탐색기 재시작 대응을 시작한다.
 export function startDesktopWindow(rt: Runtime, preload: string): void {
   runtime = rt;
@@ -419,7 +504,7 @@ export function startDesktopWindow(rt: Runtime, preload: string): void {
   watchDisplays();
   createDesktopWindow();
   setInterval(() => {
-    if (!quitting && current && mode === 'owned' && !isWindow(currentProgman)) reattacher.ownerLost();
+    if (!quitting && current && mode === 'owned' && ownerStatus(isWindow(currentProgman)) === 'lost') reattacher.ownerLost();
   }, PROGMAN_POLL_MS);
   setInterval(() => {
     if (!quitting && reattacher.tick(findProgman() !== 0n) === 'create') createDesktopWindow();

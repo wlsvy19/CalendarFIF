@@ -52,6 +52,12 @@ export class BottomLimiter {
     this.recent = [];
     this.attempts = 0;
   }
+  // allow(t)가 처음으로 참이 될 때(t >= now). 거절당한 뒤 한 번 다시 해 볼 때를 정한다.
+  nextAllowedAt(now: number): number {
+    if (this.attempts >= BACKOFF_AFTER) return Math.max(now, this.last + BACKOFF_MS);
+    const inWindow = this.recent.filter((t) => now - t < WINDOW_MS);
+    return inWindow.length < PER_WINDOW ? now : inWindow[inWindow.length - PER_WINDOW] + WINDOW_MS;
+  }
 }
 const WINDOW_MS = 1000;
 const PER_WINDOW = 3;
@@ -93,4 +99,38 @@ export class PageInput {
     this.interactive = false;
     return was;
   }
+}
+
+// 렌더러(화면)가 죽으면 다시 띄우기까지 기다리는 시간: 1초, 5초, 30초, 그 뒤로는 60초마다.
+// 다시 띄운 화면이 60초 넘게 살아 있었으면 처음(1초)부터 센다.
+export class CrashBackoff {
+  private count = 0;
+  private since = 0;
+  crashed(now: number): number {
+    if (this.count > 0 && now - this.since >= ALIVE_RESET_MS) this.count = 0;
+    this.count += 1;
+    return RELOAD_DELAYS[Math.min(this.count, RELOAD_DELAYS.length) - 1];
+  }
+  reloaded(now: number): void {
+    this.since = now;
+  }
+}
+const RELOAD_DELAYS = [1000, 5000, 30000, 60000];
+const ALIVE_RESET_MS = 60000;
+
+// 붙어 있는 Progman 핸들의 확인 결과(IsWindow). 확인하지 못했으면(호출이 던지거나 다른 호출 중이라 들어가지 못함, null) 살아 있는 것으로 본다.
+export function ownerStatus(isWindow: boolean | null): 'alive' | 'lost' {
+  return isWindow === false ? 'lost' : 'alive';
+}
+
+// 창이 받지 않는 키: 다시 읽기(Ctrl+R, Ctrl+Shift+R, F5)와 확대·축소(Ctrl과 +, -, 0). 누르는 순간(keyDown)만 본다.
+// Alt를 함께 누른 조합은 화면으로 보낸다(전역 단축키로 고를 수 있게).
+export type KeyInput = { type: string; key: string; code: string; control: boolean; shift: boolean; alt: boolean; meta: boolean };
+const ZOOM_KEYS = ['+', '=', '-', '_', '0'];
+const ZOOM_CODES = ['NumpadAdd', 'NumpadSubtract', 'Numpad0'];
+export function isBlockedKey(i: KeyInput): boolean {
+  if (i.type !== 'keyDown' || i.alt) return false;
+  if (i.key === 'F5') return true;
+  if (!i.control) return false;
+  return i.key.toLowerCase() === 'r' || ZOOM_KEYS.includes(i.key) || ZOOM_CODES.includes(i.code);
 }
