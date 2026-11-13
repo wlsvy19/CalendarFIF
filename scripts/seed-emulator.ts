@@ -1,28 +1,34 @@
 // Auth 에뮬레이터에 시험 계정을 만든다. 127.0.0.1의 에뮬레이터에만 접속한다.
-const AUTH = 'http://127.0.0.1:9095';
+// 주소는 에뮬레이터 CLI가 정하는 환경 변수를 따르고, 없으면 표준 포트를 쓴다.
+const AUTH = `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST ?? '127.0.0.1:9095'}`;
+const FIRESTORE = `http://${process.env.FIRESTORE_EMULATOR_HOST ?? '127.0.0.1:8085'}`;
 const account = { localId: 'owner-test-uid', email: 'test@example.com', password: 'test-password' };
+const userAccount = { localId: 'user-test-uid', email: 'user@example.com', password: 'user-password' };
 
 // 관리자용 경로(Bearer owner)만 uid를 정해서 계정을 만들 수 있다.
-const res = await fetch(`${AUTH}/identitytoolkit.googleapis.com/v1/projects/demo-calfif/accounts`, {
-  method: 'POST',
-  headers: { 'content-type': 'application/json', authorization: 'Bearer owner' },
-  body: JSON.stringify(account),
-});
-if (res.ok) {
-  console.log(`시험 계정을 만들었다: ${account.email} (${account.localId})`);
-} else {
+async function createAccount(acc: typeof account, label: string): Promise<void> {
+  const res = await fetch(`${AUTH}/identitytoolkit.googleapis.com/v1/projects/demo-calfif/accounts`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer owner' },
+    body: JSON.stringify(acc),
+  });
+  if (res.ok) {
+    console.log(`${label}을 만들었다: ${acc.email} (${acc.localId})`);
+    return;
+  }
   const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
   const message = body.error?.message ?? String(res.status);
   if (/EMAIL_EXISTS|DUPLICATE_LOCAL_ID/.test(message)) {
-    console.log('시험 계정이 이미 있다. 넘어간다.');
+    console.log(`${label}이 이미 있다. 넘어간다.`);
   } else {
-    console.error(`시험 계정을 만들지 못했다: ${message}`);
+    console.error(`${label}을 만들지 못했다: ${message}`);
     process.exit(1);
   }
 }
+await createAccount(account, '시험 계정');
+await createAccount(userAccount, '두 번째 시험 계정');
 
 // 화면 확인용으로 이번 달에 지어낸 메모를 Firestore 에뮬레이터에 쓴다. 같은 문서를 매번 덮어쓴다.
-const FIRESTORE = 'http://127.0.0.1:8085';
 const now = new Date();
 const monthId = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 const sampleDays: Record<string, { text: string; color: string }> = {
@@ -50,8 +56,8 @@ const sampleFields = Object.fromEntries(
     },
   ]),
 );
-const docUrl = `${FIRESTORE}/v1/projects/demo-calfif/databases/(default)/documents/users/${account.localId}/months/${monthId}`;
-const put = await fetch(docUrl, {
+const docsRoot = `${FIRESTORE}/v1/projects/demo-calfif/databases/(default)/documents`;
+const put = await fetch(`${docsRoot}/users/${account.localId}/months/${monthId}`, {
   method: 'PATCH',
   headers: { 'content-type': 'application/json', authorization: 'Bearer owner' },
   body: JSON.stringify({ fields: { days: { mapValue: { fields: sampleFields } } } }),
@@ -61,6 +67,29 @@ if (put.ok) {
 } else {
   console.error(`예시 메모를 쓰지 못했다: ${put.status}`);
   process.exit(1);
+}
+
+// 사용 허가 문서. 같은 문서를 매번 덮어쓴다.
+const createdAt = Date.now();
+for (const g of [{ acc: account, role: 'admin' }, { acc: userAccount, role: 'user' }]) {
+  const res = await fetch(`${docsRoot}/access/${g.acc.localId}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer owner' },
+    body: JSON.stringify({
+      fields: {
+        email: { stringValue: g.acc.email },
+        role: { stringValue: g.role },
+        disabled: { booleanValue: false },
+        createdAt: { integerValue: String(createdAt) },
+      },
+    }),
+  });
+  if (res.ok) {
+    console.log(`사용 허가를 썼다: access/${g.acc.localId} (${g.role})`);
+  } else {
+    console.error(`사용 허가를 쓰지 못했다: access/${g.acc.localId} ${res.status}`);
+    process.exit(1);
+  }
 }
 
 export {};
