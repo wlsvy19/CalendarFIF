@@ -10,6 +10,11 @@ it('상태 파일이 없으면 모든 날짜가 base 없는 편집이다', () =>
     { monthId: '2026-11', day: '13', base: { text: '', color: '' }, next: { text: 'A', color: 'F12424' }, editedAt: 100, hasBase: false },
   ]);
 });
+it('상태 파일은 있는데 그 날짜가 없으면 빈 값에서 고친 편집이다', () => {
+  expect(planEdits(new Map([day('2026-11-13', 'DC')]), {}, 999)).toEqual([
+    { monthId: '2026-11', day: '13', base: { text: '', color: '' }, next: { text: 'DC', color: '' }, editedAt: 100, hasBase: true },
+  ]);
+});
 it('지난번과 달라진 날짜만 편집으로 만든다', () => {
   const state = { '2026-11-13': { text: 'A', color: '' }, '2026-11-14': { text: 'B', color: '' }, '2026-11-15': { text: 'gone', color: '' } };
   const current = new Map([day('2026-11-13', 'A'), day('2026-11-14', 'B\nC', '', 200)]);
@@ -41,4 +46,10 @@ it('사라진 날짜가 많으면 막는다', () => {
   expect(checkDeletes(planEdits(new Map(), days(3), 999), days(3))).toEqual({ deletes: 3, stateDays: 3, blocked: true });
   expect(checkDeletes(planEdits(new Map(), days(2), 999), days(2)).blocked).toBe(false);
   expect(checkDeletes([], null)).toEqual({ deletes: 0, stateDays: 0, blocked: false });
+});
+it('따라가기에서는 10일 이상 사라지면 비율과 상관없이 막는다', () => {
+  const big = days(120);
+  const edits = planEdits(without(big, 10), big, 999);
+  expect(checkDeletes(edits, big).blocked).toBe(false);
+  expect(checkDeletes(edits, big, true).blocked).toBe(true);
 });

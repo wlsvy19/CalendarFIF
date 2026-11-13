@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { expect, it } from 'vitest';
@@ -34,4 +34,9 @@ it('없는 파일과 깨진 파일을 구분해 알린다', async () => {
   writeFileSync(join(dir, 'calendar.db'), 'this is not a database');
   await expect(readSourceRows(join(dir, 'calendar.db'), quick)).rejects.toBeInstanceOf(SourceCorruptError);
   expect(existsSync(join(dir, 'calendar.db'))).toBe(true);
+});
+it('복사하지 못한 이유를 오류 끝에 적는다', async () => {
+  const dir = join(fresh(), 'calendar.db');
+  mkdirSync(dir);
+  await expect(readSourceRows(dir, quick)).rejects.toThrow(/ \(EISDIR\)$/);
 });

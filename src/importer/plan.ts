@@ -2,7 +2,10 @@ import { splitDateKey } from '../core/dates';
 import type { DayValue, PendingEdit } from '../core/types';
 import type { ConvertedDay } from './convert';
 
-/** hasBase: 지난번 가져오기의 상태 파일에 그 날짜가 있었는지. */
+/**
+ * hasBase: 지난번 가져오기의 상태 파일이 있는지. 상태 파일이 있으면 거기에 없는 날짜도 빈 값을 base로 삼아 합친다
+ * (휴대폰에서만 적은 날짜에 DesktopCal 글이 생겨도 덮어쓰지 않기 위해서다).
+ */
 export type ImportEdit = PendingEdit & { hasBase: boolean };
 
 const sameValue = (a: DayValue, b: DayValue): boolean => a.text === b.text && a.color === b.color;
@@ -26,7 +29,7 @@ export function planEdits(current: Map<string, ConvertedDay>, state: Record<stri
       base: { text: prev?.text ?? '', color: prev?.color ?? '' },
       next: { text: converted.value.text, color: converted.value.color },
       editedAt: converted.editedAt,
-      hasBase: prev !== undefined,
+      hasBase: state !== null,
     });
   }
 
@@ -49,10 +52,13 @@ export function planEdits(current: Map<string, ConvertedDay>, state: Record<stri
 
 export type DeleteCheck = { deletes: number; stateDays: number; blocked: boolean };
 
-/** 지난번에 가져온 날짜가 한꺼번에 사라지면(파일이 비었거나 바뀌었을 수 있다) 올리지 않도록 막을지 가린다. */
-export function checkDeletes(edits: ImportEdit[], state: Record<string, DayValue> | null): DeleteCheck {
+/**
+ * 지난번에 가져온 날짜가 한꺼번에 사라지면(파일이 비었거나 바뀌었을 수 있다) 올리지 않도록 막을지 가린다.
+ * strict(사람이 지켜보지 않는 따라가기 회차)이면 비율과 상관없이 10일 이상 사라질 때도 막는다.
+ */
+export function checkDeletes(edits: ImportEdit[], state: Record<string, DayValue> | null, strict = false): DeleteCheck {
   const deletes = edits.filter((e) => e.hasBase && e.next.text === '' && e.next.color === '').length;
   const stateDays = state ? Object.keys(state).length : 0;
-  const blocked = (deletes >= 10 && deletes * 10 > stateDays) || (stateDays >= 3 && deletes === stateDays);
+  const blocked = (deletes >= 10 && (strict || deletes * 10 > stateDays)) || (stateDays >= 3 && deletes === stateDays);
   return { deletes, stateDays, blocked };
 }

@@ -9,6 +9,8 @@ export type FollowerOptions = {
   watchDir?(dir: string, onEvent: (fileName: string | null) => void): { close(): void };
   fingerprint?(): string;
   log?(line: string): void;
+  /** true면 start()에서 곧바로 한 번 돈다. 다른 회차와 같은 길로 돌므로 실패하면 적고 다음 확인 때 다시 돈다. */
+  runAtStart?: boolean;
 };
 
 function defaultWatchDir(dir: string, onEvent: (fileName: string | null) => void, log: (line: string) => void): { close(): void } {
@@ -103,6 +105,7 @@ export function createFollower(opts: FollowerOptions): { start(): void; stop(): 
       poll = setInterval(() => {
         if (readPrint() !== lastPrint) trigger();
       }, pollMs);
+      if (opts.runAtStart) trigger();
     },
     stop() {
       if (stopped) return;

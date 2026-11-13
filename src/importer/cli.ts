@@ -14,6 +14,11 @@ import { ImportStateCorruptError, defaultStatePath, loadState, saveState } from 
 import { uploadEdits, verifyAgainstCloud } from './upload';
 
 export class UsageError extends Error {}
+/** 화면에 그대로 보여 줄 연결 준비 오류. */
+class ConnectSetupError extends Error {}
+
+const NO_HIDDEN_INPUT =
+  '비밀번호를 가려서 입력받을 수 없는 터미널입니다. PowerShell이나 Windows 터미널에서 실행하거나 CALFIF_EMAIL, CALFIF_PASSWORD 환경 변수를 설정해 주세요.';
 
 export type CliOptions = { mode: 'preview' | 'upload' | 'follow'; dbPath: string; statePath: string; show: string[]; yes: boolean; allowDeletes: boolean };
 
@@ -96,9 +101,9 @@ type Connection = Awaited<ReturnType<CliDeps['connect']>>;
 
 function friendlyMessage(e: unknown, dbPath: string): string {
   if (e instanceof SourceMissingError) return `DesktopCal 데이터 파일을 찾지 못했습니다: ${dbPath}`;
-  if (e instanceof SourceBusyError) return 'DesktopCal이 파일을 쓰는 중입니다. 잠시 뒤 다시 실행해 주세요.';
+  if (e instanceof SourceBusyError) return `DesktopCal이 파일을 쓰는 중입니다. 잠시 뒤 다시 실행해 주세요.${e.code ? ` (${e.code})` : ''}`;
   if (e instanceof SourceCorruptError) return '복사한 파일을 읽을 수 없습니다. 다시 실행해 주세요.';
-  if (e instanceof ImportStateCorruptError) return e.message;
+  if (e instanceof ImportStateCorruptError || e instanceof ConnectSetupError) return e.message;
   return `오류: ${e instanceof Error ? e.message : String(e)}`;
 }
 
@@ -108,17 +113,20 @@ async function readDays(dbPath: string) {
 
 /**
  * 바뀐 날짜를 올리고, 달이 끝날 때마다 상태 파일을 저장한다. 올린 날짜 수를 돌려준다.
+ * 상태 파일에는 uploadEdits가 기록하라고 넘긴 편집만 반영한다.
  * 지운 날짜가 너무 많으면(막아야 하면) 아무것도 올리거나 저장하지 않고 검사 결과를 돌려준다.
+ * strictDeletes: 따라가기 회차처럼 사람이 지켜보지 않을 때 더 엄격하게 막는다.
  */
 async function uploadChanges(
   opts: CliOptions,
   conn: Connection,
   days: Map<string, ConvertedDay>,
   now: number,
+  strictDeletes: boolean,
 ): Promise<{ uploaded: number } | { blocked: DeleteCheck }> {
   const state = loadState(opts.statePath, conn.projectId, conn.uid);
   const edits = planEdits(days, state, now);
-  const check = checkDeletes(edits, state);
+  const check = checkDeletes(edits, state, strictDeletes);
   if (check.blocked && !opts.allowDeletes) return { blocked: check };
   const working: Record<string, DayValue> = { ...(state ?? {}) };
   const result = await uploadEdits(conn.store, edits, (_monthId, done) => {
@@ -163,29 +171,30 @@ export async function main(argv: string[], env: Record<string, string | undefine
       return 0;
     }
     const conn = await deps.connect();
-    const first = await uploadChanges(opts, conn, days, deps.now());
-    if ('blocked' in first) {
-      if (opts.mode === 'upload') {
+    if (opts.mode === 'upload') {
+      const result = await uploadChanges(opts, conn, days, deps.now(), false);
+      if ('blocked' in result) {
         deps.out(
-          `DesktopCal에서 사라진 날짜가 ${first.blocked.deletes}일입니다(지난번에 가져온 ${first.blocked.stateDays}일 중). 파일이 바뀌었거나 다른 파일일 수 있어 올리지 않았습니다. 맞다면 --allow-deletes를 붙여 다시 실행해 주세요.`,
+          `DesktopCal에서 사라진 날짜가 ${result.blocked.deletes}일입니다(지난번에 가져온 ${result.blocked.stateDays}일 중). 파일이 바뀌었거나 다른 파일일 수 있어 올리지 않았습니다. 맞다면 --allow-deletes를 붙여 다시 실행해 주세요.`,
         );
         return 1;
       }
-      deps.out(blockedFollowLine(deps.now(), first.blocked));
-    } else {
-      deps.out(`바뀐 날짜 ${first.uploaded}일을 올렸습니다.`);
+      deps.out(`바뀐 날짜 ${result.uploaded}일을 올렸습니다.`);
       deps.out(verifyReport(await verifyAgainstCloud(conn.store, days)));
+      return 0;
     }
-    if (opts.mode === 'upload') return 0;
 
+    // 따라가기는 첫 올리기도 한 회차로 돈다. 회차를 시작할 때 파일 지문을 재므로 올리는 동안 바뀐 것을 놓치지 않고,
+    // 실패해도 끝내지 않고 다음 확인 때 다시 돈다.
     deps.out('DesktopCal 파일을 지켜봅니다. 끝내려면 Ctrl+C를 누르세요.');
     const follower = createFollower({
       dbPath: opts.dbPath,
       log: deps.out,
+      runAtStart: true,
       runOnce: async () => {
         try {
           const latest = await readDays(opts.dbPath);
-          const round = await uploadChanges(opts, conn, latest.days, deps.now());
+          const round = await uploadChanges(opts, conn, latest.days, deps.now(), true);
           if ('blocked' in round) deps.out(blockedFollowLine(deps.now(), round.blocked));
           else deps.out(`${clock(deps.now())} 바뀐 날짜 ${round.uploaded}일을 올렸습니다.`);
         } catch (e) {
@@ -224,10 +233,9 @@ async function askLine(question: string): Promise<string> {
   }
 }
 
-/** 입력한 글자를 화면에 보이지 않게 한 줄을 읽는다. */
+/** 입력한 글자를 화면에 보이지 않게 한 줄을 읽는다. 터미널(TTY)에서만 부른다. */
 function askHidden(question: string): Promise<string> {
   const stdin = process.stdin;
-  if (!stdin.isTTY) return askLine(question);
   process.stdout.write(question);
   return new Promise((resolveAnswer) => {
     let answer = '';
@@ -258,6 +266,8 @@ function askHidden(question: string): Promise<string> {
 }
 
 async function connectFromEnvLocal(env: Record<string, string | undefined>): Promise<Connection> {
+  // 터미널이 아니면 입력한 비밀번호가 화면에 보일 수 있으므로 묻지 않는다.
+  if (!env.CALFIF_PASSWORD && !process.stdin.isTTY) throw new ConnectSetupError(NO_HIDDEN_INPUT);
   const { initializeApp } = await import('firebase/app');
   const { getAuth, signInWithEmailAndPassword } = await import('firebase/auth');
   const { getFirestore } = await import('firebase/firestore/lite');

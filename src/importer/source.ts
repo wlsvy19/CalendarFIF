@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -6,8 +6,20 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import type { SourceRow } from './convert';
 
 export class SourceMissingError extends Error {}
-export class SourceBusyError extends Error {}
+/** code: 마지막 시도에서 복사가 실패했으면 그 오류 코드(예: EBUSY). */
+export class SourceBusyError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+  }
+}
 export class SourceCorruptError extends Error {}
+
+type Failure = { failed: 'busy' | 'corrupt'; code?: string };
+
+const errorCode = (e: unknown): string | undefined => (e as NodeJS.ErrnoException | undefined)?.code;
 
 export function defaultDbPath(env: Record<string, string | undefined>): string {
   if (!env.APPDATA) throw new SourceMissingError('APPDATA 환경 변수가 없어 DesktopCal 데이터 위치를 알 수 없습니다.');
@@ -15,19 +27,19 @@ export function defaultDbPath(env: Record<string, string | undefined>): string {
 }
 
 /**
- * DesktopCal의 calendar.db를 읽는다. 원본은 열지 않는다. 임시 폴더로 복사한 복사본만 읽기 전용으로 열고,
- * 끝나면(실패해도) 복사본을 지운다.
+ * DesktopCal의 calendar.db를 읽는다. 원본은 읽기로만 열어 내용을 메모리로 읽고, 임시 폴더에 쓴 복사본만
+ * 읽기 전용 데이터베이스로 연다. 끝나면(실패해도) 복사본을 지운다.
  */
 export async function readSourceRows(dbPath: string, opts?: { retries?: number; retryDelayMs?: number }): Promise<SourceRow[]> {
   const retries = opts?.retries ?? 5;
   const retryDelayMs = opts?.retryDelayMs ?? 1000;
-  let last: 'busy' | 'corrupt' = 'busy';
+  let last: Failure = { failed: 'busy' };
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt > 0) await sleep(retryDelayMs);
-    if (!existsSync(dbPath)) throw new SourceMissingError(`DesktopCal 데이터 파일이 없습니다: ${dbPath}`);
+    if (!existsSync(dbPath)) throw missing(dbPath);
     if (isBeingWritten(dbPath)) {
-      last = 'busy';
+      last = { failed: 'busy' };
       continue;
     }
     const result = readFromCopy(dbPath);
@@ -35,28 +47,43 @@ export async function readSourceRows(dbPath: string, opts?: { retries?: number; 
     last = result;
   }
 
-  if (last === 'busy') throw new SourceBusyError(`DesktopCal이 데이터 파일을 쓰는 중입니다. 잠시 뒤 다시 해 보세요: ${dbPath}`);
+  if (last.failed === 'busy') {
+    const suffix = last.code ? ` (${last.code})` : '';
+    throw new SourceBusyError(`DesktopCal이 데이터 파일을 쓰는 중입니다. 잠시 뒤 다시 해 보세요: ${dbPath}${suffix}`, last.code);
+  }
   throw new SourceCorruptError(`DesktopCal 데이터 파일을 읽을 수 없습니다: ${dbPath}`);
+}
+
+function missing(dbPath: string): SourceMissingError {
+  return new SourceMissingError(`DesktopCal 데이터 파일이 없습니다: ${dbPath}`);
 }
 
 function isBeingWritten(dbPath: string): boolean {
   return existsSync(`${dbPath}-journal`);
 }
 
-function readFromCopy(dbPath: string): SourceRow[] | 'busy' | 'corrupt' {
+function readFromCopy(dbPath: string): SourceRow[] | Failure {
   const dir = mkdtempSync(join(tmpdir(), 'calfif-import-'));
   try {
     const copy = join(dir, 'calendar.db');
+    let bytes: Buffer;
     try {
       const before = statSync(dbPath);
-      copyFileSync(dbPath, copy);
+      // copyFileSync는 원본을 다른 프로그램이 쓰지 못하게 열 수 있어서, 읽기로만 열어 메모리로 읽는다.
+      bytes = readFileSync(dbPath);
       const after = statSync(dbPath);
-      // 복사하는 사이에 원본이 바뀌었으면 복사본이 중간 상태일 수 있다.
-      if (isBeingWritten(dbPath) || before.mtimeMs !== after.mtimeMs || before.size !== after.size) return 'busy';
-    } catch {
-      return 'busy';
+      // 읽는 사이에 원본이 바뀌었으면 읽은 내용이 중간 상태일 수 있다.
+      if (isBeingWritten(dbPath) || before.mtimeMs !== after.mtimeMs || before.size !== after.size) return { failed: 'busy' };
+    } catch (e) {
+      if (errorCode(e) === 'ENOENT') throw missing(dbPath);
+      return { failed: 'busy', code: errorCode(e) };
     }
-    return queryCopy(copy) ?? 'corrupt';
+    try {
+      writeFileSync(copy, bytes);
+    } catch (e) {
+      return { failed: 'busy', code: errorCode(e) };
+    }
+    return queryCopy(copy) ?? { failed: 'corrupt' };
   } finally {
     try {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

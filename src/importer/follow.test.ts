@@ -4,7 +4,7 @@ import { createFollower } from './follow';
 beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
 
-function setup(runOnce: () => Promise<void>) {
+function setup(runOnce: () => Promise<void>, extra: { runAtStart?: boolean } = {}) {
   let emit!: (fileName: string | null) => void;
   const close = vi.fn();
   let print = 'v1';
@@ -13,6 +13,7 @@ function setup(runOnce: () => Promise<void>) {
     dbPath: 'C:\\x\\Db\\calendar.db', runOnce, debounceMs: 2000, pollMs: 30000, log,
     watchDir: (_dir, onEvent) => { emit = onEvent; return { close }; },
     fingerprint: () => print,
+    ...extra,
   });
   follower.start();
   return { follower, emit: (name: string | null) => emit(name), close, log, setPrint: (p: string) => { print = p; } };
@@ -74,4 +75,28 @@ it('실패해도 계속 돌고, 멈추면 더 돌지 않는다', async () => {
   emit('calendar.db');
   await vi.advanceTimersByTimeAsync(60000);
   expect(runOnce).toHaveBeenCalledTimes(2);
+});
+it('시작하자마자 한 번 돌고, 실패해도 다음 확인 때 다시 돈다', async () => {
+  const runOnce = vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValue(undefined);
+  const { log } = setup(runOnce, { runAtStart: true });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(runOnce).toHaveBeenCalledTimes(1);
+  expect(log).toHaveBeenCalledWith(expect.stringContaining('boom'));
+  await vi.advanceTimersByTimeAsync(30000);
+  expect(runOnce).toHaveBeenCalledTimes(2);
+});
+it('시작할 때 도는 회차가 지문을 먼저 잰다', async () => {
+  let print = 'v1';
+  const runOnce = vi.fn(async () => { print = 'v2'; });
+  const follower = createFollower({
+    dbPath: 'C:\\x\\Db\\calendar.db', runOnce, pollMs: 30000, runAtStart: true,
+    watchDir: () => ({ close: () => {} }),
+    fingerprint: () => print,
+  });
+  follower.start();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(runOnce).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(30000);
+  expect(runOnce).toHaveBeenCalledTimes(2);
+  follower.stop();
 });

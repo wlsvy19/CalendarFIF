@@ -1,3 +1,4 @@
+import { todayKey } from '../core/dates';
 import type { ConvertStats, ConvertedDay } from './convert';
 import type { VerifyResult } from './upload';
 
@@ -13,6 +14,11 @@ export function previewReport(stats: ConvertStats, days: Map<string, ConvertedDa
     .map(([year, count]) => `${year}년 ${count}`)
     .join(', ');
   const colorLines = stats.colors.length === 0 ? ['  없음'] : stats.colors.map((c) => `  ${c.stored} → ${c.rgb}  ${c.count}일`);
+  const editedTimes = [...days.values()].map((d) => d.editedAt).filter((t) => t > 0);
+  const editedRange =
+    editedTimes.length === 0
+      ? '없음'
+      : `${todayKey(new Date(Math.min(...editedTimes)))} ~ ${todayKey(new Date(Math.max(...editedTimes)))}`;
   return [
     'DesktopCal 가져오기 미리보기',
     `전체 행: ${stats.rows}`,
@@ -22,6 +28,7 @@ export function previewReport(stats: ConvertStats, days: Map<string, ConvertedDa
     `색 값이 이상해 배경 없음으로 처리: ${stats.badColors}`,
     `글자색 태그를 뗀 곳: ${stats.fontTags}`,
     `연도별: ${yearLine || '없음'}`,
+    `수정 시각 범위: ${editedRange}`,
     '색 변환:',
     ...colorLines,
   ].join('\n');
@@ -34,6 +41,17 @@ export function dayReport(dateKey: string, day: ConvertedDay | undefined): strin
   return day.value.text === '' ? header : `${header}\n${day.value.text}`;
 }
 
+const MAX_LISTED_DATES = 30;
+
+function dateList(dates: string[]): string {
+  const listed = dates.slice(0, MAX_LISTED_DATES).join(', ');
+  return dates.length > MAX_LISTED_DATES ? `${listed} 외 ${dates.length - MAX_LISTED_DATES}일` : listed;
+}
+
+/** 건수와 날짜만 담는다. 메모 내용은 넣지 않는다. */
 export function verifyReport(result: VerifyResult): string {
-  return `원본 날짜 ${result.source} / 클라우드와 같음 ${result.same} / 다름 ${result.different} / 클라우드에 없음 ${result.missing}`;
+  const lines = [`원본 날짜 ${result.source} / 클라우드와 같음 ${result.same} / 다름 ${result.different} / 클라우드에 없음 ${result.missing}`];
+  if (result.differentDates.length > 0) lines.push(`다른 날짜: ${dateList(result.differentDates)}`);
+  if (result.missingDates.length > 0) lines.push(`클라우드에 없는 날짜: ${dateList(result.missingDates)}`);
+  return lines.join('\n');
 }
