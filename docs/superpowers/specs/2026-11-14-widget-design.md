@@ -33,11 +33,11 @@
 | 기본 부품 그리기 | `src/widget/tree.ts`, `src/widget/renderTree.ts` | 기본 그리기다. 달 자료와 크기를 받아 글자와 칸을 쌓는 나무를 만들고(순수 함수), 그것을 Scriptable의 위젯 부품(`ListWidget`, `WidgetStack`, `WidgetText`)으로 만든다. |
 | 그림 그리기 | `src/widget/scene.ts`, `src/widget/render.ts` | 위젯 매개변수에 `image`가 있을 때 쓴다. 달 자료와 크기, 밝기를 받아 그릴 목록(사각형, 글자, 선)을 만들고(순수 함수), `DrawContext`로 그림 한 장을 그린다. |
 | Scriptable 연결 | `src/widget/main.ts` | 로그인, 토큰 갱신, 문서 읽기, 마지막 자료 보관, 매개변수에 따라 기본 부품이나 그림으로 위젯 만들기, 오류 위젯, 위젯 내놓기. |
-| 묶음 | `scripts/build-widget.ts` | 위 둘을 가져오기 없는 자바스크립트 파일 하나로 묶는다(`build/widget/calendarfif-widget.js`). 설정 자리는 표시로 남긴다. |
-| 웹앱 설정 | `src/web/ui/widgetInstall.ts` | "위젯 스크립트 복사" 단추와 설치 순서. 복사할 때 표시를 지금 앱의 공개 설정으로 바꾼다. |
+| 묶음 | `scripts/build-widget.ts` | 위의 것들을 가져오기 없는 자바스크립트 파일 하나로 묶는다(`public/widget/calendarfif-widget.js`, git에 올라가지 않는다). 설정 자리는 표시로 남긴다. |
+| 웹앱 설정 | `src/web/ui/widgetInstall.ts` | "위젯 스크립트 복사" 단추와 설치 순서. 설정 화면이 열릴 때 스크립트를 받아 표시를 지금 앱의 공개 설정으로 바꿔 둔다. |
 | PC 미리 보기 | `scripts/widget-preview.ts` | 같은 그릴 목록을 헤드리스 Edge의 캔버스에 그려 그림 파일로 만든다. |
 
-웹앱은 묶은 스크립트를 글자 그대로 품는다(Vite의 `?raw`). 그래서 스크립트 묶음이 웹앱 빌드보다 먼저 만들어져야 한다(`npm run build`와 `npm run deploy`가 먼저 `build-widget`을 부른다).
+웹앱은 스크립트를 품지 않는다. 묶은 파일은 `npm run widget:build`가 `public/widget/`에 만들고, 웹앱 빌드가 그것을 그대로 내놓는다(`/widget/calendarfif-widget.js`). 그래서 묶음이 웹앱 빌드보다 먼저 만들어져야 한다. `npm run build`가 먼저 묶음을 만들고, `npm run deploy`는 `npm run build`를 부른다. 설정 화면은 열릴 때 이 주소에서 스크립트를 받아 설정 자리를 지금 앱의 공개 설정으로 채워 둔다. 단추를 누르면 채워 둔 글을 복사한다(클립보드 쓰기는 누르는 순간에 시작해야 하기 때문이다).
 
 ## 3. 위젯이 하는 일 (실행 순서)
 
