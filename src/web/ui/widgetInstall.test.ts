@@ -111,10 +111,11 @@ it('설치 방법 여섯 단계가 순서대로 있다', () => {
   expect(steps).toHaveLength(6);
   expect(steps[0]).toBe('App Store에서 Scriptable을 설치합니다(무료).');
   expect(steps[2]).toBe('Scriptable을 열고 오른쪽 위 +를 눌러 새 스크립트를 만든 뒤 붙여 넣습니다. 이름을 CalendarFIF로 바꿉니다.');
+  expect(steps[4]).toBe('홈 화면의 빈 곳을 길게 누른 뒤 왼쪽 위의 "편집" → "위젯 추가"(예전 iOS에서는 +)를 눌러 Scriptable의 큰 위젯을 추가합니다.');
   expect(steps[5]).toBe('추가한 위젯을 길게 눌러 "위젯 편집"에서 Script를 CalendarFIF로 고릅니다.');
   const notes = [...m.el.querySelectorAll('details > p.settings-note')].map((p) => p.textContent);
   expect(notes).toEqual([
     '위젯은 아이폰이 정한 때(보통 15~60분마다)에 새로 그려집니다. 위젯을 누르면 Safari에서 달력이 열립니다.',
-    '모양이 어긋나 보이면 "위젯 편집"의 Parameter에 image dark 또는 image light를 적으면 그림 방식으로 그립니다.',
+    '오류가 나오거나, 비어 보이거나, 모양이 어긋나 보이면 "위젯 편집"의 Parameter에 image dark 또는 image light를 적으면 그림 방식으로 그립니다.',
   ]);
 });
