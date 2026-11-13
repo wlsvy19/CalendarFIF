@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "rules:build": "tsx scripts/build-rules.ts",
     "emu": "tsx scripts/emu.ts",
-    "test:emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"vitest run --project emulator\""
+    "test:emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"vitest run --project emulator\"",
+    "import": "tsx src/importer/cli.ts"
   },
   "dependencies": {
     "firebase": "^13.3.0"
