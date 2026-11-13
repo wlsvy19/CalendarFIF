@@ -5,20 +5,27 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FAKE_HOST_MARKER } from '../src/widget/fakeHost';
 
-const HEADER = `// Variables used by Scriptable.
+// 앞의 세 줄은 Scriptable이 읽는다. 그대로 둔다.
+const header = (version: string): string => `// Variables used by Scriptable.
 // These must be at the very top of the file. Do not edit.
 // icon-color: deep-blue; icon-glyph: calendar-alt;
-// CalendarFIF 위젯. 웹앱 설정의 "위젯 스크립트 복사"로 받은 것을 그대로 붙여 넣는다.
+// CalendarFIF 위젯 ${version}. 웹앱 설정의 "위젯 스크립트 복사"로 받은 것을 그대로 붙여 넣는다.
 `;
-const START = `
-await CalendarFIFWidget.run({ Keychain, Request, Alert, DrawContext, ListWidget, FileManager, Script, config, args, Device, Color, Font, Size, Rect, Point, Path }, { projectId: "__PROJECT_ID__", apiKey: "__API_KEY__", appUrl: "__APP_URL__" });
+const start = (version: string): string => `
+await CalendarFIFWidget.run({ Keychain, Request, Alert, DrawContext, ListWidget, FileManager, Script, config, args, Device, Color, Font, Size, Rect, Point, Path }, { projectId: "__PROJECT_ID__", apiKey: "__API_KEY__", appUrl: "__APP_URL__", version: ${JSON.stringify(version)} });
 Script.complete();
 `;
 const PLACEHOLDERS = ['__PROJECT_ID__', '__API_KEY__', '__APP_URL__'];
 
-/** 묶은 iife 글에 머리말과 시작 줄을 붙인다. */
-export function finishBundle(iife: string): string {
-  return `${HEADER}${iife.trimEnd()}\n${START}`;
+/** 스크립트의 버전 글: package.json의 버전과 만든 날(이 PC의 날짜). 예: '0.4.0 (2026-11-14)'. */
+export function versionText(version: string, built: Date): string {
+  const pad2 = (n: number): string => String(n).padStart(2, '0');
+  return `${version} (${built.getFullYear()}-${pad2(built.getMonth() + 1)}-${pad2(built.getDate())})`;
+}
+
+/** 묶은 iife 글에 머리말과 시작 줄을 붙인다. version은 versionText의 글이다. */
+export function finishBundle(iife: string, version: string): string {
+  return `${header(version)}${iife.trimEnd()}\n${start(version)}`;
 }
 
 const count = (text: string, part: string): number => text.split(part).length - 1;
@@ -49,7 +56,8 @@ export function bundleProblems(script: string): string[] {
 function main(): void {
   const built = spawnSync(process.execPath, [resolve('node_modules/vite/bin/vite.js'), 'build', '-c', 'vite.widget.config.ts'], { stdio: 'inherit' });
   if (built.status !== 0) process.exit(built.status ?? 1);
-  const script = finishBundle(readFileSync(resolve('build/widget/widget.js'), 'utf8'));
+  const { version } = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as { version: string };
+  const script = finishBundle(readFileSync(resolve('build/widget/widget.js'), 'utf8'), versionText(version, new Date()));
   const problems = bundleProblems(script);
   if (problems.length > 0) {
     console.error('위젯 묶음에 문제가 있다:');

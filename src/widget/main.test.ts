@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Config } from './api';
 import { drawnTexts, makeFakeHost, nativeTexts, widgetRecord, type FakeAnswer, type FakeNode, type FakeHost, type FakeOptions, type FakeRequest, type FakeWidgetRecord } from './fakeHost';
 import { readCache, run } from './main';
+import { PALETTES } from './theme';
 
 const cfg: Config = { projectId: 'demo-calfif', apiKey: 'demo-key', appUrl: 'https://example.test/' };
 const now = () => new Date(2026, 10, 13, 9, 0, 0);
@@ -190,7 +191,7 @@ describe('앱에서 실행', () => {
     expect(host.state.alerts[0]).toMatchObject({
       title: '로그인',
       message: 'CalendarFIF에 쓰는 이메일과 비밀번호를 넣으세요. 비밀번호는 저장하지 않습니다.',
-      fields: [{ kind: 'text', placeholder: '이메일', text: '' }, { kind: 'secure', placeholder: '비밀번호', text: '' }],
+      fields: [{ kind: 'text', placeholder: '이메일', text: '', keyboard: 'email' }, { kind: 'secure', placeholder: '비밀번호', text: '' }],
       actions: ['로그인'],
       cancel: '취소',
     });
@@ -230,6 +231,12 @@ describe('앱에서 실행', () => {
     expect(host.state.contexts[0].size).toEqual({ width: 338, height: 354 });
   });
 
+  it('버전을 알면 메뉴 제목에 버전과 만든 날짜가 있다', async () => {
+    const host = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }] });
+    await run(host, { ...cfg, version: '0.4.0 (2026-11-14)' }, now);
+    expect(host.state.alerts[0].title).toBe('CalendarFIF 위젯 0.4.0 (2026-11-14)');
+  });
+
   it('닫기는 아무것도 하지 않는다', async () => {
     const host = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }] });
     await run(host, cfg, now);
@@ -251,6 +258,83 @@ describe('앱에서 실행', () => {
     await run(host, cfg, now);
     expect(host.state.widgets.at(-1)!.presented).toBe('large');
     expect(drawnTexts(host)).toContain('오류');
+  });
+});
+
+describe('앱에서 미리 보기 중에 저장된 로그인이 거절되면', () => {
+  const MENU = { button: 0 };
+  const LOGIN = { button: 0, fields: ['test@example.com', 'pw'] };
+  /** 처음 n번의 갱신은 거절하고 그 뒤는 받아 준다. */
+  const rejectFirst = (n: number): Backend => {
+    let calls = 0;
+    return { refresh: () => (++calls <= n ? err(400, 'TOKEN_EXPIRED') : { body: { id_token: 'ID2', refresh_token: 'RT1', user_id: 'owner-test-uid' } }) };
+  };
+
+  it('안내 대신 바로 로그인을 묻고, 로그인하면 미리 보기를 보여 준다', async () => {
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [MENU, LOGIN] }, rejectFirst(1));
+    await run(host, cfg, now);
+    expect(host.state.alerts.map((a) => a.title)).toEqual(['CalendarFIF 위젯', '로그인']);
+    expect(host.state.keychain.get(REFRESH)).toBe('RT1');
+    expect(presented(host)).toEqual(['large']);
+    expect(textsOf(shownInApp(host))).toEqual(expect.arrayContaining(['2026년 11월', '리뷰']));
+    expect(nativeTexts(host)).not.toContain('로그인이 필요합니다');
+  });
+
+  it('로그인을 취소하면 조용히 끝난다', async () => {
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [MENU, { button: -1 }] }, rejectFirst(1));
+    await expect(run(host, cfg, now)).resolves.toBeUndefined();
+    expect(host.state.alerts).toHaveLength(2);
+    expect(host.state.widgets).toEqual([]);
+    expect(host.state.keychain.size).toBe(0);
+  });
+
+  it('다시 묻는 것은 한 번뿐이다: 새 로그인도 거절되면 안내를 보여 준다', async () => {
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [MENU, LOGIN] }, rejectFirst(99));
+    await run(host, cfg, now);
+    expect(host.state.alerts.map((a) => a.title)).toEqual(['CalendarFIF 위젯', '로그인']);
+    expect(presented(host)).toEqual(['large']);
+    expect(textsOf(shownInApp(host))[0]).toBe('로그인이 필요합니다');
+  });
+
+  it('처음 로그인 뒤의 미리 보기가 거절돼도 한 번만 다시 묻는다', async () => {
+    const host = makeNative({ runsInApp: true, alerts: [LOGIN, LOGIN] }, rejectFirst(99));
+    await run(host, cfg, now);
+    expect(host.state.alerts.map((a) => a.title)).toEqual(['로그인', '로그인']);
+    expect(textsOf(shownInApp(host))[0]).toBe('로그인이 필요합니다');
+  });
+
+  it('위젯으로 실행할 때는 그대로 로그인 안내', async () => {
+    const host = makeNative({ keychain: loggedIn }, rejectFirst(1));
+    await run(host, cfg, now);
+    expect(host.state.alerts).toEqual([]);
+    expect(textsOf(lastWidget(host))[0]).toBe('로그인이 필요합니다');
+  });
+});
+
+describe('로그인의 이메일 칸', () => {
+  const LOGIN = { button: 0, fields: ['test@example.com', 'pw'] };
+
+  it('이메일 키보드를 쓴다', async () => {
+    const host = makeNative({ runsInApp: true, alerts: [LOGIN] });
+    await run(host, cfg, now);
+    expect(host.state.alerts[0].fields[0]).toMatchObject({ placeholder: '이메일', keyboard: 'email' });
+  });
+
+  it('오래된 Scriptable이 칸을 돌려주지 않거나 키보드 바꾸기가 던져도 로그인한다', async () => {
+    for (const field of [undefined, {}, { setEmailAddressKeyboard: () => { throw new Error('키보드 시험 오류'); } }]) {
+      const host = makeNative({ runsInApp: true, alerts: [LOGIN] });
+      const Base = host.Alert;
+      host.Alert = class extends Base {
+        addTextField(placeholder: string, text?: string) {
+          super.addTextField(placeholder, text);
+          return field;
+        }
+      };
+      await run(host, cfg, now);
+      expect(host.state.keychain.get(REFRESH)).toBe('RT1');
+      expect(presented(host)).toEqual(['large']);
+      expect(textsOf(shownInApp(host))).toContain('리뷰');
+    }
   });
 });
 
@@ -380,13 +464,20 @@ describe('기본 부품 위젯(기본)', () => {
     expect(nativeTexts(host)).not.toContain('오프라인');
   });
 
-  it('light와 dark는 기본 부품 위젯에서는 무시한다(색이 스스로 따른다)', async () => {
+  it('light나 dark를 적으면 그쪽 색으로 고정하고, 없으면 색이 화면 밝기를 스스로 따른다', async () => {
     const plain = makeNative({ keychain: loggedIn });
     await run(plain, cfg, now);
-    for (const parameter of ['dark', 'light', 'Dark, light']) {
-      const host = makeNative({ keychain: loggedIn, widgetParameter: parameter, dark: true });
+    const hex = (h: string) => ({ hex: h, alpha: 1 });
+    expect(lastWidget(plain).props.backgroundColor).toEqual({ dynamic: { light: hex(PALETTES.light.surface), dark: hex(PALETTES.dark.surface) } });
+    for (const [parameter, theme] of [['dark', 'dark'], ['light', 'light'], ['Dark, light', 'dark'], [' LIGHT ', 'light']] as const) {
+      // 기기는 반대 밝기여도 매개변수가 먼저다.
+      const host = makeNative({ keychain: loggedIn, widgetParameter: parameter, dark: theme === 'light' });
       await run(host, cfg, now);
-      expect(lastWidget(host)).toEqual(lastWidget(plain));
+      const rec = lastWidget(host);
+      expect(rec.props.backgroundColor).toEqual(hex(PALETTES[theme].surface));
+      expect(JSON.stringify(rec)).not.toContain('dynamic');
+      expect(host.state.contexts).toEqual([]);
+      expect(textsOf(rec)).toEqual(textsOf(lastWidget(plain)));
     }
   });
 

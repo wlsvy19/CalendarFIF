@@ -15,8 +15,8 @@ const CACHE_FILE = 'calendarfif-cache.json';
 
 /** 위젯에 놓을 것: 기본은 기본 부품의 나무, 위젯 매개변수에 image가 있으면 그림 장면. */
 type View = { tree: Tree } | { scene: Scene };
-/** force: 매개변수로 고정한 밝기(없으면 null). pictureTheme: 그림을 그릴 밝기(그림을 그릴 때만 묻는다). */
-type Env = { family: Family; image: boolean; force: Theme | null; pictureTheme: () => Theme; size: Size; today: string };
+/** force: 매개변수로 고정한 밝기(없으면 기본 부품의 색이 화면 밝기를 스스로 따른다). pictureTheme: 그림을 그릴 밝기(그림을 그릴 때만 묻는다). */
+type Env = { family: Family; image: boolean; force: Theme | undefined; pictureTheme: () => Theme; size: Size; today: string };
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 const localDate = (d: Date): string => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -43,7 +43,7 @@ function makeEnv(host: Host, family: Family, now: Date): Env {
   const words = paramWords(host);
   const image = words.includes('image') || words.includes('그림');
   // 매개변수의 밝기가 먼저다. 없으면 그림은 그리는 순간의 기기 밝기를 쓰고, 기본 부품의 색은 화면 밝기를 스스로 따른다.
-  const force: Theme | null = words.includes('dark') ? 'dark' : words.includes('light') ? 'light' : null;
+  const force: Theme | undefined = words.includes('dark') ? 'dark' : words.includes('light') ? 'light' : undefined;
   const pictureTheme = (): Theme => force ?? (systemIsDark(host) ? 'dark' : 'light');
   return { family, image, force, pictureTheme, size: widgetSize(host.Device.screenSize(), family), today: localDate(now) };
 }
@@ -53,8 +53,8 @@ function monthView(env: Env, month: MonthData, offline: boolean): View {
   return env.image ? { scene: buildScene({ ...input, theme: env.pictureTheme() }) } : { tree: buildTree(input) };
 }
 
-const toWidget = (host: Host, view: View, appUrl: string, now: Date): ListWidgetLike =>
-  'tree' in view ? renderTree(host, view.tree, appUrl, now) : makeWidget(host, view.scene, appUrl, now);
+const toWidget = (host: Host, env: Env, view: View, appUrl: string, now: Date): ListWidgetLike =>
+  'tree' in view ? renderTree(host, view.tree, appUrl, now, env.force) : makeWidget(host, view.scene, appUrl, now);
 
 // 보관해 둔 달: 네트워크가 안 될 때 마지막으로 읽은 것을 그린다.
 const cachePath = (host: Host): string => {
@@ -156,7 +156,12 @@ async function askLogin(host: Host, cfg: Config): Promise<boolean> {
     const alert = new host.Alert();
     alert.title = '로그인';
     alert.message = 'CalendarFIF에 쓰는 이메일과 비밀번호를 넣으세요. 비밀번호는 저장하지 않습니다.';
-    alert.addTextField('이메일', email);
+    const emailField = alert.addTextField('이메일', email);
+    try {
+      emailField?.setEmailAddressKeyboard?.();
+    } catch {
+      // 오래된 Scriptable: 보통 키보드로 적는다.
+    }
     alert.addSecureTextField('비밀번호');
     alert.addAction('로그인');
     alert.addCancelAction('취소');
@@ -193,17 +198,25 @@ async function notify(host: Host, title: string, text: string): Promise<void> {
 }
 
 async function runInApp(host: Host, cfg: Config, now: () => Date): Promise<void> {
+  let askedAgain = false;
   const show = async (): Promise<void> => {
     const at = now();
-    const view = await load(host, cfg, makeEnv(host, 'large', at), at);
-    await toWidget(host, view, cfg.appUrl, at).presentLarge();
+    const env = makeEnv(host, 'large', at);
+    const view = await load(host, cfg, env, at);
+    // 저장된 로그인이 방금 거절돼 지워졌다: 이미 Scriptable 안이므로 안내 대신 바로 다시 묻는다(한 실행에 한 번).
+    if (!askedAgain && !host.Keychain.contains(REFRESH_KEY)) {
+      askedAgain = true;
+      if (await askLogin(host, cfg)) await show();
+      return;
+    }
+    await toWidget(host, env, view, cfg.appUrl, at).presentLarge();
   };
   if (!host.Keychain.contains(REFRESH_KEY)) {
     if (await askLogin(host, cfg)) await show();
     return;
   }
   const menu = new host.Alert();
-  menu.title = 'CalendarFIF 위젯';
+  menu.title = cfg.version ? `CalendarFIF 위젯 ${cfg.version}` : 'CalendarFIF 위젯';
   menu.addAction('미리 보기');
   menu.addAction('로그아웃');
   menu.addCancelAction('닫기');
@@ -240,13 +253,13 @@ function drawnErrorWidget(host: Host, cfg: Config, now: () => Date, lines: strin
     return null;
   }
   try {
-    return toWidget(host, message(env, '오류', lines), cfg.appUrl, at);
+    return toWidget(host, env, message(env, '오류', lines), cfg.appUrl, at);
   } catch {
     // 기본 부품이 깨졌으면 그림으로, 그림이 깨졌으면 기본 부품으로 그린다.
   }
   try {
     return env.image
-      ? renderTree(host, messageTree({ title: '오류', lines }), cfg.appUrl, at)
+      ? renderTree(host, messageTree({ title: '오류', lines }), cfg.appUrl, at, env.force)
       : makeWidget(host, messageScene({ theme: env.pictureTheme(), size: env.size, title: '오류', lines }), cfg.appUrl, at);
   } catch {
     return null;
@@ -291,7 +304,7 @@ export async function run(host: Host, cfg: Config, now: () => Date = () => new D
     } else {
       const at = now();
       const env = makeEnv(host, pickFamily(host.config.widgetFamily), at);
-      host.Script.setWidget(toWidget(host, await load(host, cfg, env, at), cfg.appUrl, at));
+      host.Script.setWidget(toWidget(host, env, await load(host, cfg, env, at), cfg.appUrl, at));
     }
   } catch (e) {
     await deliverError(host, cfg, now, e);

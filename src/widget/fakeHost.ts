@@ -1,12 +1,12 @@
 // 시험용 가짜 Scriptable. 묶음(번들)에는 들어가지 않는다.
-import type { DrawContextLike, Host, ListWidgetLike, WidgetStackLike, WidgetTextLike } from './host';
+import type { DrawContextLike, Host, ListWidgetLike, TextFieldLike, WidgetStackLike, WidgetTextLike } from './host';
 
 /** 묶음 파일에 이 파일의 코드가 섞여 들어가지 않았는지 찾아볼 표지. */
 export const FAKE_HOST_MARKER = 'calfif-fake-host-marker';
 
 export type FakeRequest = { url: string; method: string; headers: Record<string, string>; body: string; timeoutInterval: number };
 export type FakeAnswer = { status?: number; body?: unknown };
-export type FakeAlertRecord = { title: string; message: string; fields: { kind: 'text' | 'secure'; placeholder: string; text: string }[]; actions: string[]; cancel: string | null };
+export type FakeAlertRecord = { title: string; message: string; fields: { kind: 'text' | 'secure'; placeholder: string; text: string; keyboard?: 'email' }[]; actions: string[]; cancel: string | null };
 export type FakeContextRecord = { size: unknown; opaque: boolean; respectScreenScale: boolean; calls: [string, ...unknown[]][] };
 /** 위젯 안에 놓인 것의 기록. 나무와 같은 모양으로 겹쳐 있어 시험이 나무와 견줄 수 있다. */
 export type FakeNode =
@@ -105,7 +105,11 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
     message = '';
     private record: FakeAlertRecord = { title: '', message: '', fields: [], actions: [], cancel: null };
     private answer: { button: number; fields?: string[] } = { button: -1 };
-    addTextField(placeholder: string, text = ''): void { this.record.fields.push({ kind: 'text', placeholder, text }); }
+    addTextField(placeholder: string, text = ''): TextFieldLike | undefined {
+      const field: FakeAlertRecord['fields'][number] = { kind: 'text', placeholder, text };
+      this.record.fields.push(field);
+      return { setEmailAddressKeyboard: () => { field.keyboard = 'email'; } };
+    }
     addSecureTextField(placeholder: string, text = ''): void { this.record.fields.push({ kind: 'secure', placeholder, text }); }
     addAction(title: string): void { this.record.actions.push(title); }
     addCancelAction(title: string): void { this.record.cancel = title; }

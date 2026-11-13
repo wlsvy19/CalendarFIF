@@ -52,6 +52,25 @@ describe('renderTree', () => {
     expect(w.backgroundImage).toBeNull();
   });
 
+  it('밝기를 정해 주면 Color.dynamic 없이 그쪽 색으로만 칠한다', () => {
+    const tree: Tree = {
+      background: D('#FFFFFF', '#000000'), padding: [0, 0, 0, 0], spacing: 0,
+      children: [
+        { kind: 'text', text: '글', size: 9, weight: 'regular', color: D('#111111', '#EEEEEE'), lines: 1 },
+        { kind: 'stack', dir: 'h', background: D('#AAAAAA', '#222222'), children: [{ kind: 'text', text: '안', size: 9, weight: 'regular', color: D('#333333', '#CCCCCC'), lines: 1 }] },
+      ],
+    };
+    for (const [force, bg, ink, box, inner] of [['dark', '#000000', '#EEEEEE', '#222222', '#CCCCCC'], ['light', '#FFFFFF', '#111111', '#AAAAAA', '#333333']] as const) {
+      const host = makeFakeHost();
+      host.Color.dynamic = () => { throw new Error('dynamic을 쓰면 안 된다'); };
+      const rec = widgetRecord(renderTree(host, tree, 'https://example.test/', now, force));
+      const plain = (hex: string) => ({ hex, alpha: 1 });
+      expect(rec.props.backgroundColor).toEqual(plain(bg));
+      expect(rec.children[0]).toMatchObject({ kind: 'text', textColor: plain(ink) });
+      expect(rec.children[1]).toMatchObject({ kind: 'stack', backgroundColor: plain(box), children: [{ kind: 'text', textColor: plain(inner) }] });
+    }
+  });
+
   it('칸의 메모 줄은 lineLimit 1, minimumScaleFactor 0.9인 글 하나씩이고, 완료 줄은 흐리다', () => {
     const ten = Array.from({ length: 10 }, (_, i) => `줄${i}`).join('\n');
     const month = { monthId: '2026-11', days: { '14': { text: '회의\n[+]장보기', color: '' }, '17': { text: ten, color: '' } } };
