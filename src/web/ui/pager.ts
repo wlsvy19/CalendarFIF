@@ -8,12 +8,11 @@ export const CENTER = 1200;
 const REST_MS = 150; // 마지막 scroll 뒤 이만큼 조용하면 멈춘 것으로 본다
 const ASSIST_MIN_PX = 10; // 이보다 덜 움직인 끌기는 마저 넘기지 않는다
 const ASSIST_WATCH_MS = 80; // 손을 뗀 뒤 브라우저가 이어서 넘기는지 지켜보는 시간
-
-const clampSlot = (i: number): number => Math.min(SLOTS - 1, Math.max(0, i));
+const MAX_STEP = 2; // 손가락은 칸을 하나씩 넘긴다(scroll-snap-stop: always). 이보다 먼 위치는 낡은 값으로 본다
 
 /** 스크롤 위치에서 가장 가까운 칸. 0 ~ SLOTS-1로 자른다. */
 export function nearestSlot(scrollLeft: number, width: number): number {
-  return clampSlot(Math.round(scrollLeft / width));
+  return Math.min(SLOTS - 1, Math.max(0, Math.round(scrollLeft / width)));
 }
 
 export type PagerEnv = {
@@ -67,9 +66,13 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
   // 그 움직임에 스크립트가 끼어들면 안 된다.
   const assist = env.assist ?? !('GestureEvent' in window);
 
+  // PC 앱(neighbours 0)은 스크롤하지 않으므로 칸을 하나만 둔다. 스크롤 위치가 늘 0이라
+  // 창 폭이 소수점 단위로 바뀌어도(배율을 쓰는 화면) 쪽이 칸 밖으로 밀려나지 않는다.
+  const count = deps.neighbours === 0 ? 1 : SLOTS;
+  const clamp = (i: number): number => Math.min(count - 1, Math.max(0, i));
   const slots: HTMLElement[] = [];
   const strip = document.createDocumentFragment();
-  for (let i = 0; i < SLOTS; i++) {
+  for (let i = 0; i < count; i++) {
     const slot = document.createElement('div');
     slot.className = 'slot';
     slots.push(slot);
@@ -77,7 +80,7 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
   }
   el.append(strip);
 
-  let currentSlot = CENTER;
+  let currentSlot = count === 1 ? 0 : CENTER;
   let currentAnchor = deps.anchor;
   const pages = new Map<number, HTMLElement>(); // 칸 번호 -> 그 칸의 .grid
   let placedWidth: number | null = null;
@@ -92,7 +95,7 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
   function mount(refill: boolean): void {
     const wanted: number[] = [];
     for (let i = currentSlot - deps.neighbours; i <= currentSlot + deps.neighbours; i++) {
-      if (i >= 0 && i < SLOTS) wanted.push(i);
+      if (i >= 0 && i < count) wanted.push(i);
     }
     const spare: HTMLElement[] = [];
     for (const [i, grid] of [...pages]) {
@@ -122,6 +125,8 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     placedWidth = w;
     el.scrollLeft = currentSlot * w;
   }
+  // 폭 변화가 지금 칸의 위치를 반 화소보다 많이 옮기면 다시 맞춰야 한다. 가운데 칸은 폭의 1200배 자리에 있다.
+  const widthMoved = (w: number): boolean => placedWidth === null || Math.abs(w - placedWidth) * (currentSlot + 1) > 0.5;
 
   // 스크롤이 멈추면 단추로 가던 칸을 잊는다. 두 번 빨리 누르면 두 칸을 가고, 멈춘 뒤에는 지금 칸에서 다시 센다.
   function restLater(): void {
@@ -149,7 +154,7 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     stopWatch();
     const w = width();
     if (w <= 0) return;
-    const target = clampSlot(dir > 0 ? Math.ceil(endLeft / w - 0.001) : Math.floor(endLeft / w + 0.001));
+    const target = clamp(dir > 0 ? Math.ceil(endLeft / w - 0.001) : Math.floor(endLeft / w + 0.001));
     pending = target;
     restLater();
     el.scrollTo({ left: target * w, behavior: 'smooth' });
@@ -161,11 +166,16 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     const w = width();
     if (w <= 0) return;
     // 폭이 바뀌는 중이다. 옛 위치를 새 폭으로 나누면 먼 칸이 나오므로(폰을 돌리면 1000달을 건너뛴다) 지금 칸에 다시 맞춘다.
-    if (Math.abs(w - placedWidth) > 0.5) {
+    if (widthMoved(w)) {
       place();
       return;
     }
-    const i = nearestSlot(el.scrollLeft, w);
+    const i = clamp(nearestSlot(el.scrollLeft, w));
+    // 단추나 도움이 스크롤하는 중이 아니면 먼 위치는 낡은 값이다(예: 폰을 돌린 직후). 따라가면 수백 달을 건너뛴다.
+    if (Math.abs(i - currentSlot) > MAX_STEP && pending === null) {
+      place();
+      return;
+    }
     if (i !== currentSlot) {
       currentAnchor = deps.step(currentAnchor, i - currentSlot);
       currentSlot = i;
@@ -179,14 +189,30 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     }
   }
 
+  // 끄는 중에 손가락 밑의 칸이 다시 그려지면 그 손짓의 나머지 터치 이벤트는 떨어져 나간 칸에만 가고 .pager에는 오지 않는다.
+  // 그래서 손가락이 처음 닿은 요소에도 touchend/touchcancel을 단다. 한 손짓은 한 번만 처리한다:
+  // 먼저 받은 쪽이 touchStartLeft를 비우므로 거품으로 .pager에 다시 와도 아무것도 하지 않는다.
+  let targetListening: AbortController | null = null;
+  function stopTargetListening(): void {
+    targetListening?.abort();
+    targetListening = null;
+  }
   function onTouchStart(e: TouchEvent): void {
     pending = null;
     if (!assist) return;
     stopWatch();
+    stopTargetListening();
     touchStartLeft = e.touches.length === 1 ? el.scrollLeft : null;
+    const target = e.target;
+    if (touchStartLeft === null || !target || target === el) return;
+    targetListening = new AbortController();
+    const opts = { passive: true, signal: targetListening.signal };
+    target.addEventListener('touchend', (ev) => onTouchEnd(ev as TouchEvent), opts);
+    target.addEventListener('touchcancel', onTouchCancel, opts);
   }
   function onTouchEnd(e: TouchEvent): void {
     if (touchStartLeft === null || e.touches.length > 0) return;
+    stopTargetListening();
     const endLeft = el.scrollLeft;
     const travel = endLeft - touchStartLeft;
     touchStartLeft = null;
@@ -194,6 +220,7 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     watch = { endLeft, dir: travel > 0 ? 1 : -1, timer: setTimeout(finishTurn, ASSIST_WATCH_MS) };
   }
   function onTouchCancel(): void {
+    stopTargetListening();
     touchStartLeft = null;
   }
 
@@ -201,7 +228,8 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     currentAnchor = anchor;
     pending = null;
     stopWatch();
-    if (Math.min(currentSlot, SLOTS - 1 - currentSlot) <= 2) currentSlot = CENTER;
+    // 끝에 가까우면 가운데 칸으로 돌아온다. 폭이 없으면 스크롤 위치가 따라올 수 없으니 칸을 옮기지 않는다.
+    if (count > 1 && width() > 0 && Math.min(currentSlot, count - 1 - currentSlot) <= 2) currentSlot = CENTER;
     mount(true);
     place(); // 단추로 시작한 부드러운 스크롤이 아직 가고 있으면 이것으로 멈춘다
     deps.onCurrent(currentAnchor);
@@ -214,7 +242,7 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
       return;
     }
     stopWatch();
-    const target = clampSlot((pending ?? currentSlot) + delta);
+    const target = clamp((pending ?? currentSlot) + delta);
     pending = target;
     restLater();
     el.scrollTo({ left: target * w, behavior: 'smooth' });
@@ -230,7 +258,7 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     el.addEventListener('touchcancel', onTouchCancel, on);
   }
   const stopResize = (env.observeResize ?? observeSize)(el, () => {
-    if (placedWidth === null || Math.abs(width() - placedWidth) > 0.5) place();
+    if (widthMoved(width())) place();
   });
 
   mount(true);
@@ -248,6 +276,7 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     },
     destroy() {
       listening.abort();
+      stopTargetListening();
       stopResize();
       clearTimeout(restTimer);
       stopWatch();

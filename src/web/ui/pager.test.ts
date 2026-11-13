@@ -18,8 +18,8 @@ function setup(neighbours: 0 | 1 = 1, env: PagerEnv = {}) {
     pager.el.scrollLeft = left;
     pager.el.dispatchEvent(new Event('scroll'));
   };
-  const touch = (type: string, count: number) =>
-    pager.el.dispatchEvent(new TouchEvent(type, { touches: Array.from({ length: count }, () => ({}) as Touch) }));
+  const touch = (type: string, count: number, target: EventTarget = pager.el) =>
+    target.dispatchEvent(new TouchEvent(type, { bubbles: true, touches: Array.from({ length: count }, () => ({}) as Touch) }));
   const slots = [...pager.el.children];
   const grids = () =>
     [...pager.el.querySelectorAll<HTMLElement>('.grid')].map((g) => ({
@@ -52,14 +52,22 @@ it('지금 쪽과 양옆 쪽을 칸에 붙이고, 지금 쪽만 누를 수 있�
   pager.place();
   expect(pager.el.scrollLeft).toBe(1200 * 400);
 });
-it('옆 쪽을 붙이지 않으면 한 쪽만 있고, 다음으로 가면 그 자리에서 바로 바뀐다', () => {
-  const { pager, fill, onCurrent, scrollTo, grids } = setup(0);
+it('옆 쪽을 붙이지 않으면 칸 하나에 쪽 하나만 있고 폭과 상관없이 스크롤 위치는 0이며, 다음으로 가면 그 자리에서 바로 바뀐다', () => {
+  let width = 400;
+  const { pager, fill, onCurrent, scrollTo, scroll, grids } = setup(0, { width: () => width });
+  expect(pager.el.children).toHaveLength(1);
   pager.place();
-  expect(grids()).toEqual([{ slot: 1200, anchor: '2026-11', current: true, inert: false }]);
+  expect([grids(), pager.el.scrollLeft]).toEqual([[{ slot: 0, anchor: '2026-11', current: true, inert: false }], 0]);
+  width = 800.4;
+  scroll(0);
+  pager.place();
+  expect(pager.el.scrollLeft).toBe(0);
   const grid = pager.current();
   fill.mockClear();
   pager.go(1);
   expect([pager.anchor(), fill.mock.calls, onCurrent.mock.calls]).toEqual(['2026-12', [[grid, '2026-12']], [['2026-12']]]);
+  pager.jump('2027-05');
+  expect([grids(), pager.el.scrollLeft, fill.mock.lastCall]).toEqual([[{ slot: 0, anchor: '2027-05', current: true, inert: false }], 0, [grid, '2027-05']]);
   expect(scrollTo).not.toHaveBeenCalled();
 });
 it('반을 넘게 스크롤하면 다음 쪽이 지금 쪽이 되고, 새로 붙는 쪽만 그린다', () => {
@@ -128,7 +136,8 @@ it('바로 가기는 붙은 쪽을 모두 다시 그리고, 끝에 가까우면 
   expect(fill.mock.calls.map((c) => c[1])).toEqual(['2027-04', '2027-05', '2027-06']);
   expect([onCurrent.mock.lastCall, pager.el.scrollLeft]).toEqual([['2027-05'], S]);
 
-  scroll(400); // 칸 1
+  pager.go(-1); // 단추로 스크롤하는 중이라 먼 위치(칸 1)도 따라간다
+  scroll(400);
   expect(grids().map((g) => g.slot)).toEqual([0, 1, 2]);
   pager.jump('2026-11');
   expect(grids()).toEqual([
@@ -197,4 +206,110 @@ it('없앤 뒤에는 스크롤에 반응하지 않는다', () => {
   pager.destroy();
   scroll(S + 201);
   expect([pager.anchor(), onCurrent.mock.calls.length]).toEqual(['2026-11', 0]);
+});
+it('폭이 조금만 바뀌어도 가운데 칸의 위치가 반 화소 넘게 어긋나면 다시 맞춘다', () => {
+  let width = 400;
+  let resized = () => {};
+  const { pager, onCurrent, scroll } = setup(1, {
+    width: () => width,
+    observeResize: (_el, cb) => {
+      resized = cb;
+      return () => {};
+    },
+  });
+  pager.place();
+  width = 400.2; // 칸 1200의 위치가 240px 옮겨진다
+  scroll(S);
+  expect([pager.anchor(), pager.el.scrollLeft, onCurrent.mock.calls.length]).toEqual(['2026-11', 1200 * 400.2, 0]);
+  width = 400.4;
+  resized();
+  expect([pager.anchor(), pager.el.scrollLeft]).toEqual(['2026-11', 1200 * 400.4]);
+});
+it('폭이 그대로면 크기 알림은 스크롤 위치를 건드리지 않는다', () => {
+  let resized = () => {};
+  const { pager } = setup(1, {
+    observeResize: (_el, cb) => {
+      resized = cb;
+      return () => {};
+    },
+  });
+  pager.place();
+  pager.el.scrollLeft = S + 30; // 손가락이 끄는 중이다
+  resized();
+  expect(pager.el.scrollLeft).toBe(S + 30);
+});
+it('단추나 도움이 스크롤하는 중이 아니면 먼 위치를 따라가지 않고 지금 칸으로 되돌린다', () => {
+  const { pager, onCurrent, scroll } = setup();
+  pager.place();
+  scroll(1300 * 400);
+  expect([pager.anchor(), pager.el.scrollLeft, onCurrent.mock.calls.length]).toEqual(['2026-11', S, 0]);
+  pager.go(1); // 단추로 스크롤하는 중에는 따라간다
+  scroll(1300 * 400);
+  expect([pager.anchor(), onCurrent.mock.lastCall]).toEqual(['2035-03', ['2035-03']]);
+});
+it('폭이 없으면 바로 가기가 끝 쪽 칸을 가운데로 옮기지 않는다', () => {
+  let width = 400;
+  const { pager, onCurrent, scroll, grids } = setup(1, { width: () => width });
+  pager.place();
+  pager.go(-1);
+  scroll(400); // 칸 1
+  width = 0;
+  pager.jump('2027-05');
+  expect(grids().map((g) => [g.slot, g.anchor])).toEqual([[0, '2027-04'], [1, '2027-05'], [2, '2027-06']]);
+  expect(onCurrent.mock.lastCall).toEqual(['2027-05']);
+});
+it('scrollend와 touchstart는 단추로 가던 칸을 잊게 한다', () => {
+  const { pager, scrollTo, touch } = setup();
+  pager.place();
+  pager.go(1);
+  pager.el.dispatchEvent(new Event('scrollend'));
+  pager.go(1);
+  touch('touchstart', 1);
+  pager.go(1);
+  expect(scrollTo.mock.calls).toEqual([[smooth(1201)], [smooth(1201)], [smooth(1201)]]);
+});
+it('단추와 바로 가기는 지켜보던 도움을 멈춘다', () => {
+  vi.useFakeTimers();
+  const { pager, scrollTo, touch } = setup(1, { assist: true });
+  pager.place();
+  const stoppedSwipe = () => {
+    pager.el.scrollLeft = S;
+    touch('touchstart', 1);
+    pager.el.scrollLeft = S + 25;
+    touch('touchend', 0);
+    scrollTo.mockClear();
+  };
+  stoppedSwipe();
+  pager.go(1);
+  vi.advanceTimersByTime(80);
+  expect(scrollTo.mock.calls).toEqual([[smooth(1201)]]); // 단추의 것 하나뿐
+  stoppedSwipe();
+  pager.jump('2027-01');
+  vi.advanceTimersByTime(80);
+  expect(scrollTo).not.toHaveBeenCalled();
+});
+it('끄는 중에 손가락 밑의 요소가 다시 그려져 빠져도 손을 뗀 것을 알고, 한 손짓은 한 번만 처리한다', () => {
+  vi.useFakeTimers();
+  const { pager, scrollTo, touch } = setup(1, { assist: true });
+  pager.place();
+  const cellUnderFinger = () => pager.current().appendChild(document.createElement('button'));
+
+  let finger = cellUnderFinger();
+  touch('touchstart', 1, finger);
+  pager.el.scrollLeft = S + 25;
+  finger.remove(); // 쪽이 다시 그려졌다: 나머지 터치 이벤트는 떨어져 나간 칸에만 간다
+  touch('touchend', 0, finger);
+  vi.advanceTimersByTime(80);
+  expect(scrollTo.mock.calls).toEqual([[smooth(1201)]]);
+
+  vi.advanceTimersByTime(200); // 넘긴 뒤의 멈춤 타이머까지 끝낸다
+  scrollTo.mockClear();
+  pager.el.scrollLeft = S;
+  finger = cellUnderFinger();
+  touch('touchstart', 1, finger);
+  pager.el.scrollLeft = S + 25;
+  touch('touchend', 0, finger); // 칸이 받고 거품으로 .pager에도 온다
+  expect(vi.getTimerCount()).toBe(1); // 지켜보기는 하나만 시작했다
+  vi.advanceTimersByTime(80);
+  expect(scrollTo.mock.calls).toEqual([[smooth(1201)]]);
 });

@@ -171,7 +171,7 @@ describe('달 넘기기', () => {
     const web = scrollMount().root;
     expect([web.querySelectorAll('.grid').length, web.querySelectorAll('.grid.current').length, web.querySelectorAll('.grid[inert]').length]).toEqual([3, 1, 2]);
     const pc = scrollMount(true).root;
-    expect([pc.querySelectorAll('.grid').length, pc.querySelectorAll('.grid.current').length]).toEqual([1, 1]);
+    expect([pc.querySelectorAll('.slot').length, pc.querySelectorAll('.grid').length, pc.querySelectorAll('.grid.current').length, pc.querySelector<HTMLElement>('.pager')!.scrollLeft]).toEqual([1, 1, 1, 0]);
   });
   it('다음 달 단추는 부드럽게 스크롤하고, 스크롤이 반을 넘어야 제목이 바뀐다', () => {
     const { root, pager, store, scroll, title } = scrollMount();

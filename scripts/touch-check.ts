@@ -43,6 +43,10 @@ export function monthDelta(before: string, after: string): number | null {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const MOVE_GAP_MS = 8; // 표본이 40ms보다 벌어지면 Chromium은 손가락이 멈췄다고 보고 튕기지 않는다
+// 움직이는 채 뗀 손가락은 튕기기(fling)를 남긴다. 아무것도 스크롤되지 않았어도(세로로 끈 경우) 그렇다. 튕기기가 끝나기 전에
+// 누르면 Chromium은 그것을 "튕기기 멈추기"로 먹어 버리고 click을 내지 않는다(300ms 뒤 누르기: 16번 중 7번 무시, 1500ms 뒤: 0번).
+// 그래서 누르기 전에는 마지막으로 움직이는 채 뗀 때부터 이만큼 기다린다.
+const FLING_OVER_MS = 1500;
 const TITLE_JS = "document.querySelector('.year').textContent + ' ' + document.querySelector('.month').textContent";
 const VIEW_JS = `(() => { const p = document.querySelector('.pager'); return { title: ${TITLE_JS}, left: p.scrollLeft, width: p.getBoundingClientRect().width }; })()`;
 // 페이지 안의 기록: scroll마다의 위치, 손을 떼기 직전까지 적힌 수(upAt), 마지막 scroll 시각, 긴 작업(50ms 이상) 수.
@@ -90,6 +94,8 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     return { all: log.scrolls, down: log.upAt < 0 ? log.scrolls : log.scrolls.slice(0, log.upAt) };
   }
 
+  let releasedMovingAt = 0; // 마지막으로 움직이는 채 손가락을 뗀 시각(FLING_OVER_MS 참고)
+
   /** 손가락을 from에서 by만큼 steps번에 나눠 촘촘히 움직이고, holdMs만큼 멈췄다가 뗀다. 스크롤이 멈출 때까지 기다린다. */
   async function gesture(from: [number, number], by: [number, number], steps: number, holdMs = 0): Promise<Gesture> {
     await cdp.evaluate(RESET_JS);
@@ -102,10 +108,14 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     if (holdMs > 0) await sleep(holdMs);
     await cdp.evaluate('__touchLog.upAt = __touchLog.scrolls.length');
     await touch('touchEnd');
+    if (holdMs === 0) releasedMovingAt = Date.now();
     await rest();
     return { before, after: await view(), ...(await recorded()) };
   }
+  /** 짧게 누른다. 앞의 손짓이 남긴 튕기기가 끝난 뒤에 누른다(FLING_OVER_MS). */
   async function tap(at: { x: number; y: number }): Promise<void> {
+    const flingLeft = releasedMovingAt + FLING_OVER_MS - Date.now();
+    if (flingLeft > 0) await sleep(flingLeft);
     await touch('touchStart', at.x, at.y);
     await sleep(60);
     await touch('touchEnd');
