@@ -13,3 +13,8 @@ it('화면을 주소로 바꾼다', () => {
   expect(hashFor({ name: 'settings' })).toBe('#settings');
   expect(hashFor({ name: 'calendar' })).toBe('');
 });
+it('#users는 사용자 관리 화면이다', () => {
+  expect(parseHash('#users')).toEqual({ name: 'users' });
+  expect(hashFor({ name: 'users' })).toBe('#users');
+  expect(parseHash('#users/x')).toEqual({ name: 'calendar' });
+});

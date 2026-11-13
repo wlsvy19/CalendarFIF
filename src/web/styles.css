@@ -474,3 +474,41 @@ button { touch-action: manipulation; }
 }
 .settings-btn.danger { border-color: var(--sun); color: var(--sun); }
 .settings [hidden] { display: none; }
+
+/* 사용자 관리, 허가 안내, 비밀번호 변경, 비밀번호 잊음 */
+.users { overflow-y: auto; }
+.users [hidden] { display: none; }
+.users-status:empty { display: none; }
+.users-status { margin: 0; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+.users-body { display: grid; gap: 8px; }
+.users-list { margin: 0; padding: 0; list-style: none; display: grid; }
+.user-row { display: grid; gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--hairline); }
+.user-email { font-size: 16px; overflow-wrap: anywhere; }
+.user-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.user-badge { font-size: 12px; font-weight: 600; color: var(--muted); }
+.user-badge.off { color: var(--sun); }
+.users .donebtn:disabled { opacity: 0.55; cursor: default; }
+.users .donebtn.danger { color: var(--sun); }
+.users-note { margin: 0; padding: 10px 0; font-size: 14px; color: var(--muted); }
+.users-add { display: grid; gap: 12px; margin-top: 8px; }
+.users-add label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 500; }
+.users-add input, .account-pw-form input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px; /* 16px 미만이면 아이폰이 입력 때 화면을 확대한다 */
+}
+.users-hint { margin: 0; font-size: 13px; color: var(--muted); }
+.account-pw-form { display: grid; gap: 10px; }
+.account-pw-actions { display: flex; gap: 8px; }
+.account-pw-form .donebtn:disabled { opacity: 0.55; cursor: default; }
+.blocked-email { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.blocked-text { margin: 0; font-size: 15px; line-height: 1.5; color: var(--sun); }
+.blocked-pending { margin: 0; font-size: 15px; line-height: 1.5; }
+.login-forgot { justify-self: center; font-weight: 500; }
+.login-error.ok { color: var(--muted); }

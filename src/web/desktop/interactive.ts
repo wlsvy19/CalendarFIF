@@ -1,4 +1,4 @@
-export type InteractiveReason = 'editor' | 'settings' | 'login';
+export type InteractiveReason = 'editor' | 'settings' | 'login' | 'blocked' | 'users';
 
 /** 창이 마우스와 키보드 입력을 받아야 하는 이유들을 세어, 하나라도 있는 동안만 켠다. */
 export class Interactivity {

@@ -1,10 +1,151 @@
 import { dismiss } from './sheetMotion';
 
-export type AccountProps = { email: string; pending: number; storageOk: boolean; corruptFound: boolean; onSignOut(): void };
+export type AccountProps = {
+  email: string;
+  pending: number;
+  storageOk: boolean;
+  corruptFound: boolean;
+  onSignOut(): void;
+  /** 주면 "비밀번호 변경"을 보인다. 결과 문구를 돌려준다. */
+  onChangePassword?(current: string, next: string): Promise<{ ok: boolean; message: string }>;
+  /** 주면 "사용자 관리" 단추를 보인다(관리자). */
+  onManageUsers?(): void;
+  /** 비밀번호 칸에 적은 글이 있거나 바꾸는 중이면 true, 그렇지 않게 되면 false. 바뀔 때만 부른다. */
+  onPasswordBusy?(busy: boolean): void;
+};
 
-// 계정, 동기화, (extra), 로그아웃. 웹앱 설정 화면과 PC 앱 설정의 계정 쪽이 함께 쓴다.
+const PASSWORD_DONE_MS = 1500;
+
+// "비밀번호" 칸. 단추를 누르면 그 자리가 폼으로 바뀐다. onCleanup에는 화면이 사라질 때 부를 함수를 맡긴다.
+function passwordField(
+  onChange: NonNullable<AccountProps['onChangePassword']>,
+  onBusy: AccountProps['onPasswordBusy'],
+  onCleanup?: (fn: () => void) => void,
+): HTMLElement {
+  const field = document.createElement('div');
+  field.className = 'field';
+  field.innerHTML = `
+    <span class="field-label">비밀번호</span>
+    <div class="account-pw"></div>`;
+  const slot = field.querySelector<HTMLElement>('.account-pw')!;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let disposed = false;
+  let busy = false;
+  const reportBusy = (next: boolean): void => {
+    if (next === busy) return;
+    busy = next;
+    onBusy?.(next);
+  };
+  onCleanup?.(() => {
+    disposed = true;
+    clearTimeout(timer);
+  });
+  // 처리 중에는 초점이 시트(tabindex -1)에 있어야 Escape와 Tab 가두기가 계속 듣는다.
+  const focusIdle = (holder: HTMLElement | null): boolean => document.activeElement === holder || document.activeElement === document.body || document.activeElement === null;
+  const showButton = (): void => {
+    clearTimeout(timer);
+    const holder = slot.closest<HTMLElement>('[tabindex="-1"]');
+    const hadFocus = slot.contains(document.activeElement) || focusIdle(holder);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'settings-btn';
+    b.textContent = '비밀번호 변경';
+    b.addEventListener('click', showForm);
+    slot.replaceChildren(b);
+    reportBusy(false);
+    if (hadFocus && field.isConnected && focusIdle(holder)) b.focus({ preventScroll: true });
+  };
+  const showForm = (): void => {
+    const form = document.createElement('form');
+    form.className = 'account-pw-form';
+    form.noValidate = true;
+    form.innerHTML = `
+      <input type="password" name="current" autocomplete="current-password" placeholder="지금 비밀번호">
+      <input type="password" name="next" autocomplete="new-password" placeholder="새 비밀번호 (8자 이상)">
+      <div class="account-pw-actions">
+        <button type="submit" class="donebtn">바꾸기</button>
+        <button type="button" class="donebtn cancel">취소</button>
+      </div>
+      <p class="settings-note" role="status"></p>`;
+    const current = form.querySelector<HTMLInputElement>('input[name="current"]')!;
+    const next = form.querySelector<HTMLInputElement>('input[name="next"]')!;
+    const note = form.querySelector<HTMLElement>('.settings-note')!;
+    const controls = form.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button');
+    // 적은 글이 있거나 잠겨 있는(보내는 중이거나 결과를 보이는) 동안은 바쁘다.
+    const checkBusy = (): void => reportBusy(current.value !== '' || next.value !== '' || current.disabled);
+    const setBusy = (on: boolean): void => {
+      controls.forEach((c) => (c.disabled = on));
+      checkBusy();
+    };
+    form.addEventListener('input', checkBusy);
+    form.querySelector('.cancel')!.addEventListener('click', showButton);
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (current.disabled || disposed) return;
+      const origin = document.activeElement as HTMLElement | null;
+      const holder = form.closest<HTMLElement>('[tabindex="-1"]');
+      const hadFocus = form.contains(origin);
+      if (hadFocus) holder?.focus({ preventScroll: true });
+      setBusy(true);
+      let pending: Promise<{ ok: boolean; message: string }>;
+      try {
+        pending = onChange(current.value, next.value);
+      } catch (e) {
+        pending = Promise.reject(e);
+      }
+      const reenable = (): void => {
+        setBusy(false);
+        if (hadFocus && focusIdle(holder) && origin?.isConnected) origin.focus({ preventScroll: true });
+      };
+      pending.then(
+        (result) => {
+          if (disposed || !form.isConnected) return;
+          note.textContent = result.message;
+          if (result.ok) {
+            // 결과를 보이는 동안은 폼을 잠가 둔다. 그 사이 다시 보내면 첫 요청의 타이머가 폼을 바꿔 버린다.
+            current.value = '';
+            next.value = '';
+            timer = setTimeout(() => {
+              if (!field.isConnected) return;
+              showButton();
+            }, PASSWORD_DONE_MS);
+            return;
+          }
+          reenable();
+        },
+        () => {
+          if (disposed || !form.isConnected) return;
+          note.textContent = '바꾸지 못했습니다.';
+          reenable();
+        },
+      );
+    });
+    slot.replaceChildren(form);
+    current.focus();
+  };
+  showButton();
+  return field;
+}
+
+function usersField(onManage: () => void): HTMLElement {
+  const field = document.createElement('div');
+  field.className = 'field';
+  field.innerHTML = `
+    <span class="field-label">사용자</span>
+    <button type="button" class="settings-btn">사용자 관리</button>`;
+  field.querySelector('button')!.addEventListener('click', onManage);
+  return field;
+}
+
+export type AccountSection = {
+  el: HTMLElement;
+  /** 열린 뒤에 관리자인지 알게 되면 부른다: 주면 "사용자 관리"를 제자리(동기화 뒤)에 두고, 안 주면 뺀다. 다른 칸은 그대로다. */
+  setManageUsers(onManage: (() => void) | undefined): void;
+};
+
+// 계정, 동기화, (사용자), (비밀번호), (extra), 로그아웃. 웹앱 설정 화면과 PC 앱 설정의 계정 쪽이 함께 쓴다.
 // 감싸는 요소는 상자를 만들지 않아서(display: contents) 자식들이 시트의 세로 배치에 그대로 놓인다.
-export function accountSection(props: AccountProps, extra?: HTMLElement): HTMLElement {
+export function accountSection(props: AccountProps, extra?: HTMLElement, onCleanup?: (fn: () => void) => void): AccountSection {
   const el = document.createElement('div');
   el.style.display = 'contents';
   el.innerHTML = `
@@ -27,7 +168,23 @@ export function accountSection(props: AccountProps, extra?: HTMLElement): HTMLEl
   el.querySelector('.settings-pending')!.textContent = `대기 중인 편집 ${props.pending}건`;
   el.querySelector<HTMLElement>('.settings-storage')!.hidden = props.storageOk;
   el.querySelector<HTMLElement>('.settings-corrupt')!.hidden = !props.corruptFound;
-  if (extra) el.querySelector('.settings-signout')!.before(extra);
+  const signOutField = el.querySelector('.settings-signout')!;
+  const syncField = el.querySelector('.settings-pending')!.closest('.field')!;
+  let manage: (() => void) | undefined;
+  let users: HTMLElement | null = null;
+  const setManageUsers = (onManage: (() => void) | undefined): void => {
+    manage = onManage;
+    if (onManage && !users) {
+      users = usersField(() => manage?.());
+      syncField.after(users);
+    } else if (!onManage && users) {
+      users.remove();
+      users = null;
+    }
+  };
+  setManageUsers(props.onManageUsers);
+  if (props.onChangePassword) signOutField.before(passwordField(props.onChangePassword, props.onPasswordBusy, onCleanup));
+  if (extra) signOutField.before(extra);
   const signOutBtn = el.querySelector<HTMLButtonElement>('.signout')!;
   const forceBtn = el.querySelector<HTMLButtonElement>('.danger')!;
   const confirmText = el.querySelector<HTMLElement>('.settings-confirm')!;
@@ -43,7 +200,7 @@ export function accountSection(props: AccountProps, extra?: HTMLElement): HTMLEl
     forceBtn.focus();
   });
   forceBtn.addEventListener('click', () => props.onSignOut());
-  return el;
+  return { el, setManageUsers };
 }
 
 function widgetNote(): HTMLElement {
@@ -64,8 +221,11 @@ export function mountSettings(
     corruptFound: boolean;
     onSignOut(): void;
     onClose(): void;
+    onChangePassword?: AccountProps['onChangePassword'];
+    onManageUsers?: AccountProps['onManageUsers'];
+    onPasswordBusy?: AccountProps['onPasswordBusy'];
   },
-): { destroy(): void } {
+): { destroy(): void; setManageUsers: AccountSection['setManageUsers'] } {
   const previouslyFocused = document.activeElement as HTMLElement | null;
   const scrim = document.createElement('div');
   scrim.className = 'scrim';
@@ -97,7 +257,9 @@ export function mountSettings(
   };
   closeBtn.addEventListener('click', close);
   scrim.addEventListener('click', close);
-  sheet.append(accountSection({ ...props, onSignOut: signOut }, widgetNote()));
+  const cleanups: Array<() => void> = [];
+  const account = accountSection({ ...props, onSignOut: signOut }, widgetNote(), (fn) => cleanups.push(fn));
+  sheet.append(account.el);
   sheet.addEventListener('keydown', (e) => {
     if (e.isComposing) return;
     if (e.key === 'Escape') {
@@ -106,7 +268,9 @@ export function mountSettings(
       return;
     }
     if (e.key !== 'Tab') return;
-    const stops = [...sheet.querySelectorAll<HTMLElement>('button')].filter((el) => !el.hidden);
+    const stops = [...sheet.querySelectorAll<HTMLElement>('button, input')].filter(
+      (el) => !el.hidden && !(el as HTMLButtonElement).disabled && !el.closest('[hidden]'),
+    );
     const first = stops[0];
     const last = stops[stops.length - 1];
     if (e.shiftKey && (document.activeElement === first || document.activeElement === sheet)) {
@@ -123,7 +287,9 @@ export function mountSettings(
   sheet.focus();
 
   return {
+    setManageUsers: account.setManageUsers,
     destroy() {
+      for (const fn of cleanups) fn();
       document.documentElement.classList.remove('sheet-open');
       dismiss(scrim, sheet);
       if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });

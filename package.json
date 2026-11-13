@@ -21,6 +21,7 @@
     "mobile": "tsx scripts/mobile-preview.ts",
     "mobile:emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && tsx scripts/mobile-preview.ts --url http://localhost:5173/?autologin=1 --with-vite\"",
     "test:touch": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && tsx scripts/touch-check.ts --url http://localhost:5173/?autologin=1 --with-vite\"",
+    "test:users": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && tsx scripts/users-check.ts --url http://localhost:5173/ --with-vite\"",
     "desktop:setup": "node node_modules/electron/install.js",
     "desktop": "tsx scripts/desktop-run.ts",
     "desktop:emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && tsx scripts/desktop-run.ts --emu\"",
