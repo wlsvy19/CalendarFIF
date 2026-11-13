@@ -96,21 +96,52 @@ describe('시작 줄과 Host', () => {
 });
 
 describe('startProblems: 묶은 파일을 가짜 Scriptable에서 한 번 실행해 본다', () => {
-  // 로그인 전의 위젯처럼 위젯 하나를 두는 작은 묶음.
-  const good = [
-    'var CalendarFIFWidget = (function(exports) {',
-    '\texports.run = async (host, cfg) => {',
-    '\t\tconst w = new host.ListWidget();',
-    '\t\tw.addText(host.Keychain.contains("calendarfif.refreshToken") ? "로그인됨" : cfg.version);',
-    '\t\thost.Script.setWidget(w);',
-    '\t};',
-    '\treturn exports;',
-    '})({});',
-  ].join('\n');
+  // run의 몸통으로 위젯 하나를 두는 작은 묶음.
+  const bundle = (body: string[]): string =>
+    ['var CalendarFIFWidget = (function(exports) {', '\texports.run = async (host, cfg) => {', ...body.map((l) => `\t\t${l}`), '\t};', '\treturn exports;', '})({});'].join('\n');
+  // 로그인 전의 위젯처럼 로그인 안내를 보인다.
+  const good = bundle([
+    'const w = new host.ListWidget();',
+    'w.addText(host.Keychain.contains("calendarfif.refreshToken") ? "로그인됨" : "로그인이 필요합니다");',
+    'w.addText(cfg.version);',
+    'host.Script.setWidget(w);',
+  ]);
+  // 그림 한 장의 위젯: 그림에 그린 글이 위젯의 글이다.
+  const picture = (text: string): string =>
+    bundle([
+      'const ctx = new host.DrawContext();',
+      `ctx.drawTextInRect(${JSON.stringify(text)}, null);`,
+      'const w = new host.ListWidget();',
+      'w.backgroundImage = ctx.getImage();',
+      'host.Script.setWidget(w);',
+    ]);
   const problems = async (script: string): Promise<string> => (await startProblems(script)).join('\n');
 
   it('잘 만든 파일은 문제가 없다', async () => {
     expect(await startProblems(finishBundle(good, VERSION))).toEqual([]);
+  });
+
+  it('로그인 안내 대신 오류 위젯을 두면(그리기가 run 안에서 깨져 오류 위젯이 된 경우) 문제다', async () => {
+    const errorOnly = bundle(['const w = new host.ListWidget();', 'w.addText("오류");', 'host.Script.setWidget(w);']);
+    const out = await startProblems(finishBundle(errorOnly, VERSION));
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain('로그인이 필요합니다');
+    expect(out[0]).toContain('오류');
+  });
+
+  it('위젯에 둔 글만 본다: 두지 않은 위젯의 로그인 안내는 세지 않는다', async () => {
+    const other = bundle([
+      'new host.ListWidget().addText("로그인이 필요합니다");',
+      'const w = new host.ListWidget();',
+      'w.addText("오류");',
+      'host.Script.setWidget(w);',
+    ]);
+    expect(await problems(finishBundle(other, VERSION))).toContain('로그인이 필요합니다');
+  });
+
+  it('그림 위젯은 그 그림에 그린 글을 본다', async () => {
+    expect(await startProblems(finishBundle(picture('로그인이 필요합니다'), VERSION))).toEqual([]);
+    expect(await problems(finishBundle(picture('오류'), VERSION))).toContain('로그인이 필요합니다');
   });
 
   it('시작 줄의 전역 이름이 틀리면', async () => {

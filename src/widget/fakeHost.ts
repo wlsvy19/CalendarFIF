@@ -287,3 +287,21 @@ export function nativeTexts(host: FakeHost): string[] {
   for (const w of host.state.widgets) walk(w.children);
   return out;
 }
+
+/** 위젯 하나가 보이는 글: 그 위젯 안에 놓인 글과, 배경이 그림이면 그 그림에 그린 글. 가짜 위젯이 아니면 빈 배열. */
+export function widgetTexts(host: FakeHost, widget: unknown): string[] {
+  const record = (widget as { record?: FakeWidgetRecord } | null | undefined)?.record;
+  if (!record) return [];
+  const out: string[] = [];
+  const walk = (nodes: FakeNode[]): void => {
+    for (const n of nodes) {
+      if (n.kind === 'text') out.push(n.text);
+      else if (n.kind === 'stack') walk(n.children);
+    }
+  };
+  walk(record.children);
+  const image = record.props.backgroundImage as { image?: unknown } | null | undefined;
+  const context = typeof image?.image === 'number' ? host.state.contexts[image.image] : undefined;
+  if (context) for (const call of context.calls) if (call[0] === 'drawTextInRect') out.push(call[1] as string);
+  return out;
+}

@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FAKE_HOST_MARKER, makeFakeHost } from '../src/widget/fakeHost';
+import { FAKE_HOST_MARKER, makeFakeHost, widgetTexts } from '../src/widget/fakeHost';
 import type { Host } from '../src/widget/host';
 
 /** 시작 줄이 run에 넘기는 Scriptable의 전역들. Host의 키와 같아야 한다. */
@@ -59,9 +59,13 @@ export function bundleProblems(script: string): string[] {
   return problems;
 }
 
+/** 로그인 전의 위젯이 보여야 하는 글. 그리기가 run 안에서 깨지면 오류 위젯이 대신 놓이므로 이것으로 가른다. */
+const LOGIN_HINT = '로그인이 필요합니다';
+
 /**
  * 묶음 파일을 Scriptable처럼 한 번 실행해 본다: 시작 줄이 넘기는 이름들을 매개변수로 하는 async 함수의 본문으로,
- * 가짜 Scriptable(로그인 전, 위젯으로 실행)의 것들을 넘긴다. 네트워크는 쓰지 않는다. 문제가 없으면 빈 배열.
+ * 가짜 Scriptable(로그인 전, 위젯으로 실행)의 것들을 넘긴다. 네트워크는 쓰지 않는다.
+ * 위젯 하나를 두고, 그 위젯이 로그인 안내를 보이고, Script.complete()를 한 번 불러야 한다. 문제가 없으면 빈 배열.
  */
 export async function startProblems(script: string): Promise<string[]> {
   const host = makeFakeHost({ handler: () => { throw new Error('시작 확인은 네트워크를 쓰지 않는다'); } });
@@ -73,6 +77,10 @@ export async function startProblems(script: string): Promise<string[]> {
   }
   const set = host.state.setWidgets.length;
   if (set !== 1) problems.push(`위젯을 ${set}번 두었다(한 번이어야 한다)`);
+  else {
+    const texts = widgetTexts(host, host.state.setWidgets[0]);
+    if (!texts.includes(LOGIN_HINT)) problems.push(`둔 위젯에 "${LOGIN_HINT}"가 없다. 위젯의 글: ${texts.length > 0 ? texts.join(' | ') : '(없음)'}`);
+  }
   if (host.state.completed !== 1) problems.push(`Script.complete()가 ${host.state.completed}번 불렸다(한 번이어야 한다)`);
   return problems;
 }
