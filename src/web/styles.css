@@ -203,18 +203,121 @@ button.primary {
 }
 button.primary:disabled { opacity: 0.55; cursor: default; }
 
-/* 임시 본 화면 */
-.main-placeholder { align-items: flex-start; gap: 12px; padding-left: 16px; padding-right: 16px; }
-.main-placeholder .who { margin: 0; font-size: 16px; font-weight: 600; }
-.main-placeholder button {
-  min-height: 44px;
-  padding: 0 16px;
-  border: 1px solid var(--hairline);
-  border-radius: 10px;
+/* 달력 화면 (시안의 .app-head, .dow, .num, .ln 치수) */
+.app-head {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  padding: 2px 12px 10px 18px;
+}
+.app-meta {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.app-head h2 { margin: 0; font-size: 30px; line-height: 1.15; font-weight: 700; letter-spacing: -0.02em; }
+.app-nav { display: flex; align-items: center; gap: 2px; }
+.pill {
+  height: 34px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 17px;
   background: var(--surface-2);
-  color: var(--ink);
+  color: var(--accent);
   font: inherit;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
+}
+.iconbtn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.sync { display: inline-flex; align-items: center; gap: 5px; }
+.sync i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.sync[data-state="busy"] i { background: var(--accent); animation: blink 0.7s ease-in-out infinite alternate; }
+.sync[data-state="wait"] i { background: var(--sun); }
+@keyframes blink { to { opacity: 0.25; } }
+
+.dow {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--hairline);
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.dow span:first-child { color: var(--sun); }
+.dow span:last-child { color: var(--sat); }
+
+.cell[data-color] { background: color-mix(in srgb, var(--day-color) 38%, var(--surface)); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .cell[data-color] { background: color-mix(in srgb, var(--day-color) 45%, var(--surface)); }
+}
+:root[data-theme="dark"] .cell[data-color] { background: color-mix(in srgb, var(--day-color) 45%, var(--surface)); }
+
+.num {
+  flex: none;
+  align-self: flex-start;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.cell.sun .num { color: var(--sun); }
+.cell.sat .num { color: var(--sat); }
+.cell[data-color] .num { color: var(--ink); }
+.cell.today .num { background: var(--accent); color: var(--on-accent); }
+.cell.other .num, .cell.other .memo { opacity: 0.4; }
+
+.memo { display: block; min-height: 0; overflow: hidden; }
+.ln {
+  display: block;
+  height: 13px;
+  font-size: 10px;
+  line-height: 13px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ln.done { text-decoration: line-through; opacity: 0.6; }
+.ln.cut {
+  -webkit-mask-image: linear-gradient(to right, #000 78%, transparent);
+  mask-image: linear-gradient(to right, #000 78%, transparent);
+}
+.ln.more { opacity: 0.65; font-weight: 600; }
+
+/* 좁은 화면은 시안처럼 칸 높이를 고정하고, 넓은 화면은 창 전체를 채운다 */
+@media (max-width: 879.98px) {
+  .calendar { padding-bottom: 0; }
+  .calendar .grid { flex: none; grid-template-rows: none; grid-auto-rows: 112px; border-bottom: 0; }
+}
+@media (min-width: 880px) {
+  .calendar { padding-bottom: 0; }
+  .calendar .cell { padding: 6px 6px 3px; }
+  .calendar .ln { height: 17px; font-size: 13px; line-height: 17px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
