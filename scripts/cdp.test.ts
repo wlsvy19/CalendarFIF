@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { EDGE_PATHS, findEdge, parseEdgeProcesses, previewProfile } from './cdp';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { COMMAND_TIMEOUT_MS, EDGE_PATHS, cdpOver, findEdge, parseEdgeProcesses, previewProfile } from './cdp';
 
 it('있는 첫 경로를 돌려준다', () => {
   expect(findEdge((p) => p === EDGE_PATHS[1])).toBe(EDGE_PATHS[1]);
@@ -41,5 +41,65 @@ describe('parseEdgeProcesses', () => {
     expect(parseEdgeProcesses('', dir)).toEqual([]);
     expect(parseEdgeProcesses('오류', dir)).toEqual([]);
     expect(parseEdgeProcesses(JSON.stringify([{ ProcessId: 13, CommandLine: null }]), dir)).toEqual([]);
+  });
+});
+
+describe('cdpOver', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  function socket() {
+    const sent: Array<{ id: number; method: string; params: object }> = [];
+    return { sent, send: (data: string) => sent.push(JSON.parse(data)), close: vi.fn() };
+  }
+
+  it('보낸 명령의 답을 id로 찾아 돌려주고, 오류 답은 명령 이름과 함께 던진다', async () => {
+    const ws = socket();
+    const { cdp, receive } = cdpOver(ws);
+    const first = cdp.send('Page.navigate', { url: 'about:blank' });
+    const second = cdp.send('Runtime.enable');
+    expect(ws.sent.map((m) => [m.id, m.method])).toEqual([[1, 'Page.navigate'], [2, 'Runtime.enable']]);
+    receive(JSON.stringify({ id: 2, error: { message: 'nope' } }));
+    receive(JSON.stringify({ method: 'Page.loadEventFired', params: {} })); // 알림은 무시한다
+    receive(JSON.stringify({ id: 1, result: { frameId: 'f' } }));
+    await expect(first).resolves.toEqual({ frameId: 'f' });
+    await expect(second).rejects.toThrow('Runtime.enable: nope');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('답이 오지 않는 명령은 정한 시간(기본 30초) 뒤에 명령 이름을 담아 실패한다', async () => {
+    expect(COMMAND_TIMEOUT_MS).toBe(30000);
+    const { cdp, receive } = cdpOver(socket());
+    const hung = cdp.send('Runtime.evaluate', { expression: '1' });
+    const caught = hung.catch((e: Error) => e);
+    await vi.advanceTimersByTimeAsync(29999);
+    expect(await Promise.race([caught, Promise.resolve('아직')])).toBe('아직');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(String(await caught)).toContain('Runtime.evaluate');
+    receive(JSON.stringify({ id: 1, result: {} })); // 늦은 답은 아무 일도 하지 않는다
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('evaluate도 같은 제한을 받고, 제한 시간은 바꿀 수 있다', async () => {
+    const { cdp } = cdpOver(socket(), 500);
+    const caught = cdp.evaluate('new Promise(() => {})').catch((e: Error) => e);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(String(await caught)).toMatch(/Runtime\.evaluate.*500ms/);
+  });
+
+  it('evaluate는 값을 돌려주고 페이지의 예외는 던진다', async () => {
+    const ws = socket();
+    const { cdp, receive } = cdpOver(ws);
+    const ok = cdp.evaluate<number>('1 + 1');
+    receive(JSON.stringify({ id: 1, result: { result: { value: 2 } } }));
+    await expect(ok).resolves.toBe(2);
+    const bad = cdp.evaluate('boom()');
+    receive(JSON.stringify({ id: 2, result: { exceptionDetails: { text: 'x', exception: { description: 'ReferenceError: boom' } } } }));
+    await expect(bad).rejects.toThrow('ReferenceError: boom');
+    cdp.close();
+    expect(ws.close).toHaveBeenCalledTimes(1);
   });
 });

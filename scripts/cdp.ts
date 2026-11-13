@@ -20,6 +20,47 @@ export type Cdp = {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** DevTools 명령 하나를 기다리는 가장 긴 시간. 답이 없는 명령이 실행 전체를 붙잡지 않게 한다. */
+export const COMMAND_TIMEOUT_MS = 30000;
+
+type Reply = { result?: any; error?: { message: string } };
+
+/**
+ * DevTools 소켓 위에 명령 보내기를 만든다. 받은 글은 receive로 넘긴다.
+ * 답이 timeoutMs 안에 오지 않으면 그 명령 이름을 담아 실패한다(늦게 온 답은 버린다).
+ */
+export function cdpOver(socket: { send(data: string): void; close(): void }, timeoutMs = COMMAND_TIMEOUT_MS): { cdp: Cdp; receive(data: string): void } {
+  let nextId = 0;
+  const pending = new Map<number, (r: Reply) => void>();
+  const receive = (data: string): void => {
+    const msg = JSON.parse(data);
+    if (msg.id !== undefined) pending.get(msg.id)?.(msg);
+  };
+  const send = async (method: string, params: object = {}) => {
+    const id = ++nextId;
+    const reply = await new Promise<Reply>((ok, fail) => {
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        fail(new Error(`${method}: ${timeoutMs}ms 안에 답이 없다`));
+      }, timeoutMs);
+      pending.set(id, (r) => {
+        clearTimeout(timer);
+        pending.delete(id);
+        ok(r);
+      });
+      socket.send(JSON.stringify({ id, method, params }));
+    });
+    if (reply.error) throw new Error(`${method}: ${reply.error.message}`);
+    return reply.result;
+  };
+  const evaluate = async <T>(expression: string): Promise<T> => {
+    const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
+    return r.result.value as T;
+  };
+  return { cdp: { send, evaluate, close: () => socket.close() }, receive };
+}
+
 /**
  * Edge를 띄워 첫 페이지에 DevTools로 연결한다. `closed`는 브라우저가 끝나거나 그 페이지의 창이 닫히면 풀린다.
  * 창을 닫아도 Edge가 백그라운드에 남는 PC가 있어서 프로세스가 끝나기만 기다리지 않는다.
@@ -29,6 +70,8 @@ export async function launchEdge(opts: {
   profileDir: string;
   args?: string[];
   url?: string;
+  /** DevTools 명령 하나를 기다리는 가장 긴 시간. 기본은 COMMAND_TIMEOUT_MS. */
+  commandTimeoutMs?: number;
 }): Promise<{ cdp: Cdp; closed: Promise<void>; kill(): void }> {
   const exe = findEdge();
   if (!exe) throw new Error('Microsoft Edge를 찾지 못했습니다.');
@@ -75,28 +118,9 @@ export async function launchEdge(opts: {
       ws.onerror = () => fail(new Error('WebSocket 연결 실패'));
     });
     ws.onclose = () => markClosed();
-    let nextId = 0;
-    const pending = new Map<number, (r: { result?: any; error?: { message: string } }) => void>();
-    ws.onmessage = (ev) => {
-      const msg = JSON.parse(String(ev.data));
-      if (msg.id !== undefined) pending.get(msg.id)?.(msg);
-    };
-    const send = async (method: string, params: object = {}) => {
-      const id = ++nextId;
-      const reply = await new Promise<{ result?: any; error?: { message: string } }>((ok) => {
-        pending.set(id, ok);
-        ws.send(JSON.stringify({ id, method, params }));
-      });
-      pending.delete(id);
-      if (reply.error) throw new Error(`${method}: ${reply.error.message}`);
-      return reply.result;
-    };
-    const evaluate = async <T>(expression: string): Promise<T> => {
-      const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-      if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
-      return r.result.value as T;
-    };
-    return { cdp: { send, evaluate, close: () => ws.close() }, closed, kill };
+    const { cdp, receive } = cdpOver(ws, opts.commandTimeoutMs);
+    ws.onmessage = (ev) => receive(String(ev.data));
+    return { cdp, closed, kill };
   } catch (e) {
     kill();
     throw e;
