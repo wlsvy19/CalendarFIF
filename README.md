@@ -1,6 +1,6 @@
 # CalendarFIF
 
-Windows PC와 아이폰에서 날짜별 메모와 날짜 배경색을 양방향으로 동기화하는 개인용 달력이다. 바탕화면 달력 DesktopCal을 대체한다. 이 저장소에는 동기화 핵심, 웹앱, DesktopCal 가져오기, PC 바탕화면 앱이 들어 있고, 아이폰 위젯은 나중에 만든다.
+Windows PC와 아이폰에서 날짜별 메모와 날짜 배경색을 양방향으로 동기화하는 개인용 달력이다. 바탕화면 달력 DesktopCal을 대체한다. 이 저장소에는 동기화 핵심, 웹앱, DesktopCal 가져오기, PC 바탕화면 앱, 아이폰 위젯(Scriptable 스크립트)이 들어 있다.
 
 ## 처음 준비
 
@@ -67,6 +67,39 @@ PC에서 DesktopCal을 아직 주로 쓰는 동안 `--follow`는 DesktopCal에�
 ## 아이폰에서 쓰기
 
 Safari에서 주소를 열고 로그인한 뒤 공유 버튼으로 홈 화면에 추가한다. 홈 화면 앱은 Safari와 로그인 상태를 따로 가지므로 한 번 더 로그인한다. 연결이 끊긴 동안 고친 내용은 `오프라인 (대기 n건)`으로 표시되고 연결이 돌아오면 올라간다.
+
+## 아이폰 위젯
+
+아이폰의 Scriptable 앱으로 홈 화면에 달력을 띄운다. 큰 위젯은 이번 달, 중간 위젯은 이번 주, 작은 위젯은 오늘을 보여 준다. 메모와 색은 웹앱과 같은 것이다.
+
+### 설치
+
+웹앱의 설정(아이폰에서 연 달력의 설정)에 `위젯` 칸이 있다. 거기서 스크립트를 복사한다. 주소와 프로젝트 정보가 이미 채워져 있다.
+
+1. App Store에서 Scriptable을 설치합니다(무료).
+2. 위의 단추로 스크립트를 복사합니다.
+3. Scriptable을 열고 오른쪽 위 +를 눌러 새 스크립트를 만든 뒤 붙여 넣습니다. 이름을 CalendarFIF로 바꿉니다.
+4. ▶를 눌러 한 번 실행하고, 이 달력에 쓰는 이메일과 비밀번호로 로그인합니다. 비밀번호는 저장되지 않습니다.
+5. 홈 화면의 빈 곳을 길게 누르고 +를 눌러 Scriptable의 큰 위젯을 추가합니다.
+6. 추가한 위젯을 길게 눌러 "위젯 편집"에서 Script를 CalendarFIF로 고릅니다.
+
+복사 단추가 막히면 설정에 글 상자가 나온다. 길게 눌러 전체 선택한 뒤 복사한다.
+
+### 알아 둘 것
+
+- 위젯이 언제 새로 그려지는지는 아이폰이 정한다. 보통 15~60분마다다.
+- 위젯을 누르면 Safari에서 달력이 열린다. Safari에서도 한 번 로그인해야 한다.
+- 위젯에서는 편집할 수 없다. 편집은 달력에서 한다.
+- 로그아웃은 Scriptable에서 스크립트를 실행해 "로그아웃"을 고른다.
+- 비밀번호를 바꾸면 위젯이 다시 로그인을 요구한다.
+- 색은 아이폰의 밝은 화면과 어두운 화면을 따라간다.
+- 모양이 어긋나 보이면 "위젯 편집"의 Parameter에 `image dark` 또는 `image light`를 적는다. 그림 방식으로 그린다.
+
+### 개발
+
+- `npm run widget:build`: 스크립트를 만든다(`public/widget/calendarfif-widget.js`, git에 없다). `npm run build`와 `npm run deploy`가 먼저 이것을 해서 배포에 늘 새 스크립트가 들어간다.
+- `npm run widget:preview`: PC에서 위젯 모양을 그림으로 본다(`build/shots/widget-*.png`).
+- 설계: [아이폰 위젯 설계](docs/superpowers/specs/2026-11-14-widget-design.md)
 
 ## 사용자 추가 (관리자)
 
@@ -189,3 +222,4 @@ Spark 요금제는 결제 수단이 필요 없다.
 - [Firebase 프로젝트 준비](docs/firebase-setup.md)
 - [PC 바탕화면 앱 설계](docs/superpowers/specs/2026-11-13-pc-desktop-app-design.md)
 - [관리자와 사용자 추가 설계](docs/superpowers/specs/2026-11-14-admin-users-design.md)
+- [아이폰 위젯 설계](docs/superpowers/specs/2026-11-14-widget-design.md)
