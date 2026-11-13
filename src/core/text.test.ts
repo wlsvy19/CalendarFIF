@@ -21,5 +21,7 @@ describe('text', () => {
     expect(toggleDoneInRange('a\n[+]b\nc', 0, 6).text).toBe('[+]a\n[+]b\nc');
     expect(toggleDoneInRange('[+]a\n[+]b', 0, 9).text).toBe('a\nb');
     expect(toggleDoneInRange('a\nb', 3, 3)).toEqual({ text: 'a\n[+]b', selStart: 6, selEnd: 6 });
+    expect(toggleDoneInRange('a\nb\nc', 0, 2).text).toBe('[+]a\nb\nc');
+    expect(toggleDoneInRange('a\nb', 2, 2).text).toBe('a\n[+]b');
   });
 });

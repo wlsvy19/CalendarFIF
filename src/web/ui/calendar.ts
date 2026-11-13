@@ -137,7 +137,9 @@ export function mountCalendar(
 
   grid.addEventListener('click', (event) => {
     if (swiped) return;
-    const cell = (event.target as Element).closest<HTMLElement>('.cell');
+    // 누르는 사이에 칸이 다시 그려지면 target이 격자가 된다. 누른 자리의 칸을 찾아 쓴다.
+    let cell = (event.target as Element).closest<HTMLElement>('.cell');
+    if (!cell) cell = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('.cell') ?? null;
     if (cell?.dataset.key) deps.onOpenDay(cell.dataset.key);
   });
   prevBtn.addEventListener('click', () => go(shiftMonth(store.current(), -1)));

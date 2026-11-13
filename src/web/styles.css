@@ -147,7 +147,11 @@ body {
 .sheet {
   position: fixed;
   z-index: 21;
-  inset: calc(env(safe-area-inset-top, 0px) + 24px) 0 0 0;
+  top: calc(env(safe-area-inset-top, 0px) + 24px);
+  left: 0;
+  right: 0;
+  height: calc(100vh - env(safe-area-inset-top, 0px) - 24px);
+  height: calc(100dvh - env(safe-area-inset-top, 0px) - 24px); /* 화상 키보드가 열려도 입력 칸이 가려지지 않게 dvh를 쓴다 */
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -155,8 +159,78 @@ body {
   border-radius: 18px 18px 0 0;
   background: var(--surface);
   box-shadow: 0 -10px 30px -16px var(--shadow);
+  animation: sheet-in 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .sheet:focus { outline: none; }
+
+@keyframes sheet-in { from { transform: translateY(28px); opacity: 0; } }
+:root.sheet-open { overflow: hidden; }
+.sheet-bar {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  min-height: 44px;
+}
+.sheet-bar h3 { margin: 0; font-size: 16px; font-weight: 600; }
+.textbtn {
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 16px;
+  padding: 8px 4px;
+  cursor: pointer;
+}
+.textbtn.start { justify-self: start; }
+.textbtn.end { justify-self: end; font-weight: 700; }
+.field { flex: none; display: grid; gap: 8px; min-height: 0; }
+.field.grow { flex: 1; grid-template-rows: auto minmax(0, 1fr); }
+.field-head { display: flex; align-items: center; justify-content: space-between; }
+.field-label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.donebtn {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 16px;
+  background: var(--surface-2);
+  color: var(--accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.swatches { display: flex; flex-wrap: wrap; gap: 10px; padding: 4px; margin: -4px; }
+.swatch {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  background: var(--sw, var(--surface));
+  cursor: pointer;
+}
+.swatch.none {
+  background:
+    linear-gradient(to top right, transparent calc(50% - 1px), var(--sun) calc(50% - 1px), var(--sun) calc(50% + 1px), transparent calc(50% + 1px)),
+    var(--surface);
+}
+.swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.memo-input {
+  width: 100%;
+  min-height: 140px;
+  resize: none;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px; /* 16px 미만이면 아이폰이 입력 때 화면을 확대한다 */
+  line-height: 1.5;
+}
+.memo-input:focus-visible { outline-offset: 0; }
 
 /* 로그인 */
 .login {
@@ -309,17 +383,36 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
 }
 .ln.more { opacity: 0.65; font-weight: 600; }
 
-/* 좁은 화면은 시안처럼 칸 높이를 고정하고, 넓은 화면은 창 전체를 채운다 */
+/* 좁은 화면은 화면 높이를 채우고, 주 줄들이 남는 높이를 똑같이 나눠 가진다 */
 @media (max-width: 879.98px) {
-  .calendar { padding-bottom: 0; }
-  .calendar .grid { flex: none; grid-template-rows: none; grid-auto-rows: 112px; border-bottom: 0; }
+  .calendar {
+    height: 100vh;
+    height: 100dvh;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .calendar .grid { border-bottom: 0; }
 }
 @media (min-width: 880px) {
+  .sheet {
+    top: 50%;
+    left: 50%;
+    right: auto;
+    width: 480px;
+    height: auto;
+    max-height: min(640px, calc(100vh - 48px));
+    max-height: min(640px, calc(100dvh - 48px));
+    transform: translate(-50%, -50%);
+    border-radius: 18px;
+    padding-bottom: 20px;
+    animation: none;
+  }
+  .memo-input { min-height: 200px; }
   .calendar { padding-bottom: 0; }
   .calendar .cell { padding: 6px 6px 3px; }
   .calendar .ln { height: 17px; font-size: 13px; line-height: 17px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .sheet { animation: none; }
   * { animation: none !important; transition: none !important; }
 }

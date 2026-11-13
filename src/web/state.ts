@@ -33,6 +33,11 @@ export class CalendarStore {
     this.subscribeAround();
   }
 
+  /** True once the server has answered for the month (even when the document does not exist). */
+  isLoaded(monthId: string): boolean {
+    return this.docs.has(monthId);
+  }
+
   days(monthId: string): Record<string, DayValue> {
     return applyPending(monthId, this.docs.get(monthId) ?? null, this.outbox.list(), this.editedBy);
   }

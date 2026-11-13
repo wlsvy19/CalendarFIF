@@ -41,7 +41,9 @@ export function toggleDoneInRange(
   const hi = Math.max(selStart, selEnd);
   const touched: number[] = [];
   lines.forEach((line, i) => {
-    if (starts[i] <= hi && lo <= starts[i] + line.length) touched.push(i);
+    // 선택 범위가 있을 때 다음 줄 맨 앞에서 끝나면 그 줄은 건드리지 않는다.
+    const reachesStart = lo === hi ? starts[i] <= hi : starts[i] < hi;
+    if (reachesStart && lo <= starts[i] + line.length) touched.push(i);
   });
   if (touched.length === 0) return { text, selStart, selEnd };
 

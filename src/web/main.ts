@@ -6,7 +6,10 @@ import { CalendarStore } from './state';
 import { startAutoFlush } from './autoFlush';
 import { deviceLabel } from './device';
 import { mountCalendar } from './ui/calendar';
+import { mountEditor } from './ui/editor';
+import { parseHash } from './router';
 import { splitDateKey, todayKey } from '../core/dates';
+import { EMPTY_DAY } from '../core/types';
 import { FirestoreMonthStore } from '../sync/firestoreStore';
 import { Outbox } from '../sync/outbox';
 import { SyncEngine } from '../sync/engine';
@@ -30,19 +33,84 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
     if (event.key === null || event.key.startsWith('calfif.outbox.')) store.refresh();
   };
   window.addEventListener('storage', onStorage);
+  let pushedByApp = false;
+  let editor: { dateKey: string; handle: { destroy(): void } } | null = null;
+  let waiting: { dateKey: string; off(): void; timer: ReturnType<typeof setTimeout> } | null = null;
+
+  const closeEditor = (): void => {
+    waiting?.off();
+    if (waiting) clearTimeout(waiting.timer);
+    waiting = null;
+    editor?.handle.destroy();
+    editor = null;
+  };
+  const backToCalendar = (): void => {
+    if (pushedByApp) history.back();
+    else location.hash = '';
+  };
+  const openEditor = (dateKey: string): void => {
+    const { monthId, day } = splitDateKey(dateKey)!;
+    // 편집 화면이 처음 보여 준 값이 base다. 서버 문서를 따로 읽지 않는다.
+    const base = store.days(monthId)[day] ?? EMPTY_DAY;
+    const handle = mountEditor(root, {
+      dateKey,
+      value: base,
+      onSave: (next) => {
+        engine.saveEdit(monthId, day, base, next);
+        store.refresh();
+        backToCalendar();
+      },
+      onCancel: backToCalendar,
+    });
+    editor = { dateKey, handle };
+  };
+  const syncRoute = (): void => {
+    const route = parseHash(location.hash);
+    if (route.name !== 'day') {
+      pushedByApp = false;
+      closeEditor();
+      return;
+    }
+    if (editor?.dateKey === route.dateKey || waiting?.dateKey === route.dateKey) return;
+    closeEditor();
+    const { monthId } = splitDateKey(route.dateKey)!;
+    store.show(monthId);
+    store.refresh();
+    if (store.isLoaded(monthId)) {
+      openEditor(route.dateKey);
+      return;
+    }
+    // 서버 답이 오기 전에 열면 빈 값을 보여 주게 되므로 답을 기다린다. 오프라인이면 4초 뒤에 연다.
+    const dateKey = route.dateKey;
+    const start = (): void => {
+      if (waiting?.dateKey !== dateKey) return;
+      closeEditor();
+      openEditor(dateKey);
+    };
+    const off = store.onChange(() => {
+      if (store.isLoaded(monthId)) start();
+    });
+    waiting = { dateKey, off, timer: setTimeout(start, 4000) };
+  };
+  window.addEventListener('hashchange', syncRoute);
+
   const calendar = mountCalendar(root, {
     store,
     status: engine,
     today: () => todayKey(),
     onOpenDay: (dateKey) => {
+      pushedByApp = true;
       location.hash = dateKey;
     },
     onOpenSettings: () => {
       location.hash = 'settings';
     },
   });
+  syncRoute();
   return {
     destroy() {
+      window.removeEventListener('hashchange', syncRoute);
+      closeEditor();
       calendar.destroy();
       window.removeEventListener('storage', onStorage);
       offStatus();
