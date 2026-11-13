@@ -388,3 +388,18 @@ it('destroy 뒤에 행 동작과 재설정의 늦은 결과는 아무것도 바�
   expect(statusEl.textContent).toBe('');
   expect(root.querySelector('.sheet')).toBeNull();
 });
+
+it('끌기 연결 함수를 받았을 때만(PC 앱) 시트와 제목 줄을 넘겨 부르고, destroy에서 끝낸다', () => {
+  const { root, handle } = setup();
+  expect(root.querySelector('.sheet-bar')!.classList.contains('drag-handle')).toBe(false);
+  handle.destroy();
+  const end = vi.fn();
+  const attachDrag = vi.fn(() => ({ destroy: end }));
+  const pc = setup({ attachDrag });
+  expect(attachDrag).toHaveBeenCalledTimes(1);
+  expect(attachDrag).toHaveBeenCalledWith(pc.root.querySelector('.sheet.users'), pc.root.querySelector('.sheet.users .sheet-bar'));
+  expect(end).not.toHaveBeenCalled();
+  pc.handle.destroy();
+  pc.handle.destroy();
+  expect(end).toHaveBeenCalledTimes(1);
+});

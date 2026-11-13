@@ -35,23 +35,80 @@ export function usersRoute(state: AccessState): 'open' | 'leave' | 'wait' {
 }
 
 const MAX_CLAIM_ATTEMPTS = 2;
+// 지켜보기가 실패하면(SDK는 그 지켜보기를 끝낸다) 2초부터 두 배씩 60초까지 기다렸다가 다시 지켜본다.
+const RETRY_FIRST_MS = 2000;
+const RETRY_MAX_MS = 60000;
+// 허가 없음인 동안 다시 확인하는 간격. 마지막 값을 계속 쓴다.
+const RECHECK_MS = [30000, 60000, 120000, 300000];
+// recheck(done)의 done은 답이 없어도(연결이 없을 때) 이만큼 뒤에 부른다.
+const RECHECK_LIMIT_MS = 10000;
 
-/** 로그인한 계정의 접근 상태를 알린다. 처음은 'checking'. 끊는 함수를 돌려준다. */
+export type AccessWatch = {
+  stop(): void;
+  /** 지금 다시 확인한다: 새로 지켜보고 관리자 표시 만들기를 한 번 더 허락한다. done은 서버의 답이 오면(늦어도 10초 뒤) 한 번 부른다. */
+  recheck(done?: () => void): void;
+};
+/** 허가 없음인 동안 화면이 다시 보이거나(visibilitychange) 연결이 돌아오면(online) 다시 확인한다. */
+export type AccessTriggers = { target: EventTarget; doc: { visibilityState: string } };
+
+/**
+ * 로그인한 계정의 접근 상태를 알린다. 처음은 'checking'.
+ * 규칙을 배포한 직후에는 새 규칙이 모든 요청에 닿기까지 1분쯤 걸린다. 그래서 지켜보기의 오류는 상태를 바꾸지 않고
+ * 다시 지켜보며, 'none'은 서버가 "문서 없음"이라고 답하고 만들기가 거부됐을 때만 알린다. 'none'인 동안에도 때때로 다시 확인한다.
+ */
 export function watchAccess(
   source: AccessSource,
   session: { uid: string; email: string },
   onState: (state: AccessState) => void,
-): () => void {
+  triggers?: AccessTriggers,
+): AccessWatch {
   let stopped = false;
   let state: AccessState = 'checking';
   let attempts = 0;
   let claiming = false;
-  let denied = false; // 만들기가 거부됐다. 이 계정은 관리자가 아니다.
+  let denied = false; // 만들기가 거부됐다. 다시 확인할 때까지 이 계정은 관리자가 아니다.
   let claimed = false; // 만들기가 성공했다. 문서가 보일 때까지 다시 시도하지 않는다.
+  let emptyOnServer = false; // 서버가 마지막으로 "문서 없음"이라고 답했다.
+
+  let generation = 0; // 지금 지켜보기의 번호. 끝난 지켜보기가 늦게 보낸 알림은 무시한다.
+  let unwatch: (() => void) | undefined;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  let retryDelay = RETRY_FIRST_MS;
+  let recheckTimer: ReturnType<typeof setTimeout> | undefined;
+  let recheckStep = 0;
+  let waiters: Array<() => void> = [];
+  let waitLimit: ReturnType<typeof setTimeout> | undefined;
+
+  // 다시 확인의 답이 왔다: 기다리는 쪽에 알린다.
+  const settle = (): void => {
+    clearTimeout(waitLimit);
+    waitLimit = undefined;
+    const done = waiters;
+    waiters = [];
+    for (const fn of done) fn();
+  };
+
+  const scheduleRecheck = (): void => {
+    if (stopped || state !== 'none' || recheckTimer !== undefined) return;
+    const wait = RECHECK_MS[Math.min(recheckStep, RECHECK_MS.length - 1)];
+    recheckStep += 1;
+    recheckTimer = setTimeout(() => {
+      recheckTimer = undefined;
+      recheckNow();
+      scheduleRecheck();
+    }, wait);
+  };
 
   const set = (next: AccessState): void => {
     if (stopped || next === state) return;
     state = next;
+    if (next === 'none') {
+      scheduleRecheck();
+    } else {
+      clearTimeout(recheckTimer);
+      recheckTimer = undefined;
+      recheckStep = 0;
+    }
     onState(next);
   };
 
@@ -61,46 +118,114 @@ export function watchAccess(
     source.claimAdmin(session.uid, session.email).then(
       () => {
         claiming = false;
-        claimed = true;
+        claimed = true; // 문서가 보이는 스냅샷이 오면 끝난다
       },
       (e: unknown) => {
         claiming = false;
         if (stopped) return;
         if ((e as { code?: string } | null)?.code === 'permission-denied') {
           denied = true;
-          set('none');
+          // 만드는 사이 문서가 왔으면(관리자가 추가했으면) 그 상태를 둔다.
+          if (emptyOnServer) set('none');
         }
+        settle();
       },
     );
   };
 
+  const handleSnapshot = (s: AccessSnapshot): void => {
+    retryDelay = RETRY_FIRST_MS;
+    if (s.hasPendingWrites) return;
+    if (s.doc) {
+      emptyOnServer = false;
+      if (claimed) {
+        // 관리자 문서가 나중에 사라지면 한 번 더 만들어 볼 수 있게 한다.
+        claimed = false;
+        attempts = 0;
+      }
+      set(s.doc.disabled ? 'blocked' : s.doc.role);
+      settle();
+      return;
+    }
+    if (s.fromCache) return;
+    emptyOnServer = true;
+    if (denied) {
+      set('none');
+      settle();
+      return;
+    }
+    if (claiming || claimed) return; // 만들기의 답이나 문서가 오면 끝난다
+    if (attempts < MAX_CLAIM_ATTEMPTS) claim();
+    else settle();
+  };
+
+  const handleError = (): void => {
+    settle();
+    retry = setTimeout(() => {
+      retry = undefined;
+      subscribe();
+    }, retryDelay);
+    retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
+  };
+
+  // 지켜보기를 새로 시작한다. 하던 지켜보기와 기다리던 다시 지켜보기는 버린다.
+  function subscribe(): void {
+    clearTimeout(retry);
+    retry = undefined;
+    unwatch?.();
+    const mine = ++generation;
+    const live = (): boolean => !stopped && mine === generation;
+    unwatch = source.watch(
+      session.uid,
+      (s) => {
+        if (live()) handleSnapshot(s);
+      },
+      () => {
+        if (!live()) return;
+        generation += 1; // 이 지켜보기는 끝났다
+        handleError();
+      },
+    );
+  }
+
+  // 거부된 만들기를 한 번 더 허락하고 새로 지켜본다. 상태는 서버의 답이 올 때까지 그대로다.
+  function recheckNow(): void {
+    if (stopped) return;
+    denied = false;
+    attempts = Math.min(attempts, MAX_CLAIM_ATTEMPTS - 1);
+    subscribe();
+  }
+
+  const onOnline = (): void => {
+    if (state === 'none') recheckNow();
+  };
+  const onVisibility = (): void => {
+    if (state === 'none' && triggers?.doc.visibilityState === 'visible') recheckNow();
+  };
+  triggers?.target.addEventListener('online', onOnline);
+  triggers?.target.addEventListener('visibilitychange', onVisibility);
+
   onState('checking');
-  const unwatch = source.watch(
-    session.uid,
-    (s) => {
-      if (stopped || s.hasPendingWrites) return;
-      if (s.doc) {
-        if (claimed) {
-          // 관리자 문서가 나중에 사라지면 한 번 더 만들어 볼 수 있게 한다.
-          claimed = false;
-          attempts = 0;
-        }
-        set(s.doc.disabled ? 'blocked' : s.doc.role);
-        return;
-      }
-      if (s.fromCache) return;
-      if (denied) {
-        set('none');
-        return;
-      }
-      if (!claiming && !claimed && attempts < MAX_CLAIM_ATTEMPTS) claim();
+  subscribe();
+  return {
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      unwatch?.();
+      clearTimeout(retry);
+      clearTimeout(recheckTimer);
+      clearTimeout(waitLimit);
+      waiters = [];
+      triggers?.target.removeEventListener('online', onOnline);
+      triggers?.target.removeEventListener('visibilitychange', onVisibility);
     },
-    (code) => {
-      if (code === 'permission-denied') set('none');
+    recheck(done) {
+      if (stopped) return;
+      if (done) {
+        waiters.push(done);
+        waitLimit ??= setTimeout(settle, RECHECK_LIMIT_MS);
+      }
+      recheckNow();
     },
-  );
-  return () => {
-    stopped = true;
-    unwatch();
   };
 }

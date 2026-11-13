@@ -3,7 +3,7 @@ import { PALETTE } from '../../core/color';
 import type { Layout } from '../../core/layout';
 import type { CalfifDesktop, Hotkey, SettingsPage } from '../../desktop/api';
 import type { Appearance, Bullet } from '../appearance';
-import { accountSection, type AccountProps } from '../ui/settings';
+import { accountSection, type AccountProps, type AccountSection } from '../ui/settings';
 import { makeDraggable, sessionMemory } from './dragSheet';
 import { playDoneTone } from './tone';
 
@@ -122,7 +122,10 @@ function rangeInput(label: string, min: number, max: number, step: number, value
   return input;
 }
 
-export function mountDesktopSettings(root: HTMLElement, props: Props): { destroy(): void; showPage(page: SettingsPage): void } {
+export function mountDesktopSettings(
+  root: HTMLElement,
+  props: Props,
+): { destroy(): void; showPage(page: SettingsPage): void; setManageUsers: AccountSection['setManageUsers'] } {
   const previouslyFocused = document.activeElement as HTMLElement | null;
   let cur = props.appearance;
   let destroyed = false;
@@ -447,6 +450,7 @@ export function mountDesktopSettings(root: HTMLElement, props: Props): { destroy
   }
 
   // 쪽과 탭
+  const account = accountSection(props.account);
   const panels = new Map<SettingsPage, HTMLElement>();
   const tabs = new Map<SettingsPage, HTMLButtonElement>();
   for (const { id, name } of PAGES) {
@@ -461,7 +465,7 @@ export function mountDesktopSettings(root: HTMLElement, props: Props): { destroy
     panel.id = `settings-panel-${id}`;
     panel.setAttribute('role', 'tabpanel');
     panel.setAttribute('aria-labelledby', tabButton.id);
-    if (id === 'account') panel.append(accountSection(props.account));
+    if (id === 'account') panel.append(account.el);
     else panel.append(...rows[id]);
     panels.set(id, panel);
   }
@@ -524,6 +528,7 @@ export function mountDesktopSettings(root: HTMLElement, props: Props): { destroy
 
   return {
     showPage,
+    setManageUsers: account.setManageUsers,
     destroy() {
       destroyed = true;
       drag.destroy();

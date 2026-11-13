@@ -5,7 +5,7 @@ import {
   updatePassword,
   type Auth,
 } from 'firebase/auth';
-import { MIN_PASSWORD, codeOf, normalizeEmail } from './users';
+import { MIN_PASSWORD, codeOf, normalizeEmail } from './authCommon';
 
 export type PasswordFailure = 'wrong-current' | 'weak' | 'same' | 'network' | 'throttled' | 'unknown';
 export type PasswordResult = { ok: true } | { ok: false; reason: PasswordFailure; code: string };

@@ -529,5 +529,6 @@ button { touch-action: manipulation; }
 .account-pw-form .donebtn:disabled { opacity: 0.55; cursor: default; }
 .blocked-email { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
 .blocked-text { margin: 0; font-size: 15px; line-height: 1.5; color: var(--sun); }
+.blocked-pending { margin: 0; font-size: 15px; line-height: 1.5; }
 .login-forgot { justify-self: center; font-weight: 500; }
 .login-error.ok { color: var(--muted); }

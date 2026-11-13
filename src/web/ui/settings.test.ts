@@ -114,6 +114,24 @@ it('Tab 순서에 복사 실패 때 나오는 글 상자가 들어간다: 그것
   expect(e.defaultPrevented).toBe(true);
   expect(document.activeElement).toBe(close);
 });
+it('열린 뒤에 관리자로 확인되면 사용자 관리 단추가 제자리에 생기고, 적던 비밀번호는 그대로다', () => {
+  const { root, button, handle } = mount({ onChangePassword: vi.fn(), widget });
+  expect(button('사용자 관리')).toBeUndefined();
+  button('비밀번호 변경').click();
+  const current = root.querySelector<HTMLInputElement>('input[name="current"]')!;
+  current.value = '적던 비밀번호';
+  current.focus();
+  const onManage = vi.fn();
+  handle.setManageUsers(onManage);
+  handle.setManageUsers(onManage);
+  expect([...root.querySelectorAll('.field-label')].map((l) => l.textContent)).toEqual(['계정', '동기화', '사용자', '비밀번호', '위젯']);
+  expect([root.querySelector('input[name="current"]') === current, current.value, document.activeElement === current]).toEqual([true, '적던 비밀번호', true]);
+  button('사용자 관리').click();
+  expect(onManage).toHaveBeenCalledTimes(1);
+  handle.setManageUsers(undefined);
+  expect(button('사용자 관리')).toBeUndefined();
+  expect(root.querySelector('input[name="current"]')).toBe(current);
+});
 
 function pwSetup(onChangePassword: (c: string, n: string) => Promise<{ ok: boolean; message: string }>) {
   const m = mount({ onChangePassword });

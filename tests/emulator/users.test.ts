@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import type { RulesTestEnvironment } from '@firebase/rules-unit-testing';
 import { assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
 import { deleteApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
@@ -18,7 +19,8 @@ import {
   type Firestore,
 } from 'firebase/firestore';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { watchAccess, type AccessState } from '../../src/web/access';
+import { buildRules } from '../../scripts/build-rules';
+import { watchAccess, type AccessState, type AccessWatch } from '../../src/web/access';
 import { firestoreAccessSource, firestoreUsersSource } from '../../src/web/accessStore';
 import { firebaseAccountMaker } from '../../src/web/accountMaker';
 import { changePassword, firebasePasswordDeps, sendReset } from '../../src/web/password';
@@ -78,6 +80,31 @@ function until(read: () => AccessState | undefined, want: AccessState): Promise<
     };
     tick();
   });
+}
+
+// 이 브랜치 전의 규칙: 소유자 한 명이 자기 달만 읽고 쓴다(access 문서는 아무도 못 읽는다).
+// 배포 직후 아직 새 규칙이 닿지 않은 요청을 흉내 낸다.
+const OLD_RULES = `rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/months/{monthId} {
+      allow read, write: if request.auth != null
+        && request.auth.uid == uid
+        && uid == '${OWNER}'
+        && monthId.matches('^[0-9]{4}-[0-9]{2}$');
+    }
+  }
+}
+`;
+const NEW_RULES = buildRules(readFileSync('firestore.rules.template', 'utf8'), OWNER);
+
+/** 에뮬레이터의 Firestore 규칙을 바꾼다(@firebase/rules-unit-testing이 규칙을 올리는 것과 같은 주소). */
+async function loadRules(rules: string): Promise<void> {
+  const res = await fetch(`http://${FIRESTORE_HOST}/emulator/v1/projects/demo-calfif:securityRules`, {
+    method: 'PUT',
+    body: JSON.stringify({ rules: { files: [{ content: rules }] } }),
+  });
+  if (!res.ok) throw new Error(`규칙을 올리지 못했다: ${await res.text()}`);
 }
 
 let env: RulesTestEnvironment;
@@ -160,24 +187,48 @@ it('watchAccess: 관리자는 admin이 되고 문서가 만들어지며, 허가 
     await ctx.firestore().doc(`access/${OWNER}`).delete();
   });
   let adminState: AccessState | undefined;
-  const stopAdmin = watchAccess(firestoreAccessSource(admin.db), { uid: OWNER, email: ADMIN_EMAIL }, (s) => { adminState = s; });
+  const adminWatch = watchAccess(firestoreAccessSource(admin.db), { uid: OWNER, email: ADMIN_EMAIL }, (s) => { adminState = s; });
   await until(() => adminState, 'admin');
-  stopAdmin();
+  adminWatch.stop();
   const created = await getDoc(doc(admin.db, 'access', OWNER));
   expect(created.data()).toMatchObject({ email: ADMIN_EMAIL, role: 'admin', disabled: false });
 
   const stranger = await instance(STRANGER_EMAIL, 'stranger-password');
   const strangerUid = stranger.auth.currentUser!.uid;
   const strangerStates: AccessState[] = [];
-  const stopStranger = watchAccess(firestoreAccessSource(stranger.db), { uid: strangerUid, email: STRANGER_EMAIL }, (s) => { strangerStates.push(s); });
+  const strangerWatch = watchAccess(firestoreAccessSource(stranger.db), { uid: strangerUid, email: STRANGER_EMAIL }, (s) => { strangerStates.push(s); });
   await until(() => strangerStates.at(-1), 'none');
   await new Promise((r) => setTimeout(r, 300));
-  stopStranger();
+  strangerWatch.stop();
   expect(strangerStates).not.toContain('admin');
   expect(strangerStates).not.toContain('user');
   await env.withSecurityRulesDisabled(async (ctx) => {
     expect((await ctx.firestore().doc(`access/${strangerUid}`).get()).exists).toBe(false);
   });
+});
+
+it('watchAccess: 배포 직후 예전 규칙에 거부되던 관리자도 허가 없음으로 굳지 않고, 새 규칙이 닿으면 admin이 된다', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().doc(`access/${OWNER}`).delete();
+  });
+  // 캐시가 빈 새 앱 인스턴스: 앞 시험에서 읽은 관리자 문서가 남아 있지 않다.
+  const owner = await instance(ADMIN_EMAIL, ADMIN_PASSWORD);
+  const states: AccessState[] = [];
+  let watch: AccessWatch | undefined;
+  try {
+    await loadRules(OLD_RULES);
+    watch = watchAccess(firestoreAccessSource(owner.db), { uid: OWNER, email: ADMIN_EMAIL }, (s) => { states.push(s); });
+    await new Promise((r) => setTimeout(r, 1500)); // 지켜보기가 예전 규칙에 거부된 뒤, 첫 다시 지켜보기(2초) 전
+    expect(states).toEqual(['checking']);
+    await loadRules(NEW_RULES);
+    await until(() => states.at(-1), 'admin');
+    expect(states).toEqual(['checking', 'admin']);
+  } finally {
+    watch?.stop();
+    await loadRules(NEW_RULES);
+  }
+  const created = await getDoc(doc(admin.db, 'access', OWNER));
+  expect(created.data()).toMatchObject({ email: ADMIN_EMAIL, role: 'admin', disabled: false });
 });
 
 it('연결이 없으면 관리자의 목록 쓰기는 기다리지 않고 실패하고 대기열에 남지 않는다', async () => {

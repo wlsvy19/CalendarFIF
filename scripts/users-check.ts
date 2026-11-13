@@ -205,11 +205,17 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     await clickEl(`${sheet(cls)}?.querySelector('.sheet-bar .textbtn.end')`);
     return (await waitFor<boolean>(NO_SHEET, 5000)) === true;
   }
-  /** 로그인 화면이 될 때까지 로그아웃한다: 안내의 로그아웃, 또는 설정의 로그아웃(대기 중인 편집이 있으면 "그래도 로그아웃"). */
+  /** 로그인 화면이 될 때까지 로그아웃한다: 안내나 설정의 로그아웃(대기 중인 편집이 있으면 둘 다 "그래도 로그아웃"). */
   async function signOut(): Promise<boolean> {
     if (await js<boolean>(LOGIN_FORM)) return true;
     if (await js<boolean>(`!!${button(q('.login-card'), '로그아웃')}`)) {
       await press(button(q('.login-card'), '로그아웃'));
+      if (await js<boolean>(`${button(q('.login-card'), '그래도 로그아웃')}?.hidden === false`)) {
+        // 사람처럼 묻는 문구를 확인하고 한 번 더 누른다. 문구가 다르면 로그아웃하지 않고 실패로 둔다.
+        const asked = await js<string | null>("document.querySelector('.blocked-confirm:not([hidden])')?.textContent ?? null");
+        if (!/^아직 올리지 못한 편집이 [1-9][0-9]*건 있습니다\. 로그아웃하면 이 기기에 남습니다\.$/.test(asked ?? '')) return false;
+        await press(button(q('.login-card'), '그래도 로그아웃'));
+      }
     } else {
       if (await js<boolean>(`!!${sheet('')}`)) await closeSheet('');
       if (!(await openSettings())) return false;
@@ -433,6 +439,14 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   const holdSaved = editorKept && (await press(`${editor}.querySelector('.textbtn.end')`));
   const holdNotice = holdSaved ? await waitText(NOTICE, BLOCKED_TEXT) : '(저장하지 못했다)';
   const queued = await js<boolean>(`(localStorage.getItem(${JSON.stringify(outboxKey)}) ?? '').includes(${JSON.stringify(HOLD_MEMO)})`);
+  // 안내에 올리지 못한 편집의 건수가 나오고, 로그아웃은 한 번 더 묻는다(묻는 데까지만 본다. 이 계정은 아래에서 다시 허용된다).
+  const PENDING_LINE = '아직 올리지 못한 편집이 1건 있습니다.';
+  const CONFIRM_LINE = '아직 올리지 못한 편집이 1건 있습니다. 로그아웃하면 이 기기에 남습니다.';
+  const pendingLine = holdNotice === BLOCKED_TEXT ? await waitText("document.querySelector('.blocked-pending:not([hidden])')?.textContent", PENDING_LINE, 5000) : '(안내 없음)';
+  const askPressed = pendingLine === PENDING_LINE && (await press(button(q('.login-card'), '로그아웃')));
+  const confirmLine = askPressed ? await waitText("document.querySelector('.blocked-confirm:not([hidden])')?.textContent", CONFIRM_LINE, 5000) : '(누르지 못했다)';
+  const forceShown = await js<boolean>(`${button(q('.login-card'), '그래도 로그아웃')}?.hidden === false && !${q('.login-card')}?.querySelector('button.primary:not([hidden])')`);
+  const stillSignedIn = await js<boolean>(`!${LOGIN_FORM}`);
   const allowedAgain = holdUid !== null && (await setDisabledAsOwner(holdUid, false));
   const calendarBack = allowedAgain && (await waitFor<boolean>(`${CALENDAR} && ${access('user')}`, 15000)) === true;
   await cdp.send('Page.reload');
@@ -441,9 +455,11 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   const holdSynced = (await waitFor<boolean>(SYNCED)) === true;
   const outboxEmpty = await js<boolean>(`['[]', null].includes(localStorage.getItem(${JSON.stringify(outboxKey)}))`);
   record(
-    '17. 메모를 적는 중에 중지되면 편집 화면이 그대로 있고, 저장하면 중지 안내가 나오며, 다시 허용된 뒤 다시 읽으면 그 메모가 올라가 있다',
-    holdWritten && blockedArrived && editorKept && holdSaved && holdNotice === BLOCKED_TEXT && queued && calendarBack && holdAfter === HOLD_MEMO && holdSynced && outboxEmpty,
-    `적기 ${holdWritten ? '됨' : '안 됨'}, 중지 ${disabledByAdmin ? '씀' : '못 씀'}, 접근 상태 ${blockedArrived ? 'blocked 옴' : '안 옴'}, 편집 화면 ${editorKept ? '그대로' : '사라짐'}, 저장 뒤 안내 "${holdNotice}", 대기열 ${queued ? '있음' : '없음'}, 다시 허용 뒤 ${calendarBack ? '달력' : '달력 아님'}, 다시 읽은 뒤 "${holdAfter || (await cellText('20'))}", ${holdSynced ? '동기화됨' : '동기화 안 됨'}, 대기열 ${outboxEmpty ? '비었음' : '남음'}`,
+    '17. 메모를 적는 중에 중지되면 편집 화면이 그대로 있고, 저장하면 중지 안내(올리지 못한 1건, 로그아웃은 한 번 더 물음)가 나오며, 다시 허용된 뒤 다시 읽으면 그 메모가 올라가 있다',
+    holdWritten && blockedArrived && editorKept && holdSaved && holdNotice === BLOCKED_TEXT && queued &&
+      pendingLine === PENDING_LINE && confirmLine === CONFIRM_LINE && forceShown && stillSignedIn &&
+      calendarBack && holdAfter === HOLD_MEMO && holdSynced && outboxEmpty,
+    `적기 ${holdWritten ? '됨' : '안 됨'}, 중지 ${disabledByAdmin ? '씀' : '못 씀'}, 접근 상태 ${blockedArrived ? 'blocked 옴' : '안 옴'}, 편집 화면 ${editorKept ? '그대로' : '사라짐'}, 저장 뒤 안내 "${holdNotice}", 대기열 ${queued ? '있음' : '없음'}, 건수 "${pendingLine}", 로그아웃 뒤 "${confirmLine}", 그래도 로그아웃 ${forceShown ? '보임' : '안 보임'}, ${stillSignedIn ? '로그인 그대로' : '로그아웃됨'}, 다시 허용 뒤 ${calendarBack ? '달력' : '달력 아님'}, 다시 읽은 뒤 "${holdAfter || (await cellText('20'))}", ${holdSynced ? '동기화됨' : '동기화 안 됨'}, 대기열 ${outboxEmpty ? '비었음' : '남음'}`,
   );
 
   // 18
@@ -463,11 +479,16 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   const removedSubmitted = await submitLogin(newUserLater);
   const noneNotice = removedSubmitted ? await waitText(NOTICE, NONE_TEXT) : '(로그인하지 못했다)';
   const noneNoCalendar = await js<boolean>("!document.querySelector('.calendar')");
+  // 다시 확인: 누르면 "확인하는 중"이 되고, 서버의 답(여전히 허가 없음)이 오면 단추가 돌아오며 안내는 그대로다.
+  const noPending = await js<boolean>("document.querySelector('.blocked-pending')?.hidden === true");
+  const recheckPressed = noneNotice === NONE_TEXT && (await press(button(q('.login-card'), '다시 확인')));
+  const recheckBack = recheckPressed && (await waitFor<boolean>(`${button(q('.login-card'), '다시 확인')}?.disabled === false`, 12000)) === true;
+  const noneAfter = await js<string | null>(NOTICE);
   const noneOut = noneNotice === NONE_TEXT && (await press(button(q('.login-card'), '로그아웃'))) && (await waitFor<boolean>(LOGIN_FORM)) === true;
   record(
-    '19. 지운 사용자가 로그인하면 달력 대신 허가 없음 안내를 보고, 로그아웃할 수 있다',
-    noneNotice === NONE_TEXT && noneNoCalendar && noneOut,
-    `안내 "${noneNotice}", 달력 ${noneNoCalendar ? '없음' : '있음'}, 로그아웃 뒤 ${noneOut ? '로그인 화면' : '로그인 화면 아님'}`,
+    '19. 지운 사용자가 로그인하면 달력 대신 허가 없음 안내(올리지 못한 편집 없음)를 보고, 다시 확인해도 그대로이며, 로그아웃할 수 있다',
+    noneNotice === NONE_TEXT && noneNoCalendar && noPending && recheckBack && noneAfter === NONE_TEXT && noneOut,
+    `안내 "${noneNotice}", 달력 ${noneNoCalendar ? '없음' : '있음'}, 건수 줄 ${noPending ? '숨김' : '보임'}, 다시 확인 ${recheckBack ? '돌아옴' : recheckPressed ? '안 돌아옴' : '누르지 못함'}, 그 뒤 안내 "${noneAfter ?? ''}", 로그아웃 뒤 ${noneOut ? '로그인 화면' : '로그인 화면 아님'}`,
   );
 
   // 20

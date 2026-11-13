@@ -138,9 +138,15 @@ function usersField(onManage: () => void): HTMLElement {
   return field;
 }
 
-// 계정, 동기화, (extra), 로그아웃. 웹앱 설정 화면과 PC 앱 설정의 계정 쪽이 함께 쓴다.
+export type AccountSection = {
+  el: HTMLElement;
+  /** 열린 뒤에 관리자인지 알게 되면 부른다: 주면 "사용자 관리"를 제자리(동기화 뒤)에 두고, 안 주면 뺀다. 다른 칸은 그대로다. */
+  setManageUsers(onManage: (() => void) | undefined): void;
+};
+
+// 계정, 동기화, (사용자), (비밀번호), (extra), 로그아웃. 웹앱 설정 화면과 PC 앱 설정의 계정 쪽이 함께 쓴다.
 // 감싸는 요소는 상자를 만들지 않아서(display: contents) 자식들이 시트의 세로 배치에 그대로 놓인다.
-export function accountSection(props: AccountProps, extra?: HTMLElement, onCleanup?: (fn: () => void) => void): HTMLElement {
+export function accountSection(props: AccountProps, extra?: HTMLElement, onCleanup?: (fn: () => void) => void): AccountSection {
   const el = document.createElement('div');
   el.style.display = 'contents';
   el.innerHTML = `
@@ -164,7 +170,20 @@ export function accountSection(props: AccountProps, extra?: HTMLElement, onClean
   el.querySelector<HTMLElement>('.settings-storage')!.hidden = props.storageOk;
   el.querySelector<HTMLElement>('.settings-corrupt')!.hidden = !props.corruptFound;
   const signOutField = el.querySelector('.settings-signout')!;
-  if (props.onManageUsers) signOutField.before(usersField(props.onManageUsers));
+  const syncField = el.querySelector('.settings-pending')!.closest('.field')!;
+  let manage: (() => void) | undefined;
+  let users: HTMLElement | null = null;
+  const setManageUsers = (onManage: (() => void) | undefined): void => {
+    manage = onManage;
+    if (onManage && !users) {
+      users = usersField(() => manage?.());
+      syncField.after(users);
+    } else if (!onManage && users) {
+      users.remove();
+      users = null;
+    }
+  };
+  setManageUsers(props.onManageUsers);
   if (props.onChangePassword) signOutField.before(passwordField(props.onChangePassword, props.onPasswordBusy, onCleanup));
   if (extra) signOutField.before(extra);
   const signOutBtn = el.querySelector<HTMLButtonElement>('.signout')!;
@@ -182,7 +201,7 @@ export function accountSection(props: AccountProps, extra?: HTMLElement, onClean
     forceBtn.focus();
   });
   forceBtn.addEventListener('click', () => props.onSignOut());
-  return el;
+  return { el, setManageUsers };
 }
 
 export function mountSettings(
@@ -200,7 +219,7 @@ export function mountSettings(
     /** 주면 "위젯" 칸(스크립트 복사와 설치 방법)을 보인다. 웹앱의 설정 화면만 준다. */
     widget?: WidgetInstallDeps;
   },
-): { destroy(): void } {
+): { destroy(): void; setManageUsers: AccountSection['setManageUsers'] } {
   const previouslyFocused = document.activeElement as HTMLElement | null;
   const scrim = document.createElement('div');
   scrim.className = 'scrim';
@@ -233,7 +252,8 @@ export function mountSettings(
   closeBtn.addEventListener('click', close);
   scrim.addEventListener('click', close);
   const cleanups: Array<() => void> = [];
-  sheet.append(accountSection({ ...props, onSignOut: signOut }, props.widget ? widgetSection(props.widget) : undefined, (fn) => cleanups.push(fn)));
+  const account = accountSection({ ...props, onSignOut: signOut }, props.widget ? widgetSection(props.widget) : undefined, (fn) => cleanups.push(fn));
+  sheet.append(account.el);
   sheet.addEventListener('keydown', (e) => {
     if (e.isComposing) return;
     if (e.key === 'Escape') {
@@ -261,6 +281,7 @@ export function mountSettings(
   sheet.focus();
 
   return {
+    setManageUsers: account.setManageUsers,
     destroy() {
       for (const fn of cleanups) fn();
       document.documentElement.classList.remove('sheet-open');
