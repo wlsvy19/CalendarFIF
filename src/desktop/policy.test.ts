@@ -60,3 +60,15 @@ it('옛 페이지의 늦은 되돌리기는 새 페이지가 보고한 뒤에는
   expect([p.reset(p.generation), p.interactive]).toEqual([true, false]); // 렌더러가 죽었다
   expect(p.reset(p.generation)).toBe(false);
 });
+
+import { leavesPage } from './policy';
+it('앱 주소로 가는 주 프레임의 문서 이동만 지금 화면이 떠나는 것으로 본다', () => {
+  const nav = { isMainFrame: true, isSameDocument: false, url: 'app://calfif/' };
+  expect([
+    leavesPage(nav),
+    leavesPage({ ...nav, isSameDocument: true, url: 'app://calfif/index.html#settings' }), // 해시만 바뀜
+    leavesPage({ ...nav, isMainFrame: false }), // 하위 프레임
+    leavesPage({ ...nav, url: 'https://example.com/' }), // installSecurity가 막는 이동
+    leavesPage({ ...nav, url: 'app://other/' }), // 다른 호스트
+  ]).toEqual([true, false, false, false, false]);
+});

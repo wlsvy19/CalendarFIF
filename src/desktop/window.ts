@@ -4,7 +4,7 @@ import { BrowserWindow, app, protocol, screen, session } from 'electron';
 import { CH, type DesktopCommand, type DragKind } from './api';
 import { applyDrag, clampBounds, layoutKey, resolveBounds, type DisplayInfo, type Rect } from './bounds';
 import { CSP, contentType, isAppUrl, resolveAppPath } from './protocol';
-import { BottomLimiter, PageInput, Reattacher, adjustStep, isAtBottom, shouldKeepBottom } from './policy';
+import { BottomLimiter, PageInput, Reattacher, adjustStep, isAtBottom, leavesPage, shouldKeepBottom } from './policy';
 import type { Runtime } from './runtime';
 import { loadDesktopSettings, saveDesktopSettings, type DesktopSettings } from './settings';
 import { findProgman, isWindow, makeToolWindow, sendToBottom, setOwner, windowsBelow, type Hwnd } from './win32';
@@ -334,7 +334,7 @@ export function createDesktopWindow(): BrowserWindow {
     pageGone(win, false);
   });
   win.webContents.on('did-start-navigation', (details) => {
-    if (details.isMainFrame && !details.isSameDocument) pageGone(win, true);
+    if (leavesPage(details)) pageGone(win, true);
   });
   win.webContents.on('did-finish-load', () => {
     finishAdjust(false, 'reload');

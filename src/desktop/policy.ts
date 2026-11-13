@@ -1,3 +1,5 @@
+import { isAppUrl } from './protocol';
+
 export type BelowEntry = { hwnd: bigint; desktopOwned: boolean };
 
 // below는 창 바로 아래부터 Progman까지(포함)의 목록이다. Progman 앞에는 바탕화면에 붙은 창만 있어야 맨 아래다.
@@ -63,6 +65,12 @@ export function adjustStep(adjusting: boolean, event: AdjustEvent): { adjusting:
   if (event === 'start') return { adjusting: true, action: adjusting ? 'resend' : 'begin' };
   if (!adjusting) return { adjusting: false, action: 'none' };
   return { adjusting: false, action: event === 'reload' ? 'cancel' : 'end' };
+}
+
+// 이 이동이 시작되면 지금 화면이 떠나는가. 주 프레임의 문서 이동이고 앱 주소로 갈 때만이다.
+// 해시만 바뀌는 이동, 하위 프레임, installSecurity가 막는 다른 주소로의 이동은 화면을 그대로 둔다.
+export function leavesPage(nav: { isMainFrame: boolean; isSameDocument: boolean; url: string }): boolean {
+  return nav.isMainFrame && !nav.isSameDocument && isAppUrl(nav.url);
 }
 
 // 화면(페이지)이 보고한 "입력을 받는 중" 상태. 새 페이지가 뜨기 시작할 때(그 페이지의 스크립트가 돌기 전) 되돌리므로,
