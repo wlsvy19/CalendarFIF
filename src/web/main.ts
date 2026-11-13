@@ -7,6 +7,7 @@ import { startAutoFlush } from './autoFlush';
 import { deviceLabel } from './device';
 import { mountCalendar } from './ui/calendar';
 import { mountEditor } from './ui/editor';
+import { mountSettings } from './ui/settings';
 import { parseHash } from './router';
 import { splitDateKey, todayKey } from '../core/dates';
 import { EMPTY_DAY } from '../core/types';
@@ -44,6 +45,28 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
     editor?.handle.destroy();
     editor = null;
   };
+  let settings: { destroy(): void } | null = null;
+  const closeSettings = (): void => {
+    settings?.destroy();
+    settings = null;
+  };
+  const openSettings = (): void => {
+    settings = mountSettings(root, {
+      email: session.email,
+      pending: engine.status().pending,
+      storageOk: outbox.persistent,
+      corruptFound: outbox.corruptDetected,
+      onClose: () => {
+        closeSettings(); // 주소가 바뀌기를 기다리지 않고 바로 닫는다
+        backToCalendar();
+      },
+      onSignOut: () => {
+        closeSettings();
+        history.replaceState(null, '', location.pathname + location.search); // 다시 로그인했을 때 설정이 열리지 않게 한다
+        void signOut(auth);
+      },
+    });
+  };
   const backToCalendar = (): void => {
     if (pushedByApp) history.back();
     else location.hash = '';
@@ -70,6 +93,12 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
   };
   const syncRoute = (): void => {
     const route = parseHash(location.hash);
+    if (route.name === 'settings') {
+      closeEditor();
+      if (!settings) openSettings();
+      return;
+    }
+    closeSettings();
     if (route.name !== 'day') {
       pushedByApp = false;
       closeEditor();
@@ -107,6 +136,7 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
       location.hash = dateKey;
     },
     onOpenSettings: () => {
+      pushedByApp = true;
       location.hash = 'settings';
     },
   });
@@ -115,6 +145,7 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
     destroy() {
       window.removeEventListener('hashchange', syncRoute);
       closeEditor();
+      closeSettings();
       calendar.destroy();
       window.removeEventListener('storage', onStorage);
       offStatus();

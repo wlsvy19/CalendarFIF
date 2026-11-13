@@ -416,3 +416,23 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
   .sheet { animation: none; }
   * { animation: none !important; transition: none !important; }
 }
+
+/* 설정 화면 */
+.settings { overflow-y: auto; }
+.settings-email, .settings-pending, .settings-note { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.settings-note { color: var(--muted); }
+.settings-warn { margin: 0; font-size: 14px; line-height: 1.45; color: var(--sun); }
+.settings-signout { margin-top: auto; }
+.settings-btn {
+  min-height: 46px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.settings-btn.danger { border-color: var(--sun); color: var(--sun); }
+.settings [hidden] { display: none; }
