@@ -356,7 +356,8 @@ async function tray(rt: Runtime, desk: Desk): Promise<Result> {
   const atBottomAfterOnTopOff = await until(bottom, 3000);
 
   // 화면이 입력을 받는 동안(로그인 화면 포함)은 단축키가 멈춰 등록되지 않는다. 달력이 뜨고 입력이 끝난 뒤에 등록을 본다.
-  await until(async () => (await js(win, RENDERED)) === 'calendar' && !win.isFocusable(), 15000);
+  // 끝나지 않으면 단축키 실패가 아니라 이것으로 알린다.
+  const inputEndedBeforeHotkeys = await until(async () => (await js(win, RENDERED)) === 'calendar' && !win.isFocusable(), 15000);
   // 설정 바꾸기는 화면의 다리(IPC)로 보낸다.
   const bridge = (patch: string) => js(win, `window.calfifDesktop.setSystem(${patch})`) as Promise<SystemState>;
   const hotkeyPatch = (key: string, name: 'hideHotkey' | 'contentHotkey', enabled: boolean) => `{ ${name}: { accelerator: '${key}', enabled: ${enabled} } }`;
@@ -388,7 +389,7 @@ async function tray(rt: Runtime, desk: Desk): Promise<Result> {
   const fields = {
     trayCreated, trayMenu: menuNames, startItem, labelWhenHidden, hiddenState, labelWhenShown, contentLabelWhenHidden, visible, contentHidden,
     contentHiddenSaved: contentSaved.every((v, i) => v === contentHidden[i]), alwaysOnTop: onTop, onTopSaved, onTopChecked, atBottomAfterOnTopOff,
-    hotkeys: both.hotkeys, registeredBoth, hotkeysAfterOff: off.hotkeys, hideRegisteredAfterOff, contentRegisteredAfterOff, badPatchIgnored,
+    inputEndedBeforeHotkeys, hotkeys: both.hotkeys, registeredBoth, hotkeysAfterOff: off.hotkeys, hideRegisteredAfterOff, contentRegisteredAfterOff, badPatchIgnored,
     startWithWindowsAfterPatch: startPatch.settings.startWithWindows, canStartWithWindows: system.canStartWithWindows, noneRegistered, hiddenSurvivesRecreate, shownAfterRecreate, loginItemCalls,
   };
   const checks = {
@@ -397,7 +398,7 @@ async function tray(rt: Runtime, desk: Desk): Promise<Result> {
     visible: visible[0] === false && visible[1] === true, hiddenState, labels: labelWhenHidden === '캘린더 보이기' && labelWhenShown === '캘린더 숨기기' && contentLabelWhenHidden === '내용 보이기',
     contentHidden: contentHidden[0] === true && contentHidden[1] === false, contentHiddenSaved: fields.contentHiddenSaved,
     alwaysOnTop: onTop[0] === true && onTop[1] === false, onTopSaved, onTopChecked: onTopChecked === true, atBottomAfterOnTopOff,
-    hotkeys: both.hotkeys.hide === 'ok' && both.hotkeys.content === 'ok', registeredBoth: registeredBoth[0] && registeredBoth[1],
+    inputEndedBeforeHotkeys, hotkeys: both.hotkeys.hide === 'ok' && both.hotkeys.content === 'ok', registeredBoth: registeredBoth[0] && registeredBoth[1],
     hideOff: off.hotkeys.hide === 'off' && !hideRegisteredAfterOff && contentRegisteredAfterOff, badPatchIgnored,
     startIgnored: startPatch.settings.startWithWindows === null && system.canStartWithWindows === false, noneRegistered, hiddenSurvivesRecreate, shownAfterRecreate,
     loginItemCalls: loginItemCalls === 0,

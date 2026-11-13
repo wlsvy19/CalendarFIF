@@ -4,6 +4,7 @@ export type Hwnd = bigint;
 
 const GWLP_HWNDPARENT = -8;
 const GWL_EXSTYLE = -20;
+const GWL_STYLE = -16;
 const GW_HWNDNEXT = 2;
 const GW_OWNER = 4;
 const HWND_BOTTOM = 1;
@@ -14,6 +15,7 @@ const SWP_NOACTIVATE = 0x10;
 const SWP_FRAMECHANGED = 0x20;
 const WS_EX_TOOLWINDOW = 0x80;
 const WS_EX_APPWINDOW = 0x40000;
+const WS_VISIBLE = 0x10000000;
 
 // koffi는 처음 부를 때 읽는다. 맨 위에서 읽으면 koffi.node가 없거나 막힌 PC에서 메인 프로세스가 whenReady 전에 죽는다.
 // 테스트나 다른 OS에서 이 파일을 가져와도 바로 읽지 않는다.
@@ -196,7 +198,8 @@ export function createWin32(load: () => Api = loadUser32, log: (message: string)
   }
 
   // h 바로 아래 창부터 Progman까지(포함)를 위에서 아래 순서로 돌려준다. Progman을 못 만나면 끝까지(limit까지).
-  // owner: 소유자 창(GW_OWNER). desktopOwned: 소유자나 자신이 Progman이거나 Progman의 자손인 창(DesktopCal의 달력 창은 목록 보기 컨트롤이 소유한다).
+  // owner: 소유자 창(GW_OWNER). visible: WS_VISIBLE. 모양을 읽지 못하면(0) 보이는 창으로 본다(달력이 남의 창을 가리지 않고 더 아래로 가는 쪽).
+  // desktopOwned: 소유자나 자신이 Progman이거나 Progman의 자손인 창(DesktopCal의 달력 창은 목록 보기 컨트롤이 소유한다).
   function windowsBelow(h: Hwnd, progman: Hwnd, limit = 200): BelowEntry[] {
     const f = u();
     const out: BelowEntry[] = [];
@@ -211,7 +214,8 @@ export function createWin32(load: () => Api = loadUser32, log: (message: string)
       while (cur !== 0n && out.length < limit) {
         const owner = BigInt(f.GetWindow(cur, GW_OWNER));
         const belongs = (w: Hwnd) => progman !== 0n && w !== 0n && (w === progman || f.IsChild(progman, w) !== 0);
-        out.push({ hwnd: cur, owner, desktopOwned: belongs(owner) || belongs(cur) });
+        const style = Number(BigInt(f.GetWindowLongPtrW(cur, GWL_STYLE)) & 0xffffffffn);
+        out.push({ hwnd: cur, owner, visible: style === 0 || (style & WS_VISIBLE) !== 0, desktopOwned: belongs(owner) || belongs(cur) });
         if (cur === progman) break;
         cur = BigInt(f.GetWindow(cur, GW_HWNDNEXT));
       }
