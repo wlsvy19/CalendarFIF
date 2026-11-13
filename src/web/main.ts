@@ -17,6 +17,7 @@ import { playDoneTone } from './desktop/tone';
 import { mountCalendar } from './ui/calendar';
 import { mountEditor } from './ui/editor';
 import { mountSettings } from './ui/settings';
+import { isBusy, reloadOnUpdate } from './update';
 import { parseHash } from './router';
 import { openStorage } from './storage';
 import { splitDateKey, todayKey } from '../core/dates';
@@ -32,6 +33,8 @@ const DESKTOP = import.meta.env.VITE_DESKTOP === '1';
 const bridge = DESKTOP ? getBridge() : null;
 const interactivity = new Interactivity((on) => bridge?.setInteractive(on));
 // 로그인 뒤 화면이 열려 있는 동안 메인 프로세스의 명령을 받는 동작들. 로그인 전에는 null이라 명령을 무시한다.
+// 저장되지 않아 이 페이지의 메모리에만 있는 편집이 있는가. mountMain이 로그인 중에만 채운다(새 버전으로 다시 읽기를 미룰지 정한다).
+let unsavedOnlyInMemory: () => boolean = () => false;
 let deskActions: { goToday(): void; openSettings(page?: SettingsPage): void; signOut(): void } | null = null;
 
 function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
@@ -228,9 +231,11 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
       signOut: () => (engine.status().pending === 0 ? signOutNow() : openSettingsFromCommand('account')),
     };
   }
+  unsavedOnlyInMemory = () => !(storage.persistent && outbox.persistent) && engine.status().pending > 0;
   syncRoute();
   return {
     destroy() {
+      unsavedOnlyInMemory = () => false;
       deskActions = null;
       closeCellMenu();
       window.removeEventListener('hashchange', syncRoute);
@@ -282,6 +287,25 @@ createApp({
   signOut: () => signOut(auth),
   mountMain,
 });
+
+if (!DESKTOP) {
+  // iOS는 페이지가 터치를 듣고 있어야 단추에 :active를 적용한다.
+  document.addEventListener('touchstart', () => {}, { passive: true });
+  if ('serviceWorker' in navigator) {
+    reloadOnUpdate({
+      container: navigator.serviceWorker,
+      busy: () => isBusy(document, unsavedOnlyInMemory()),
+      reload: () => location.reload(),
+      // sessionStorage에 닿는 것만으로도 던질 수 있으므로, 쓸 때 닿게 해서 update.ts가 잡게 한다.
+      session: { getItem: (k) => sessionStorage.getItem(k), setItem: (k, v) => sessionStorage.setItem(k, v) },
+      now: () => Date.now(),
+      every: (ms, fn) => {
+        const id = setInterval(fn, ms);
+        return () => clearInterval(id);
+      },
+    });
+  }
+}
 
 // 화면 확인용 자동 로그인. 에뮬레이터 모드에서만 동작하며, 그 밖에는 주소 인자를 무시한다.
 if (import.meta.env.VITE_USE_EMULATOR === '1' && new URLSearchParams(location.search).get('autologin') === '1') {

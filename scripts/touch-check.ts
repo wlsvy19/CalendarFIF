@@ -59,6 +59,18 @@ const RECORDER_JS = `(() => {
   new PerformanceObserver((list) => { log.longTasks += list.getEntries().length; }).observe({ type: 'longtask' });
   window.__touchLog = log;
 })()`;
+/** 시트가 나타날 때까지 기다렸다가 afterMs 뒤의 위치를 읽는다(시트가 없으면 null). */
+const SHEET_TOP_JS = (afterMs: number) => `new Promise((resolve) => {
+  const started = performance.now();
+  const wait = () => {
+    if (document.querySelector('.sheet')) return setTimeout(() => { const s = document.querySelector('.sheet'); resolve(s ? s.getBoundingClientRect().top : null); }, ${afterMs});
+    if (performance.now() - started > 3000) return resolve(null);
+    setTimeout(wait, 5);
+  };
+  wait();
+})`;
+/** afterMs 뒤의 시트 위치. 시트가 이미 없으면 null. */
+const SHEET_NOW_JS = (afterMs: number) => `new Promise((resolve) => setTimeout(() => { const s = document.querySelector('.sheet'); resolve(s ? s.getBoundingClientRect().top : null); }, ${afterMs}))`;
 const RESET_JS = '__touchLog.scrolls = []; __touchLog.upAt = -1; __touchLog.lastAt = performance.now();';
 
 type View = { title: string; left: number; width: number };
@@ -149,34 +161,42 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   const pagerY = (await center($('.pager'))).y;
   const start = (await view()).title;
 
-  // 1~6: 손가락으로 넘기기. 이 동안의 긴 작업을 센다.
-  let g = await gesture([340, pagerY], [-280, 0], 28);
-  record(
-    '왼쪽으로 280px 밀고 움직이는 채 떼면 손가락을 따라가다 다음 달 칸에 멈춘다',
-    followsFinger(g.down, g.before.left, 'left') && delta(g) === 1 && onSlot(g.after.left, g.after.width),
-    describe(g),
-  );
-  const right = [await gesture([60, pagerY], [280, 0], 28), await gesture([60, pagerY], [280, 0], 28)];
-  record(
-    '오른쪽으로 두 번 밀면 처음 달로, 그리고 한 달 더 전으로 간다',
-    right.every((r) => followsFinger(r.down, r.before.left, 'right') && delta(r) === -1 && onSlot(r.after.left, r.after.width)) &&
-      right[0].after.title === start,
-    right.map(describe).join(' / '),
-  );
-  const light = [await gesture([220, pagerY], [-40, 0], 6), await gesture([180, pagerY], [40, 0], 6)];
-  record('40px만 밀고 움직이는 채 떼도 넘어가고, 반대로 밀면 돌아온다', delta(light[0]) === 1 && delta(light[1]) === -1, light.map(describe).join(' / '));
-  const held = [await gesture([220, pagerY], [-40, 0], 6, 150), await gesture([180, pagerY], [40, 0], 6, 150)];
-  record('40px 밀고 150ms 멈췄다 떼도 넘어가고, 반대로 하면 돌아온다', delta(held[0]) === 1 && delta(held[1]) === -1, held.map(describe).join(' / '));
-  g = await gesture([200, pagerY], [12, 0], 6);
-  const tapped = await cdp.evaluate<boolean>("!!document.querySelector('.sheet')");
-  record('12px만 움직이면 달이 바뀌지 않는다', delta(g) === 0, `${describe(g)}${tapped ? ', 누른 것으로 보고 편집 화면을 열었다' : ''}`);
-  if (tapped) {
-    await cdp.evaluate("document.querySelector('.sheet .textbtn.start').click()");
-    await sleep(600);
+  // 1~6: 손가락으로 넘기기. 이 동안의 긴 작업을 센다. 결과는 첫 번째에만 적는다. 긴 작업이 보이면(PC가 바쁜 탓일 수 있다)
+  // 같은 손짓을 한 번 더 하고, 두 번 다 있어야 실패로 본다. 손짓은 한 바퀴 돌면 처음 달로 돌아온다.
+  let g: Gesture;
+  async function swipes(report: boolean): Promise<number> {
+    const check = report ? record : () => {};
+    await cdp.evaluate('__touchLog.longTasks = 0');
+    g = await gesture([340, pagerY], [-280, 0], 28);
+    check(
+      '왼쪽으로 280px 밀고 움직이는 채 떼면 손가락을 따라가다 다음 달 칸에 멈춘다',
+      followsFinger(g.down, g.before.left, 'left') && delta(g) === 1 && onSlot(g.after.left, g.after.width),
+      describe(g),
+    );
+    const right = [await gesture([60, pagerY], [280, 0], 28), await gesture([60, pagerY], [280, 0], 28)];
+    check(
+      '오른쪽으로 두 번 밀면 처음 달로, 그리고 한 달 더 전으로 간다',
+      right.every((r) => followsFinger(r.down, r.before.left, 'right') && delta(r) === -1 && onSlot(r.after.left, r.after.width)) &&
+        right[0].after.title === start,
+      right.map(describe).join(' / '),
+    );
+    const light = [await gesture([220, pagerY], [-40, 0], 6), await gesture([180, pagerY], [40, 0], 6)];
+    check('40px만 밀고 움직이는 채 떼도 넘어가고, 반대로 밀면 돌아온다', delta(light[0]) === 1 && delta(light[1]) === -1, light.map(describe).join(' / '));
+    const held = [await gesture([220, pagerY], [-40, 0], 6, 150), await gesture([180, pagerY], [40, 0], 6, 150)];
+    check('40px 밀고 150ms 멈췄다 떼도 넘어가고, 반대로 하면 돌아온다', delta(held[0]) === 1 && delta(held[1]) === -1, held.map(describe).join(' / '));
+    g = await gesture([200, pagerY], [12, 0], 6);
+    const tapped = await cdp.evaluate<boolean>("!!document.querySelector('.sheet')");
+    check('12px만 움직이면 달이 바뀌지 않는다', delta(g) === 0, `${describe(g)}${tapped ? ', 누른 것으로 보고 편집 화면을 열었다' : ''}`);
+    if (tapped) {
+      await cdp.evaluate("document.querySelector('.sheet .textbtn.start').click()");
+      await sleep(600);
+    }
+    g = await gesture([330, pagerY], [-250, 0], 5);
+    check('세게 튕겨도 한 달만 넘어간다', delta(g) === 1, describe(g));
+    return cdp.evaluate<number>('__touchLog.longTasks');
   }
-  g = await gesture([330, pagerY], [-250, 0], 5);
-  record('세게 튕겨도 한 달만 넘어간다', delta(g) === 1, describe(g));
-  const longTasks = await cdp.evaluate<number>('__touchLog.longTasks');
+  const longTasks = await swipes(true);
+  const longTasksAgain = longTasks > 0 ? await swipes(false) : null;
 
   await tap(await center("document.querySelectorAll('.grid.current .cell:not(.other)')[14]"));
   await sleep(600);
@@ -217,6 +237,54 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     turned.map((v) => `폭 ${Math.round(v.width)}: ${v.title}, ${restText(v)}`).join(' / '),
   );
 
+  // 시트가 미끄러져 열리고 닫힌다.
+  const dayCell = "document.querySelectorAll('.grid.current .cell:not(.other)')[14]";
+  await tap(await center(dayCell));
+  const openingTop = await cdp.evaluate<number | null>(SHEET_TOP_JS(60));
+  await sleep(700);
+  const restTops: Array<number | null> = [await cdp.evaluate<number | null>(SHEET_NOW_JS(0))];
+  restTops.push(await cdp.evaluate<number | null>(SHEET_NOW_JS(100)));
+  const restTop = restTops[0] ?? 0;
+  record(
+    '편집 화면은 아래에서 미끄러져 올라오고, 멈춘 자리는 전과 같다',
+    openingTop !== null && openingTop > restTop + 20 && restTops[0] === restTops[1] && Math.abs(restTop - 24) <= 1,
+    `열린 지 60ms 뒤 top ${openingTop === null ? '없음' : Math.round(openingTop)}px, 멈춘 뒤 ${restTops.map((t) => (t === null ? '없음' : Math.round(t))).join(', ')}px`,
+  );
+  await tap(await center($('.sheet .textbtn.start')));
+  const closingTop = await cdp.evaluate<number | null>(SHEET_NOW_JS(60));
+  await sleep(500);
+  const leftOver = await cdp.evaluate<number>("document.querySelectorAll('.sheet, .scrim').length");
+  record(
+    '취소하면 시트가 아래로 미끄러져 내려간 뒤 사라진다',
+    closingTop !== null && closingTop > restTop + 5 && leftOver === 0,
+    `닫은 지 60ms 뒤 top ${closingTop === null ? '없음' : Math.round(closingTop)}px, 500ms 뒤 .sheet/.scrim ${leftOver}개`,
+  );
+
+  // 들어오는 중에 닫아도 시트가 위로 튀지 않고 있던 자리에서 내려간다.
+  await tap(await center(dayCell));
+  // 시트가 움직이는 중에는 단추의 자리가 계속 바뀌어 손가락을 정확히 댈 수 없으므로, 시트가 나타난 120ms 뒤에 단추를 누른 것으로 한다.
+  await cdp.evaluate(`new Promise((resolve) => {
+    const started = performance.now();
+    const wait = () => {
+      const s = document.querySelector('.sheet');
+      if (s) return setTimeout(() => { s.querySelector('.textbtn.start').click(); resolve(null); }, 120);
+      if (performance.now() - started > 3000) return resolve(null);
+      setTimeout(wait, 5);
+    };
+    wait();
+  })`);
+  const tops = await cdp.evaluate<Array<number | null>>(
+    `new Promise((resolve) => { const out = []; let n = 0; const read = () => { const s = document.querySelector('.sheet'); out.push(s ? s.getBoundingClientRect().top : null); if (++n < 6) setTimeout(read, 40); else resolve(out); }; read(); })`,
+  );
+  await sleep(500);
+  const goneAfter = await cdp.evaluate<number>("document.querySelectorAll('.sheet, .scrim').length");
+  const seen = tops.filter((t): t is number => t !== null);
+  record(
+    '들어오는 중에 취소해도 시트가 위로 움직이지 않고 내려가서 사라진다',
+    seen.length > 0 && seen.every((t, i) => i === 0 || t >= seen[i - 1]) && goneAfter === 0,
+    `top ${tops.map((t) => (t === null ? '없음' : Math.round(t))).join(', ')}px, 500ms 뒤 .sheet/.scrim ${goneAfter}개`,
+  );
+
   await emulatePhone(cdp, { reducedMotion: true });
   await sleep(500);
   g = await pressNext();
@@ -227,7 +295,19 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     `${g.before.title} -> ${g.after.title}, 중간 위치 ${reducedSteps}개`,
   );
 
-  record('손가락으로 넘기는 동안(1~6) 50ms 넘는 긴 작업이 없다', longTasks === 0, `긴 작업 ${longTasks}개`);
+  await tap(await center(dayCell));
+  await cdp.evaluate<number | null>(SHEET_TOP_JS(0));
+  await sleep(300);
+  await tap(await center($('.sheet .textbtn.start')));
+  const reducedLeft = await cdp.evaluate<number | null>(SHEET_NOW_JS(40));
+  record('움직임 줄이기에서는 취소하면 50ms 안에 시트가 사라진다', reducedLeft === null, reducedLeft === null ? '시트 없음' : `top ${Math.round(reducedLeft)}px에 남아 있다`);
+  await sleep(300);
+
+  record(
+    '손가락으로 넘기는 동안(1~6) 50ms 넘는 긴 작업이 없다',
+    longTasks === 0 || longTasksAgain === 0,
+    longTasksAgain === null ? `긴 작업 ${longTasks}개` : `긴 작업 ${longTasks}개, 다시 해서 ${longTasksAgain}개`,
+  );
   return results;
 }
 
