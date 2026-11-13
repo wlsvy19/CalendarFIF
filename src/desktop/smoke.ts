@@ -407,6 +407,7 @@ async function tray(rt: Runtime, desk: Desk): Promise<Result> {
 }
 
 // 설정 화면을 앱 안의 길(openSettings 명령, 화면의 입력 이벤트, 다리)로 열어 보고 닫는다. 단축키는 끝날 때 모두 푼다.
+type SheetBox = { left: number; top: number; right: number; bottom: number; barX: number; barY: number; w: number; h: number };
 async function settings(_rt: Runtime, desk: Desk): Promise<Result> {
   const win = getWindow();
   if (!win) return { fields: {}, checks: { window: false } };
@@ -422,6 +423,38 @@ async function settings(_rt: Runtime, desk: Desk): Promise<Result> {
   const opened = await sheet(true);
   const tabs = (await js(win, "[...document.querySelectorAll('[role=\"tab\"]')].map((t) => t.textContent)")) as string[];
   const interactiveWhileOpen = await until(() => win.isFocusable(), 3000);
+
+  // 제목 줄을 진짜 마우스 입력(sendInputEvent)으로 끈다: 옮겨지고, 창 밖으로 끌어도 안에 남고, 닫았다 열면 그 자리이고, 닫기는 여전히 된다.
+  const sheetRect = () => js(win, "(() => { const r = document.querySelector('.desk-settings').getBoundingClientRect(); const b = document.querySelector('.desk-settings .sheet-bar').getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, barX: b.left + 20, barY: b.top + b.height / 2, w: window.innerWidth, h: window.innerHeight }; })()") as Promise<SheetBox>;
+  const mouse = (type: 'mouseDown' | 'mouseMove' | 'mouseUp', x: number, y: number) => win.webContents.sendInputEvent({ type, x: Math.round(x), y: Math.round(y), button: 'left', clickCount: 1 });
+  const dragBar = async (from: SheetBox, toX: number, toY: number) => {
+    mouse('mouseDown', from.barX, from.barY);
+    await sleep(50);
+    for (let i = 1; i <= 6; i++) {
+      mouse('mouseMove', from.barX + ((toX - from.barX) * i) / 6, from.barY + ((toY - from.barY) * i) / 6);
+      await sleep(30);
+    }
+    mouse('mouseUp', toX, toY);
+    await sleep(100);
+  };
+  const near = (a: number, b: number) => Math.abs(a - b) <= 1;
+  const before = await sheetRect();
+  const dx = Math.max(0, Math.min(30, before.w - 8 - before.right));
+  const dy = Math.max(0, Math.min(20, before.h - 8 - before.bottom));
+  await dragBar(before, before.barX + dx, before.barY + dy);
+  const moved = await sheetRect();
+  const sheetDragged = (dx > 0 || dy > 0) && near(moved.left, before.left + dx) && near(moved.top, before.top + dy);
+  await dragBar(moved, before.w - 1, before.h - 1);
+  const far = await sheetRect();
+  const fitsX = far.right - far.left + 16 <= far.w;
+  const fitsY = far.bottom - far.top + 16 <= far.h;
+  const sheetClamped = (!fitsX || (far.left >= 7 && far.right <= far.w - 7)) && (!fitsY || (far.top >= 7 && far.bottom <= far.h - 7)) && (far.left > moved.left || far.top > moved.top);
+  await js(win, "[...document.querySelectorAll('.desk-settings .textbtn')].find((b) => b.textContent === '닫기').click()");
+  const closeStillWorks = await sheet(false);
+  sendCommand({ type: 'openSettings' });
+  await sheet(true);
+  const again = await sheetRect();
+  const sheetRemembered = near(again.left, far.left) && near(again.top, far.top);
 
   await clickTab('글꼴 및 색상');
   await js(win, `(() => { const i = ${rowOf('투명도')}.querySelector('input[type="range"]'); i.value = '30'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
@@ -487,9 +520,9 @@ async function settings(_rt: Runtime, desk: Desk): Promise<Result> {
   desk.applySystem({ hideHotkey: { accelerator: HIDE_KEY, enabled: false } });
   const noneRegistered = registered() === 0;
 
-  const fields = { opened, tabs, interactiveWhileOpen, cellBg, savedTransparency, hotkey, registeredWhileInteractive, registeredWhileInteractiveAfterApply, registeredAfterClose, pausedBeforeRecreate, registeredAfterRecreate, focusableAfterRecreate, reloadFocusable, reloadRegistered, startSwitchDisabled, noneRegistered, closed, interactiveAfterClose, atBottomAfterClose, loginItemCalls };
+  const fields = { opened, sheetDragged, sheetClamped, sheetRemembered, closeStillWorks, tabs, interactiveWhileOpen, cellBg, savedTransparency, hotkey, registeredWhileInteractive, registeredWhileInteractiveAfterApply, registeredAfterClose, pausedBeforeRecreate, registeredAfterRecreate, focusableAfterRecreate, reloadFocusable, reloadRegistered, startSwitchDisabled, noneRegistered, closed, interactiveAfterClose, atBottomAfterClose, loginItemCalls };
   const checks = {
-    opened, tabs: JSON.stringify(tabs) === JSON.stringify(['캘린더', '셀', '글꼴 및 색상', '고급', '계정']), interactiveWhileOpen,
+    opened, sheetDragged, sheetClamped, sheetRemembered, closeStillWorks, tabs: JSON.stringify(tabs) === JSON.stringify(['캘린더', '셀', '글꼴 및 색상', '고급', '계정']), interactiveWhileOpen,
     cellBg: cellBg === 'rgba(20, 24, 32, 0.7)', savedTransparency: savedTransparency === 30,
     hotkey: hotkey.accelerator === HIDE_KEY && hotkey.state === 'ok' && hotkey.registered, startSwitchDisabled,
     registeredWhileInteractive: registeredWhileInteractive === 0 && registeredWhileInteractiveAfterApply === 0, registeredAfterClose: registeredAfterClose === 1,

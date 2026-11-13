@@ -4,6 +4,7 @@ import type { Layout } from '../../core/layout';
 import type { CalfifDesktop, Hotkey, SettingsPage } from '../../desktop/api';
 import type { Appearance, Bullet } from '../appearance';
 import { accountSection, type AccountProps } from '../ui/settings';
+import { makeDraggable, sessionMemory } from './dragSheet';
 import { playDoneTone } from './tone';
 
 type Props = {
@@ -30,6 +31,8 @@ const BROWSER_ONLY = '바탕화면 앱에서만 바꿀 수 있습니다.';
 const INVALID_HOTKEY = 'Ctrl 또는 Alt를 넣은 조합을 고르세요.';
 const MODIFIER_KEYS = new Set(['Control', 'Alt', 'Shift', 'Meta', 'AltGraph', 'OS']);
 const HEX_ERROR = '16진수 6자리로 적어 주세요.';
+// 설정 상자를 옮긴 자리는 앱이 켜져 있는 동안 기억한다.
+const settingsMemory = sessionMemory();
 const NONE_COLOR = new Set<keyof Appearance>(['calendarBg', 'restBg', 'todayBorder']);
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -517,11 +520,13 @@ export function mountDesktopSettings(root: HTMLElement, props: Props): { destroy
   root.append(scrim, sheet);
   document.documentElement.classList.add('sheet-open');
   sheet.focus();
+  const drag = makeDraggable(sheet, sheet.querySelector<HTMLElement>('.sheet-bar')!, settingsMemory);
 
   return {
     showPage,
     destroy() {
       destroyed = true;
+      drag.destroy();
       document.documentElement.classList.remove('sheet-open');
       scrim.remove();
       sheet.remove();

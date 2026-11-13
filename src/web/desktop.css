@@ -101,12 +101,14 @@
   width: 480px;
   height: auto;
   max-height: min(640px, calc(100vh - 48px));
-  transform: translate(-50%, -50%);
+  transform: translate(calc(-50% + var(--drag-x, 0px)), calc(-50% + var(--drag-y, 0px)));
   border-radius: 18px;
   padding-bottom: 20px;
   animation: none;
 }
 :root.desk .scrim { animation: none; }
+:root.desk .sheet-bar.drag-handle { cursor: move; user-select: none; }
+:root.desk .sheet-bar.drag-handle button { cursor: pointer; }
 :root.desk .memo-input { min-height: 200px; }
 @media (max-width: 519.98px) {
   :root.desk .sheet { width: calc(100vw - 24px); }

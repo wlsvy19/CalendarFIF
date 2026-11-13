@@ -1,6 +1,7 @@
 import { PALETTE } from '../../core/color';
 import { normalizeText, toggleDoneInRange } from '../../core/text';
 import type { DayValue } from '../../core/types';
+import { makeDraggable, type DragMemory } from '../desktop/dragSheet';
 import { dismiss } from './sheetMotion';
 
 const WEEKDAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
@@ -29,7 +30,7 @@ export function mountEditor(
     onSave(next: DayValue): void;
     onCancel(): void;
   },
-  env?: { visualViewport?: VisualViewportLike | null; focusText?: boolean },
+  env?: { visualViewport?: VisualViewportLike | null; focusText?: boolean; drag?: DragMemory },
 ): { destroy(): void } {
   const viewport = env?.visualViewport === undefined ? (window.visualViewport ?? null) : env.visualViewport;
   const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -168,6 +169,7 @@ export function mountEditor(
 
   root.append(scrim, sheet);
   document.documentElement.classList.add('sheet-open');
+  const drag = env?.drag ? makeDraggable(sheet, sheet.querySelector<HTMLElement>('.sheet-bar')!, env.drag) : null;
   if (env?.focusText || window.innerWidth >= WIDE_PX) {
     area.focus();
     area.setSelectionRange(area.value.length, area.value.length);
@@ -180,6 +182,7 @@ export function mountEditor(
       viewport?.removeEventListener('resize', followViewport);
       viewport?.removeEventListener('scroll', followViewport);
       document.documentElement.classList.remove('sheet-open');
+      drag?.destroy();
       dismiss(scrim, sheet);
       if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
     },

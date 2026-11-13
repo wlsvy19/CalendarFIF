@@ -10,6 +10,7 @@ import { loadAppearance, saveAppearance, applyAppearance, type Appearance } from
 import type { SettingsPage } from '../desktop/api';
 import { getBridge } from './desktop/bridge';
 import { mountAdjust } from './desktop/adjust';
+import { sessionMemory } from './desktop/dragSheet';
 import { mountDesktopSettings } from './desktop/settingsPages';
 import { mountCellMenu } from './desktop/cellMenu';
 import { Interactivity } from './desktop/interactive';
@@ -30,6 +31,7 @@ const { auth, db } = initFirebase(import.meta.env);
 
 // PC 앱(데스크톱 빌드)에서만 켠다. 웹앱은 이 값들을 쓰지 않는다.
 const DESKTOP = import.meta.env.VITE_DESKTOP === '1';
+const editorMemory = sessionMemory();
 const bridge = DESKTOP ? getBridge() : null;
 const interactivity = new Interactivity((on) => bridge?.setInteractive(on));
 // 로그인 뒤 화면이 열려 있는 동안 메인 프로세스의 명령을 받는 동작들. 로그인 전에는 null이라 명령을 무시한다.
@@ -135,7 +137,7 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
         closeEditor();
         backToCalendar();
       },
-    }, DESKTOP ? { focusText: true } : undefined);
+    }, DESKTOP ? { focusText: true, drag: editorMemory } : undefined);
     editor = { dateKey, handle };
     interactivity.begin('editor');
   };
