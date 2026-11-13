@@ -2,6 +2,8 @@
 
 사용자는 Claude Code를 두 계정(회사, 개인)으로 쓰고, 두 세션에 이 저장소의 작업을 동시에 시킨다. 두 세션은 서로 메시지를 주고받지 못한다. 이 문서와 git 커밋으로만 맞춘다.
 
+개인 계정은 Claude Pro라서 사용량이 적다. 사용자의 목적은 그 계정의 토큰을 아끼는 것이다. 그래서 무거운 작업은 회사 계정 세션이, 가볍고 범위가 분명한 작업은 개인 계정 세션이 맡는다.
+
 ## 원칙
 
 1. 폴더(워크트리) 하나에는 세션 하나만 계획을 진행한다.
@@ -11,28 +13,48 @@
 
 ## 트랙
 
-| 트랙 | 폴더 | 브랜치 | 맡은 작업 |
-|---|---|---|---|
-| A (웹앱) | `C:\sw\CalendarFIF` | `phase-1-sync-core` | Task 1~9, 그리고 합친 뒤의 Task 13 |
-| B (가져오기) | `C:\sw\CalendarFIF\.claude\worktrees\importer` | `phase-1-importer` | Task 10~12 |
+어느 트랙인지는 세션을 시작한 폴더로 정해진다.
+
+| 트랙 | 계정 | 폴더 | 브랜치 | 맡은 작업 | 진행 방식 |
+|---|---|---|---|---|---|
+| A (웹앱) | 회사 | `C:\sw\CalendarFIF` | `phase-1-sync-core` | Task 6~9, 트랙 B 검토와 병합, Task 13 | 작업마다 구현 에이전트와 검토 에이전트를 쓴다 |
+| B (가져오기) | 개인 | `C:\sw\CalendarFIF\.claude\worktrees\importer` | `phase-1-importer` | Task 10 → 11 → 12, 사용량이 되는 데까지 | 직접 구현한다. 에이전트를 쓰지 않는다 |
 
 작업 번호는 `docs/superpowers/plans/2026-11-13-phase1-sync-web-import.md`의 번호다.
 
-2026-11-13에 이 문서를 쓸 때의 상태: 트랙 A가 Task 1~4를 끝냈다(`ba43513`). 트랙 B의 브랜치는 그 커밋에서 갈라졌다.
+2026-11-13 13:20 상태: Task 1~5가 끝났고 두 브랜치 모두 `2b6dec4`를 포함한다.
 
-## 트랙 B가 트랙 A에서 받아야 하는 것
+## 트랙 B 진행 방법 (사용량을 아끼는 방법)
 
-- Task 10(DesktopCal 변환과 파일 읽기)은 Task 1의 코드만 쓴다. 바로 시작할 수 있다.
-- Task 11(올리기)은 Task 5가 만드는 `src/sync/monthDoc.ts`(`parseMonthDoc`, `buildMonthPatch`)가 필요하다. 트랙 A가 Task 5를 커밋하면 트랙 B가 자기 폴더에서 `git merge phase-1-sync-core`로 가져온다.
-- Task 12는 Task 10과 11만 쓴다.
+1. 에이전트를 쓰지 않는다. 구현은 직접 하고, 작업별 검토 에이전트도 띄우지 않는다. 검토는 트랙 A 세션이 병합할 때 한다.
+2. 계획 문서와 설계 문서 전체를 읽지 않는다. 읽을 것은 이 문서, 지금 할 작업의 요약 파일 하나, 전역 제약 파일이다.
+   - `.superpowers/sdd/2026-11-13-phase1-sync-web-import/task-10-brief.md` (`task-11-brief.md`, `task-12-brief.md`도 같은 폴더에 있다)
+   - `.superpowers/sdd/2026-11-13-phase1-sync-web-import/global-constraints.md`
+   - 이 파일들은 git에 올라가지 않아 이 폴더에만 있다. 없으면 계획 문서에서 `### Task 10` 같은 해당 섹션만 줄 범위로 읽는다.
+3. 한 번에 작업 하나만 한다. 요약 파일의 단계 순서를 따른다. 테스트 코드를 적힌 그대로 만들고, 실패를 확인하고, 구현하고, 통과를 확인하고, 커밋한다.
+4. 테스트는 그 작업의 파일만 돌린다. 작업을 끝낼 때 `npm test`와 `npx tsc --noEmit`을 한 번씩 돌린다.
+5. 작업 하나를 끝낼 때마다 커밋하고 진행 기록에 한 줄 적는다. 사용량이 모자라면 작업과 작업 사이에서 멈춘다. Task 10만 하고 멈춰도 된다. 남은 작업은 트랙 A 세션이 이어받는다.
+6. 같은 문제로 세 번 넘게 막히면 더 파고들지 않는다. 진행 기록에 무엇이 막혔는지 적고 멈춘다.
+7. 사용자에게 보내는 답은 짧게 쓴다.
+
+## 트랙 B 폴더에 준비해 둔 것
+
+- `npm ci`를 마쳤고 기준 테스트 72개가 통과한다(2026-11-13).
+- 에뮬레이터용 JDK 21은 `.tools/jdk-21/`에 있다.
+- 에뮬레이터 테스트 명령은 `bash .tools/track-b/test-emu.sh tests/emulator/importer.test.ts`다. 트랙 A의 에뮬레이터(포트 8085, 9095)와 겹치지 않게 8086과 9096을 쓴다. Task 11의 에뮬레이터 테스트 단계에서 `npm run test:emu` 대신 이 명령을 쓴다.
+- Task 5의 결과인 `src/sync/monthDoc.ts`(`parseMonthDoc`, `buildMonthPatch`)는 이미 이 브랜치에 들어 있다.
+- 계획이 쓰인 뒤 Task 3 검토에서 바뀐 것: `PendingEdit`에 선택 필드 `sent?: true`가 생겼고, `src/core/merge.ts`에 `resolveEdits`(복수)가 추가됐다. Task 11은 계획대로 `resolveEdit`(단수)를 쓴다.
+- 진행 기록은 `.superpowers/sdd/2026-11-13-phase1-sync-web-import/progress.md`다.
 
 ## 합치는 방법
 
-1. 트랙 B가 Task 12까지 끝내면, 먼저 자기 폴더에서 `git merge phase-1-sync-core`를 한다. 충돌은 트랙 B가 자기 폴더에서 푼다.
-2. 충돌이 날 만한 곳은 `package.json`의 `scripts`다. 트랙 A는 `dev`, `build`, `dev:emu`, `deploy`를, 트랙 B는 `import`를 추가한다. 양쪽 줄을 모두 남긴다. `package-lock.json`이 충돌하면 한쪽을 고른 뒤 `npm install`로 다시 맞춘다.
-3. 병합 뒤 트랙 B가 `npm install`, `npm test`, `npm run test:emu`, `npx tsc --noEmit`을 돌려 전부 통과하는지 확인하고 커밋한다.
-4. 사용자가 트랙 A 세션에 알린다. 트랙 A는 작업 하나를 끝낸 뒤(커밋 안 된 변경이 없을 때) 자기 폴더에서 `git merge phase-1-importer`를 한다.
-5. Task 13(실제 Firebase 프로젝트 연결, 배포, 기존 기록 올리기)은 두 트랙이 합쳐진 뒤 트랙 A 폴더에서 한다.
+트랙 B는 병합을 하지 않는다. 트랙 A가 가져간다.
+
+1. 트랙 B 세션이 멈추면(다 끝냈든 중간이든) 사용자가 트랙 A 세션에 알린다.
+2. 트랙 A 세션이 자기 폴더에서, 작업 하나를 끝낸 뒤 `git merge phase-1-importer`를 한다. `package.json`의 `scripts`가 충돌하면 양쪽 줄을 모두 남긴다.
+3. 트랙 A 세션이 가져온 작업을 작업별로 검토하고, 고칠 것은 자기 폴더에서 고친다.
+4. 트랙 B가 Task 12까지 못 끝냈으면 남은 작업은 트랙 A 세션이 자기 폴더에서 이어서 한다. 그 뒤로 `phase-1-importer` 브랜치는 쓰지 않는다.
+5. Task 13(실제 Firebase 프로젝트 연결, 배포, 기존 기록 올리기)은 전부 합쳐진 뒤 트랙 A 폴더에서 한다.
 
 ## 진행 기록
 
@@ -42,10 +64,8 @@
 
 ## 사용자가 세션에 전할 말
 
-트랙 A 세션에:
-
-> `shared-docs` 브랜치를 병합해서 `CLAUDE.md`와 `docs/superpowers/coordination.md`를 받아. 너는 트랙 A야. Task 9까지만 진행하고 Task 10~12는 하지 마. 그건 다른 세션이 워크트리에서 해.
-
-트랙 B 세션에(폴더 `C:\sw\CalendarFIF\.claude\worktrees\importer`에서 시작):
+개인 계정: `C:\sw\CalendarFIF`에 열려 있던 세션을 끝낸다. `C:\sw\CalendarFIF\.claude\worktrees\importer` 폴더에서 새 세션을 열고 아래를 붙여 넣는다.
 
 > `docs/superpowers/coordination.md`를 읽고 트랙 B를 진행해.
+
+회사 계정: 사용자가 알려 주면 `C:\sw\CalendarFIF`로 돌아가 트랙 A를 Task 6부터 진행한다.
