@@ -135,6 +135,40 @@ it('비밀번호 변경: 거부되면 바꾸지 못했습니다를 보인다', a
   expect(note()).toBe('바꾸지 못했습니다.');
   expect(button('바꾸기').disabled).toBe(false);
 });
+it('비밀번호 변경: 적은 글이 있거나 바꾸는 중이면 onPasswordBusy(true), 비거나 끝나면 false를 바뀔 때만 알린다', async () => {
+  let resolve!: (v: { ok: boolean; message: string }) => void;
+  const onPasswordBusy = vi.fn();
+  const m = mount({ onChangePassword: vi.fn().mockReturnValue(new Promise((r) => (resolve = r))), onPasswordBusy });
+  const input = (name: string) => m.root.querySelector<HTMLInputElement>(`input[name="${name}"]`)!;
+  const type = (name: string, value: string) => {
+    input(name).value = value;
+    input(name).dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const calls = () => onPasswordBusy.mock.calls.map((c) => c[0]);
+
+  m.button('비밀번호 변경').click();
+  expect(calls()).toEqual([]); // 빈 폼은 아니다
+  type('current', 'o');
+  type('current', 'old-pass');
+  expect(calls()).toEqual([true]);
+  type('current', '');
+  expect(calls()).toEqual([true, false]);
+  type('next', 'new-pass-1');
+  type('current', 'old-pass');
+  expect(calls()).toEqual([true, false, true]);
+
+  m.root.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+  resolve({ ok: true, message: '비밀번호를 바꿨습니다.' });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(calls()).toEqual([true, false, true]); // 칸은 비었지만 결과를 보이는 동안은 잠겨 있다
+  await vi.advanceTimersByTimeAsync(1500);
+  expect(calls()).toEqual([true, false, true, false]);
+
+  m.button('비밀번호 변경').click();
+  type('next', 'x');
+  m.button('취소').click();
+  expect(calls()).toEqual([true, false, true, false, true, false]);
+});
 it('비밀번호 변경: 취소하면 단추로 돌아간다', () => {
   const { root, button } = pwSetup(vi.fn());
   button('비밀번호 변경').click();

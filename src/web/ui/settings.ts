@@ -10,12 +10,18 @@ export type AccountProps = {
   onChangePassword?(current: string, next: string): Promise<{ ok: boolean; message: string }>;
   /** 주면 "사용자 관리" 단추를 보인다(관리자). */
   onManageUsers?(): void;
+  /** 비밀번호 칸에 적은 글이 있거나 바꾸는 중이면 true, 그렇지 않게 되면 false. 바뀔 때만 부른다. */
+  onPasswordBusy?(busy: boolean): void;
 };
 
 const PASSWORD_DONE_MS = 1500;
 
 // "비밀번호" 칸. 단추를 누르면 그 자리가 폼으로 바뀐다. onCleanup에는 화면이 사라질 때 부를 함수를 맡긴다.
-function passwordField(onChange: NonNullable<AccountProps['onChangePassword']>, onCleanup?: (fn: () => void) => void): HTMLElement {
+function passwordField(
+  onChange: NonNullable<AccountProps['onChangePassword']>,
+  onBusy: AccountProps['onPasswordBusy'],
+  onCleanup?: (fn: () => void) => void,
+): HTMLElement {
   const field = document.createElement('div');
   field.className = 'field';
   field.innerHTML = `
@@ -24,6 +30,12 @@ function passwordField(onChange: NonNullable<AccountProps['onChangePassword']>, 
   const slot = field.querySelector<HTMLElement>('.account-pw')!;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
+  let busy = false;
+  const reportBusy = (next: boolean): void => {
+    if (next === busy) return;
+    busy = next;
+    onBusy?.(next);
+  };
   onCleanup?.(() => {
     disposed = true;
     clearTimeout(timer);
@@ -40,6 +52,7 @@ function passwordField(onChange: NonNullable<AccountProps['onChangePassword']>, 
     b.textContent = '비밀번호 변경';
     b.addEventListener('click', showForm);
     slot.replaceChildren(b);
+    reportBusy(false);
     if (hadFocus && field.isConnected && focusIdle(holder)) b.focus({ preventScroll: true });
   };
   const showForm = (): void => {
@@ -58,7 +71,13 @@ function passwordField(onChange: NonNullable<AccountProps['onChangePassword']>, 
     const next = form.querySelector<HTMLInputElement>('input[name="next"]')!;
     const note = form.querySelector<HTMLElement>('.settings-note')!;
     const controls = form.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button');
-    const setBusy = (on: boolean): void => controls.forEach((c) => (c.disabled = on));
+    // 적은 글이 있거나 잠겨 있는(보내는 중이거나 결과를 보이는) 동안은 바쁘다.
+    const checkBusy = (): void => reportBusy(current.value !== '' || next.value !== '' || current.disabled);
+    const setBusy = (on: boolean): void => {
+      controls.forEach((c) => (c.disabled = on));
+      checkBusy();
+    };
+    form.addEventListener('input', checkBusy);
     form.querySelector('.cancel')!.addEventListener('click', showButton);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -145,7 +164,7 @@ export function accountSection(props: AccountProps, extra?: HTMLElement, onClean
   el.querySelector<HTMLElement>('.settings-corrupt')!.hidden = !props.corruptFound;
   const signOutField = el.querySelector('.settings-signout')!;
   if (props.onManageUsers) signOutField.before(usersField(props.onManageUsers));
-  if (props.onChangePassword) signOutField.before(passwordField(props.onChangePassword, onCleanup));
+  if (props.onChangePassword) signOutField.before(passwordField(props.onChangePassword, props.onPasswordBusy, onCleanup));
   if (extra) signOutField.before(extra);
   const signOutBtn = el.querySelector<HTMLButtonElement>('.signout')!;
   const forceBtn = el.querySelector<HTMLButtonElement>('.danger')!;
@@ -185,6 +204,7 @@ export function mountSettings(
     onClose(): void;
     onChangePassword?: AccountProps['onChangePassword'];
     onManageUsers?: AccountProps['onManageUsers'];
+    onPasswordBusy?: AccountProps['onPasswordBusy'];
   },
 ): { destroy(): void } {
   const previouslyFocused = document.activeElement as HTMLElement | null;

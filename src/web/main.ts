@@ -48,16 +48,28 @@ const interactivity = new Interactivity((on) => bridge?.setInteractive(on));
 let unsavedOnlyInMemory: () => boolean = () => false;
 let deskActions: { goToday(): void; openSettings(page?: SettingsPage): void; signOut(): void } | null = null;
 
-type CalendarScreen = { destroy(): void; accessChanged(): void };
+type CalendarScreen = {
+  destroy(): void;
+  accessChanged(): void;
+  /** 편집 화면이 열려 있거나 비밀번호 칸에 적은 글이 있거나 바꾸는 중이다. 이때는 화면을 내리지 않는다. */
+  holding(): boolean;
+};
+type ScreenContext = {
+  getAccess(): AccessState;
+  /** 로그인한 동안 하나다. 화면을 다시 올려도 메모리에만 있던 대기 중인 편집이 남는다. */
+  storage: ReturnType<typeof openStorage>;
+  outbox: Outbox;
+  /** holding()이 false가 될 수 있을 때(편집 화면이나 비밀번호 칸이 끝났을 때) 부른다. */
+  onRelease(): void;
+};
 
 // 달력 화면: 달력, 편집, 설정, 사용자 관리와 그 동기화. 접근 상태가 막힘이 되면 통째로 내려간다.
-function mountCalendarScreen(root: HTMLElement, session: Session, getAccess: () => AccessState): CalendarScreen {
+function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenContext): CalendarScreen {
+  const { getAccess, storage, outbox } = ctx;
   const editedBy = deviceLabel(navigator.userAgent);
   const source = new FirestoreMonthStore(db, session.uid);
-  const storage = openStorage();
   let appearance: Appearance | undefined = DESKTOP ? loadAppearance(storage.store) : undefined;
   if (appearance) applyAppearance(document.documentElement, appearance);
-  const outbox = new Outbox(storage.store, session.uid);
   const engine = new SyncEngine({ store: source, outbox, editedBy });
   const store = new CalendarStore({
     source,
@@ -81,15 +93,22 @@ function mountCalendarScreen(root: HTMLElement, session: Session, getAccess: () 
     waiting?.off();
     if (waiting) clearTimeout(waiting.timer);
     waiting = null;
+    const wasOpen = editor !== null;
     editor?.handle.destroy();
     editor = null;
     interactivity.end('editor');
+    if (wasOpen) ctx.onRelease();
   };
   let settings: { destroy(): void; showPage?(page: SettingsPage): void } | null = null;
+  let passwordBusy = false;
   const closeSettings = (): void => {
     settings?.destroy();
     settings = null;
     interactivity.end('settings');
+    if (passwordBusy) {
+      passwordBusy = false;
+      ctx.onRelease();
+    }
   };
   const signOutNow = (): void => {
     closeSettings();
@@ -125,6 +144,10 @@ function mountCalendarScreen(root: HTMLElement, session: Session, getAccess: () 
       onChangePassword: changeMyPassword,
       // 관리자인지는 설정을 여는 순간의 접근 상태로 정한다.
       onManageUsers: getAccess() === 'admin' ? manageUsers : undefined,
+      onPasswordBusy: (busy: boolean) => {
+        passwordBusy = busy;
+        if (!busy) ctx.onRelease();
+      },
     };
     const onClose = (): void => {
       closeSettings(); // 주소가 바뀌기를 기다리지 않고 바로 닫는다
@@ -293,14 +316,13 @@ function mountCalendarScreen(root: HTMLElement, session: Session, getAccess: () 
       signOut: () => (engine.status().pending === 0 ? signOutNow() : openSettingsFromCommand('account')),
     };
   }
-  unsavedOnlyInMemory = () => !(storage.persistent && outbox.persistent) && engine.status().pending > 0;
   syncRoute();
   return {
     accessChanged() {
       if (parseHash(location.hash).name === 'users') showUsers();
     },
+    holding: () => editor !== null || passwordBusy,
     destroy() {
-      unsavedOnlyInMemory = () => false;
       deskActions = null;
       closeCellMenu();
       window.removeEventListener('hashchange', syncRoute);
@@ -318,30 +340,45 @@ function mountCalendarScreen(root: HTMLElement, session: Session, getAccess: () 
 }
 
 // 로그인 뒤: 달력 화면을 바로 올리고 내 access 문서를 지켜본다. 허가 없음이나 중지면 달력 화면을 내리고 안내를 보인다.
-// 다시 허용되면 안내를 내리고 달력 화면을 새로 올린다(대기 중이던 편집은 저장소에 남아 있다가 다시 올라간다).
+// 편집 화면이 열려 있거나 비밀번호를 바꾸는 중이면 그것이 끝난 뒤에 바꾼다(저장한 편집은 대기열에 남는다).
+// 다시 허용되면 안내를 내리고 달력 화면을 새로 올린다. 대기열은 로그인한 동안 하나라서 대기 중이던 편집이 다시 올라간다.
 function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
+  const storage = openStorage();
+  const outbox = new Outbox(storage.store, session.uid);
+  unsavedOnlyInMemory = () => !(storage.persistent && outbox.persistent) && outbox.list().length > 0;
   let access: AccessState = 'checking';
   let shown: MainScreen = 'calendar';
-  let screen: CalendarScreen | null = mountCalendarScreen(root, session, () => access);
+  let stopped = false;
   let notice: { setKind(kind: BlockedKind): void; destroy(): void } | null = null;
+  const mountScreen = (): CalendarScreen =>
+    mountCalendarScreen(root, session, {
+      getAccess: () => access,
+      storage,
+      outbox,
+      // 편집 화면을 닫는 처리(저장하고 주소를 되돌리기)가 다 끝난 뒤에 다시 본다.
+      onRelease: () => queueMicrotask(apply),
+    });
+  let screen: CalendarScreen | null = mountScreen();
   const signOutFromNotice = (): void => {
     history.replaceState(null, '', location.pathname + location.search); // 다시 로그인했을 때 설정이 열리지 않게 한다
     void signOut(auth);
   };
-  const stopWatch = watchAccess(firestoreAccessSource(db), session, (state) => {
-    access = state;
-    const next = screenFor(state, shown);
+  function apply(): void {
+    if (stopped) return;
+    const next = screenFor(access, shown);
     if (next === 'calendar') {
       if (notice) {
         notice.destroy();
         notice = null;
         interactivity.end('blocked');
-        screen = mountCalendarScreen(root, session, () => access);
+        screen = mountScreen();
       } else {
         screen?.accessChanged();
       }
     } else if (notice) {
       notice.setKind(next);
+    } else if (screen?.holding()) {
+      return; // 적던 메모나 비밀번호를 잃지 않게 기다린다. 끝나면 onRelease가 다시 부른다.
     } else {
       screen?.destroy();
       screen = null;
@@ -349,15 +386,23 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
       interactivity.begin('blocked'); // PC 앱에서 로그아웃 단추를 누를 수 있게 한다
     }
     shown = next;
+  }
+  const stopWatch = watchAccess(firestoreAccessSource(db), session, (state) => {
+    access = state;
+    document.documentElement.dataset.access = state; // 실제 브라우저 확인이 접근 상태가 왔는지 알 수 있게 한다
+    apply();
   });
   return {
     destroy() {
+      stopped = true;
       stopWatch();
       screen?.destroy();
       screen = null;
       notice?.destroy();
       notice = null;
       interactivity.end('blocked');
+      unsavedOnlyInMemory = () => false;
+      delete document.documentElement.dataset.access;
     },
   };
 }
