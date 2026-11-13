@@ -10,3 +10,10 @@ export function bundleProblem(emu: boolean, bundleText: string): string | null {
 export function hasTopLevelKoffiRequire(mainBundleText: string): boolean {
   return /^\S.*require\(["']koffi["']\)/m.test(mainBundleText);
 }
+
+// 실행 중인 CalendarFIF.exe의 경로 가운데 dir 안에 있는 것이 있는지 본다(대소문자 무시, 폴더 이름이 겹치기만 하는 것은 제외).
+export function runningInside(paths: string[], dir: string): boolean {
+  const norm = (p: string) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+  const prefix = `${norm(dir)}\\`;
+  return paths.some((p) => norm(p).startsWith(prefix));
+}
