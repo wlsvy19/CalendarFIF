@@ -11,11 +11,12 @@ export function buildRules(template: string, ownerUid: string): string {
   return template.replaceAll('__OWNER_UID__', ownerUid);
 }
 
-function readEnvOwnerUid(): string {
+/** .env.local에서 키 하나의 값을 읽는다. 파일이나 키가 없으면 빈 문자열이다. */
+export function readEnvLocalValue(key: string): string {
   if (!existsSync('.env.local')) return '';
   const line = readFileSync('.env.local', 'utf8')
     .split(/\r?\n/)
-    .find((l) => /^\s*OWNER_UID\s*=/.test(l));
+    .find((l) => new RegExp(`^\\s*${key}\\s*=`).test(l));
   if (!line) return '';
   return line.slice(line.indexOf('=') + 1).trim().replace(/^(['"])(.*)\1$/, '$2');
 }
@@ -27,7 +28,7 @@ function main(): void {
   if (i >= 0) {
     uid = args[i + 1] ?? '';
   } else {
-    uid = readEnvOwnerUid();
+    uid = readEnvLocalValue('OWNER_UID');
     if (uid === '' || uid === TEST_UID) {
       console.error('.env.local의 OWNER_UID가 비었거나 시험용 값이다. 배포용 규칙은 만들지 않는다.');
       process.exit(1);
