@@ -66,7 +66,13 @@ export function mountLogin(
       }
       alertEl.textContent = '';
       forgot.disabled = true;
-      reset(address).then(
+      let pending: Promise<void>;
+      try {
+        pending = reset(address);
+      } catch (e) {
+        pending = Promise.reject(e);
+      }
+      pending.then(
         () => {
           if (!alive) return;
           alertEl.classList.add('ok');

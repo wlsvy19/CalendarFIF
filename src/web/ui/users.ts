@@ -38,6 +38,7 @@ export function mountUsers(root: HTMLElement, props: UsersProps): { destroy(): v
   let alive = true;
   let rows: UserRow[] | null = null;
   let failed = false;
+  let listError = false; // 상태 줄이 목록 오류를 보이는 중
   const busy = new Set<string>(); // 처리 중인 행
   const armed = new Map<string, ReturnType<typeof setTimeout>>(); // "정말 지우기"를 기다리는 행
 
@@ -108,13 +109,8 @@ export function mountUsers(root: HTMLElement, props: UsersProps): { destroy(): v
       line.append(b);
       return b;
     };
-    button('toggle', row.disabled ? '다시 허용' : '사용 중지', () => void run(row.uid, '바꾸지 못했습니다.', () => props.onSetDisabled(row.uid, !row.disabled)));
-    button('reset', '재설정 메일', () => {
-      void props.onReset(row.email).then(
-        () => alive && status(`재설정 메일을 보냈습니다: ${row.email}`),
-        () => alive && status('메일을 보내지 못했습니다.'),
-      );
-    });
+    button('toggle', row.disabled ? '다시 허용' : '사용 중지', () => void run(row.uid, 'toggle', '바꾸지 못했습니다.', () => props.onSetDisabled(row.uid, !row.disabled)));
+    button('reset', '재설정 메일', () => void run(row.uid, 'reset', '메일을 보내지 못했습니다.', () => props.onReset(row.email), `재설정 메일을 보냈습니다: ${row.email}`));
     const del = button('remove', armed.has(row.uid) ? '정말 지우기' : '지우기', () => {
       if (!armed.has(row.uid)) {
         armed.set(row.uid, setTimeout(() => {
@@ -126,14 +122,29 @@ export function mountUsers(root: HTMLElement, props: UsersProps): { destroy(): v
       }
       clearTimeout(armed.get(row.uid));
       armed.delete(row.uid);
-      void run(row.uid, '지우지 못했습니다.', () => props.onRemove(row.uid), '목록에서 지웠습니다. 로그인 계정과 그 사람의 메모는 남아 있습니다.');
+      void run(row.uid, 'remove', '지우지 못했습니다.', () => props.onRemove(row.uid), '목록에서 지웠습니다. 로그인 계정과 그 사람의 메모는 남아 있습니다.');
     });
     if (armed.has(row.uid)) del.classList.add('danger');
     return li;
   }
 
-  async function run(uid: string, failText: string, action: () => Promise<void>, okText?: string): Promise<void> {
+  // 처리 중에는 초점이 시트에 있어야 Escape와 Tab 가두기가 계속 듣는다. 눌린 단추가 잠기면 초점이 body로 떨어진다.
+  const focusIdle = (): boolean => document.activeElement === sheet || document.activeElement === document.body || document.activeElement === null;
+  const holdFocus = (inside: HTMLElement): boolean => {
+    const had = inside.contains(document.activeElement);
+    if (had) sheet.focus({ preventScroll: true });
+    return had;
+  };
+  const giveFocusBack = (target: HTMLElement | null | undefined): void => {
+    if (!focusIdle()) return;
+    if (target?.isConnected && !(target as HTMLButtonElement).disabled) target.focus({ preventScroll: true });
+    else sheet.focus({ preventScroll: true });
+  };
+
+  async function run(uid: string, act: string, failText: string, action: () => Promise<void>, okText?: string): Promise<void> {
+    if (busy.has(uid)) return;
     busy.add(uid);
+    const hadFocus = holdFocus(body);
     render();
     try {
       await action();
@@ -142,33 +153,53 @@ export function mountUsers(root: HTMLElement, props: UsersProps): { destroy(): v
       if (alive) status(failText);
     } finally {
       busy.delete(uid);
-      if (alive) render();
+      if (alive) {
+        render();
+        if (hadFocus) {
+          const li = [...body.querySelectorAll<HTMLElement>('li')].find((el) => el.dataset.uid === uid);
+          giveFocusBack(li?.querySelector<HTMLElement>(`[data-act="${act}"]`));
+        }
+      }
     }
   }
 
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     if (addButton.disabled) return;
+    const origin = document.activeElement as HTMLElement | null;
+    const hadFocus = holdFocus(form);
     const setPending = (on: boolean): void => {
       addButton.disabled = on;
       emailInput.disabled = on;
       passwordInput.disabled = on;
     };
+    const finish = (ok: boolean): void => {
+      setPending(false);
+      if (hadFocus) giveFocusBack(ok ? emailInput : origin && form.contains(origin) ? origin : emailInput);
+    };
     setPending(true);
-    props.onAdd(emailInput.value, passwordInput.value).then(
+    let pending: Promise<{ ok: boolean; message: string }>;
+    try {
+      pending = props.onAdd(emailInput.value, passwordInput.value);
+    } catch (e) {
+      pending = Promise.reject(e);
+    }
+    pending.then(
       (result) => {
         if (!alive) return;
         status(result.message);
+        listError = false;
         if (result.ok) {
           emailInput.value = '';
           passwordInput.value = '';
         }
-        setPending(false);
+        finish(result.ok);
       },
       () => {
         if (!alive) return;
         status('추가하지 못했습니다.');
-        setPending(false);
+        listError = false;
+        finish(false);
       },
     );
   });
@@ -178,6 +209,8 @@ export function mountUsers(root: HTMLElement, props: UsersProps): { destroy(): v
       if (!alive) return;
       rows = next;
       failed = false;
+      if (listError) status('');
+      listError = false;
       for (const uid of [...armed.keys()]) {
         if (!next.some((r) => r.uid === uid)) {
           clearTimeout(armed.get(uid));
@@ -189,6 +222,7 @@ export function mountUsers(root: HTMLElement, props: UsersProps): { destroy(): v
     (code) => {
       if (!alive) return;
       failed = true;
+      listError = true;
       status(`목록을 읽지 못했습니다. (${code})`);
       render();
     },

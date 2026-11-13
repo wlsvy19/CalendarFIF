@@ -14,8 +14,8 @@ export type AccountProps = {
 
 const PASSWORD_DONE_MS = 1500;
 
-// "비밀번호" 칸. 단추를 누르면 그 자리가 폼으로 바뀐다.
-function passwordField(onChange: NonNullable<AccountProps['onChangePassword']>): HTMLElement {
+// "비밀번호" 칸. 단추를 누르면 그 자리가 폼으로 바뀐다. onCleanup에는 화면이 사라질 때 부를 함수를 맡긴다.
+function passwordField(onChange: NonNullable<AccountProps['onChangePassword']>, onCleanup?: (fn: () => void) => void): HTMLElement {
   const field = document.createElement('div');
   field.className = 'field';
   field.innerHTML = `
@@ -23,14 +23,24 @@ function passwordField(onChange: NonNullable<AccountProps['onChangePassword']>):
     <div class="account-pw"></div>`;
   const slot = field.querySelector<HTMLElement>('.account-pw')!;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let disposed = false;
+  onCleanup?.(() => {
+    disposed = true;
+    clearTimeout(timer);
+  });
+  // 처리 중에는 초점이 시트(tabindex -1)에 있어야 Escape와 Tab 가두기가 계속 듣는다.
+  const focusIdle = (holder: HTMLElement | null): boolean => document.activeElement === holder || document.activeElement === document.body || document.activeElement === null;
   const showButton = (): void => {
     clearTimeout(timer);
+    const holder = slot.closest<HTMLElement>('[tabindex="-1"]');
+    const hadFocus = slot.contains(document.activeElement) || focusIdle(holder);
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'settings-btn';
     b.textContent = '비밀번호 변경';
     b.addEventListener('click', showForm);
     slot.replaceChildren(b);
+    if (hadFocus && field.isConnected && focusIdle(holder)) b.focus({ preventScroll: true });
   };
   const showForm = (): void => {
     const form = document.createElement('form');
@@ -52,23 +62,42 @@ function passwordField(onChange: NonNullable<AccountProps['onChangePassword']>):
     form.querySelector('.cancel')!.addEventListener('click', showButton);
     form.addEventListener('submit', (event) => {
       event.preventDefault();
-      if (current.disabled) return;
+      if (current.disabled || disposed) return;
+      const origin = document.activeElement as HTMLElement | null;
+      const holder = form.closest<HTMLElement>('[tabindex="-1"]');
+      const hadFocus = form.contains(origin);
+      if (hadFocus) holder?.focus({ preventScroll: true });
       setBusy(true);
-      onChange(current.value, next.value).then(
+      let pending: Promise<{ ok: boolean; message: string }>;
+      try {
+        pending = onChange(current.value, next.value);
+      } catch (e) {
+        pending = Promise.reject(e);
+      }
+      const reenable = (): void => {
+        setBusy(false);
+        if (hadFocus && focusIdle(holder) && origin?.isConnected) origin.focus({ preventScroll: true });
+      };
+      pending.then(
         (result) => {
-          if (!form.isConnected) return;
+          if (disposed || !form.isConnected) return;
           note.textContent = result.message;
           if (result.ok) {
+            // 결과를 보이는 동안은 폼을 잠가 둔다. 그 사이 다시 보내면 첫 요청의 타이머가 폼을 바꿔 버린다.
             current.value = '';
             next.value = '';
-            timer = setTimeout(showButton, PASSWORD_DONE_MS);
+            timer = setTimeout(() => {
+              if (!field.isConnected) return;
+              showButton();
+            }, PASSWORD_DONE_MS);
+            return;
           }
-          setBusy(false);
+          reenable();
         },
         () => {
-          if (!form.isConnected) return;
+          if (disposed || !form.isConnected) return;
           note.textContent = '바꾸지 못했습니다.';
-          setBusy(false);
+          reenable();
         },
       );
     });
@@ -91,7 +120,7 @@ function usersField(onManage: () => void): HTMLElement {
 
 // 계정, 동기화, (extra), 로그아웃. 웹앱 설정 화면과 PC 앱 설정의 계정 쪽이 함께 쓴다.
 // 감싸는 요소는 상자를 만들지 않아서(display: contents) 자식들이 시트의 세로 배치에 그대로 놓인다.
-export function accountSection(props: AccountProps, extra?: HTMLElement): HTMLElement {
+export function accountSection(props: AccountProps, extra?: HTMLElement, onCleanup?: (fn: () => void) => void): HTMLElement {
   const el = document.createElement('div');
   el.style.display = 'contents';
   el.innerHTML = `
@@ -116,7 +145,7 @@ export function accountSection(props: AccountProps, extra?: HTMLElement): HTMLEl
   el.querySelector<HTMLElement>('.settings-corrupt')!.hidden = !props.corruptFound;
   const signOutField = el.querySelector('.settings-signout')!;
   if (props.onManageUsers) signOutField.before(usersField(props.onManageUsers));
-  if (props.onChangePassword) signOutField.before(passwordField(props.onChangePassword));
+  if (props.onChangePassword) signOutField.before(passwordField(props.onChangePassword, onCleanup));
   if (extra) signOutField.before(extra);
   const signOutBtn = el.querySelector<HTMLButtonElement>('.signout')!;
   const forceBtn = el.querySelector<HTMLButtonElement>('.danger')!;
@@ -189,7 +218,8 @@ export function mountSettings(
   };
   closeBtn.addEventListener('click', close);
   scrim.addEventListener('click', close);
-  sheet.append(accountSection({ ...props, onSignOut: signOut }, widgetNote()));
+  const cleanups: Array<() => void> = [];
+  sheet.append(accountSection({ ...props, onSignOut: signOut }, widgetNote(), (fn) => cleanups.push(fn)));
   sheet.addEventListener('keydown', (e) => {
     if (e.isComposing) return;
     if (e.key === 'Escape') {
@@ -218,6 +248,7 @@ export function mountSettings(
 
   return {
     destroy() {
+      for (const fn of cleanups) fn();
       document.documentElement.classList.remove('sheet-open');
       dismiss(scrim, sheet);
       if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });

@@ -13,9 +13,9 @@ function mount(overrides: Partial<Parameters<typeof mountSettings>[1]> = {}) {
   const root = document.createElement('div');
   document.body.append(root);
   const onSignOut = vi.fn();
-  mountSettings(root, { email: 'me@example.com', pending: 0, storageOk: true, corruptFound: false, onSignOut, onClose: vi.fn(), ...overrides });
+  const handle = mountSettings(root, { email: 'me@example.com', pending: 0, storageOk: true, corruptFound: false, onSignOut, onClose: vi.fn(), ...overrides });
   const button = (label: string) => [...root.querySelectorAll('button')].find((b) => b.textContent === label)!;
-  return { root, button, onSignOut };
+  return { root, button, onSignOut, handle };
 }
 
 it('계정과 대기 건수를 보여 주고 로그아웃한다', () => {
@@ -101,7 +101,10 @@ it('비밀번호 변경: 성공하면 메시지를 보이고 1.5초 뒤 단추�
   await vi.advanceTimersByTimeAsync(0);
   expect(note()).toBe('비밀번호를 바꿨습니다.');
   expect([input('current').value, input('next').value]).toEqual(['', '']);
-  expect(input('current').disabled).toBe(false);
+  // 결과를 보여 주는 1.5초 동안은 폼이 잠겨 있어 다시 보낼 수 없다.
+  expect(input('current').disabled).toBe(true);
+  submit();
+  expect(onChangePassword).toHaveBeenCalledTimes(1);
   await vi.advanceTimersByTimeAsync(1499);
   expect(root.querySelector('form')).not.toBeNull();
   await vi.advanceTimersByTimeAsync(1);
@@ -166,4 +169,56 @@ it('Tab 순서에 비밀번호 입력칸이 들어간다', () => {
   next.dispatchEvent(wrap);
   expect(wrap.defaultPrevented).toBe(true);
   expect(document.activeElement).toBe(close);
+});
+
+it('비밀번호 변경: 보내는 동안 초점은 시트에 있고, 실패로 끝나면 시작한 단추로 돌아온다', async () => {
+  let resolve!: (v: { ok: boolean; message: string }) => void;
+  const onChangePassword = vi.fn().mockReturnValue(new Promise((r) => (resolve = r)));
+  const { root, button, submit } = pwSetup(onChangePassword);
+  const sheet = root.querySelector<HTMLElement>('.sheet')!;
+  button('비밀번호 변경').click();
+  const send = button('바꾸기');
+  send.focus();
+  submit();
+  expect(document.activeElement).toBe(sheet);
+  resolve({ ok: false, message: '지금 비밀번호가 맞지 않습니다.' });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(document.activeElement).toBe(send);
+});
+it('비밀번호 변경: 보내는 동안에도 Escape가 onClose를 부른다', () => {
+  const onClose = vi.fn();
+  const m = mount({ onChangePassword: () => new Promise(() => {}), onClose });
+  m.button('비밀번호 변경').click();
+  m.button('바꾸기').focus();
+  m.root.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+  document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+it('비밀번호 변경: 성공하면 1.5초 뒤 단추로 돌아가며 초점도 그 단추로 간다', async () => {
+  const { button, submit } = pwSetup(vi.fn().mockResolvedValue({ ok: true, message: '바꿨습니다.' }));
+  button('비밀번호 변경').click();
+  button('바꾸기').focus();
+  submit();
+  await vi.advanceTimersByTimeAsync(1500);
+  expect(document.activeElement).toBe(button('비밀번호 변경'));
+});
+it('비밀번호 변경: 1.5초 안에 닫으면 남는 타이머가 없다', async () => {
+  const { button, input, submit, handle } = pwSetup(vi.fn().mockResolvedValue({ ok: true, message: '바꿨습니다.' }));
+  button('비밀번호 변경').click();
+  input('current').value = 'a';
+  submit();
+  await vi.advanceTimersByTimeAsync(100);
+  expect(vi.getTimerCount()).toBe(1);
+  handle.destroy();
+  expect(vi.getTimerCount()).toBe(0);
+});
+it('비밀번호 변경: 던지는 콜백도 거부처럼 다루고 폼을 푼다', async () => {
+  const { button, input, submit, note } = pwSetup(() => {
+    throw new Error('x');
+  });
+  button('비밀번호 변경').click();
+  submit();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(note()).toBe('바꾸지 못했습니다.');
+  expect(input('current').disabled).toBe(false);
 });

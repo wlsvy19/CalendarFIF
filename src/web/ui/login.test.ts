@@ -75,3 +75,12 @@ it('비밀번호를 잊었습니다: 실패하면 코드와 함께 알린다', a
   expect(alertEl.classList.contains('ok')).toBe(false);
   expect(forgot.disabled).toBe(false);
 });
+it('비밀번호를 잊었습니다: 던지는 콜백도 실패로 알리고 단추를 푼다', async () => {
+  const { forgot, email, alertEl } = mountWithReset(() => {
+    throw new Error('x');
+  });
+  email.value = 'me@example.com';
+  forgot.click();
+  await vi.waitFor(() => expect(alertEl.textContent).toBe('메일을 보내지 못했습니다. (unknown)'));
+  expect(forgot.disabled).toBe(false);
+});

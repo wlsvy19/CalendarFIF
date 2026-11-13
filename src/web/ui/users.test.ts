@@ -290,3 +290,101 @@ it('destroy는 지켜보기를 멈추고, 타이머를 치우고, 늦은 결과�
   handle.destroy();
   expect(stop).toHaveBeenCalledTimes(1);
 });
+
+const escape = () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+it('추가: 보내는 동안 초점은 시트에 있어 Escape가 닫고, 성공하면 이메일 칸으로 돌아온다', async () => {
+  let resolve!: (v: { ok: boolean; message: string }) => void;
+  const onAdd = vi.fn().mockReturnValue(new Promise((r) => (resolve = r)));
+  const { root, props, email, submit } = setup({ onAdd });
+  const sheet = root.querySelector<HTMLElement>('.sheet')!;
+  root.querySelector<HTMLElement>('.users-add button')!.focus();
+  submit();
+  expect(document.activeElement).toBe(sheet);
+  escape();
+  expect(props.onClose).toHaveBeenCalledTimes(1);
+  resolve({ ok: true, message: '추가했습니다.' });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(document.activeElement).toBe(email());
+});
+it('추가: 실패하면 시작한 단추로 초점이 돌아온다', async () => {
+  const onAdd = vi.fn().mockResolvedValue({ ok: false, message: '이메일 주소를 확인하세요.' });
+  const { root, submit } = setup({ onAdd });
+  const send = root.querySelector<HTMLElement>('.users-add button')!;
+  send.focus();
+  submit();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(document.activeElement).toBe(send);
+});
+it('행 단추: 처리 중에는 초점이 시트에 있고, 끝나면 같은 단추로 돌아온다', async () => {
+  let resolve!: () => void;
+  const onSetDisabled = vi.fn().mockReturnValue(new Promise<void>((r) => (resolve = r)));
+  const { root, emit, btn } = setup({ onSetDisabled });
+  emit([admin, alice]);
+  btn('u1', '사용 중지').focus();
+  btn('u1', '사용 중지').click();
+  expect(document.activeElement).toBe(root.querySelector('.sheet'));
+  resolve();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(document.activeElement).toBe(btn('u1', '사용 중지'));
+});
+it('재설정 메일은 처리 중 그 행의 단추를 잠그고 두 번 눌러도 한 통만 보낸다', async () => {
+  let resolve!: () => void;
+  const onReset = vi.fn().mockReturnValue(new Promise<void>((r) => (resolve = r)));
+  const { emit, btn, row } = setup({ onReset });
+  emit([admin, alice]);
+  const mail = btn('u1', '재설정 메일');
+  mail.click();
+  mail.click();
+  btn('u1', '재설정 메일').click();
+  expect(onReset).toHaveBeenCalledTimes(1);
+  expect([...row('u1').querySelectorAll('button')].every((b) => b.disabled)).toBe(true);
+  resolve();
+  await vi.advanceTimersByTimeAsync(0);
+  expect([...row('u1').querySelectorAll('button')].some((b) => b.disabled)).toBe(false);
+});
+it('목록 오류 문구는 나중에 목록이 오면 지워지지만 다른 문구는 남는다', async () => {
+  const { emit, fail, status, btn } = setup();
+  fail('unavailable');
+  expect(status()).toBe('목록을 읽지 못했습니다. (unavailable)');
+  emit([admin, alice]);
+  expect(status()).toBe('');
+  btn('u1', '재설정 메일').click();
+  await vi.advanceTimersByTimeAsync(0);
+  emit([admin, alice]);
+  expect(status()).toBe('재설정 메일을 보냈습니다: alice@example.com');
+});
+it('던지는 콜백도 거부처럼 다루고 잠긴 것을 푼다', async () => {
+  const boom = () => {
+    throw new Error('x');
+  };
+  const { root, emit, btn, row, email, password, submit, status } = setup({ onAdd: boom, onSetDisabled: boom });
+  email().value = 'a@example.com';
+  password().value = 'pass1234';
+  submit();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(status()).toBe('추가하지 못했습니다.');
+  expect([root.querySelector<HTMLButtonElement>('.users-add button')!.disabled, email().disabled]).toEqual([false, false]);
+  emit([admin, alice]);
+  btn('u1', '사용 중지').click();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(status()).toBe('바꾸지 못했습니다.');
+  expect([...row('u1').querySelectorAll('button')].some((b) => b.disabled)).toBe(false);
+});
+it('destroy 뒤에 행 동작과 재설정의 늦은 결과는 아무것도 바꾸지 않는다', async () => {
+  let done!: () => void;
+  let mailed!: () => void;
+  const onSetDisabled = vi.fn().mockReturnValue(new Promise<void>((r) => (done = r)));
+  const onReset = vi.fn().mockReturnValue(new Promise<void>((r) => (mailed = r)));
+  const { root, handle, emit, btn } = setup({ onSetDisabled, onReset });
+  const statusEl = root.querySelector('.users-status')!;
+  emit([admin, alice, bob]);
+  btn('u1', '사용 중지').click();
+  btn('u2', '재설정 메일').click();
+  handle.destroy();
+  done();
+  mailed();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(statusEl.textContent).toBe('');
+  expect(root.querySelector('.sheet')).toBeNull();
+});
