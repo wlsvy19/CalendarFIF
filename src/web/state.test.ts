@@ -37,3 +37,17 @@ it('서버 값에 대기 편집을 얹고, 바뀌면 알린다', () => {
   expect(store.days('2026-11')).toEqual({ '13': { text: 'A\nB', color: '' } });
   expect(store.days('2026-10')).toEqual({});
 });
+it('달의 첫 답이 오면 불러온 것으로 본다', () => {
+  const source = fakeSource();
+  const store = new CalendarStore({ source, outbox: new Outbox(new MemoryStorage(), 'u1'), editedBy: 'pc', initialMonth: '2026-11' });
+  expect(store.isLoaded('2026-11')).toBe(false);
+  source.listeners.get('2026-11')!({ days: { '13': rec('A') } });
+  expect(store.isLoaded('2026-11')).toBe(true);
+  source.listeners.get('2026-12')!(null);
+  expect(store.isLoaded('2026-12')).toBe(true);
+  expect(store.isLoaded('2026-10')).toBe(false);
+  source.listeners.get('2026-10')!(null);
+  store.show('2026-12');
+  expect(store.isLoaded('2026-10')).toBe(false);
+  expect(store.isLoaded('2026-11')).toBe(true);
+});

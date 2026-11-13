@@ -49,3 +49,24 @@ it('취소와 Esc는 저장하지 않는다', () => {
   second.area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   expect(second.onCancel).toHaveBeenCalledTimes(1);
 });
+it('저장과 취소는 한 번만 전달된다', () => {
+  const saved = mount({ text: 'a', color: '' });
+  saved.button('저장').click();
+  saved.button('저장').click();
+  saved.button('취소').click();
+  expect(saved.onSave).toHaveBeenCalledTimes(1);
+  expect(saved.onCancel).not.toHaveBeenCalled();
+  const cancelled = mount({ text: 'a', color: '' });
+  cancelled.area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  cancelled.button('취소').click();
+  cancelled.button('저장').click();
+  expect(cancelled.onCancel).toHaveBeenCalledTimes(1);
+  expect(cancelled.onSave).not.toHaveBeenCalled();
+});
+it('한글 조합 중에는 Esc와 Ctrl+Enter를 무시한다', () => {
+  const { area, onSave, onCancel } = mount({ text: 'a', color: '' });
+  area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, isComposing: true }));
+  area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, isComposing: true }));
+  expect(onCancel).not.toHaveBeenCalled();
+  expect(onSave).not.toHaveBeenCalled();
+});

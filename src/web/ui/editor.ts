@@ -79,7 +79,18 @@ export function mountEditor(
   }
   paintSwatches();
 
-  const save = (): void => props.onSave({ text: normalizeText(area.value), color });
+  // 저장과 취소는 합쳐서 한 번만 전달한다. 화면이 닫히기 전에 같은 입력이 다시 와도 무시한다.
+  let finished = false;
+  const save = (): void => {
+    if (finished) return;
+    finished = true;
+    props.onSave({ text: normalizeText(area.value), color });
+  };
+  const cancel = (): void => {
+    if (finished) return;
+    finished = true;
+    props.onCancel();
+  };
   swatches.addEventListener('click', (e) => {
     const b = (e.target as Element).closest<HTMLElement>('.swatch');
     if (!b) return;
@@ -103,9 +114,10 @@ export function mountEditor(
     area.focus();
   });
   saveBtn.addEventListener('click', save);
-  cancelBtn.addEventListener('click', () => props.onCancel());
-  scrim.addEventListener('click', () => props.onCancel());
+  cancelBtn.addEventListener('click', cancel);
+  scrim.addEventListener('click', cancel);
   sheet.addEventListener('keydown', (e) => {
+    if (e.isComposing) return; // 한글 조합 중의 Esc와 Ctrl+Enter는 조합을 끝내는 키다
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
       save();
@@ -113,7 +125,7 @@ export function mountEditor(
     }
     if (e.key === 'Escape') {
       e.preventDefault();
-      props.onCancel();
+      cancel();
       return;
     }
     if (e.key !== 'Tab') return;

@@ -56,11 +56,15 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
       dateKey,
       value: base,
       onSave: (next) => {
+        closeEditor(); // 주소가 바뀌기를 기다리지 않고 바로 닫는다
         engine.saveEdit(monthId, day, base, next);
         store.refresh();
         backToCalendar();
       },
-      onCancel: backToCalendar,
+      onCancel: () => {
+        closeEditor();
+        backToCalendar();
+      },
     });
     editor = { dateKey, handle };
   };
