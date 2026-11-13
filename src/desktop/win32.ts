@@ -196,7 +196,7 @@ export function createWin32(load: () => Api = loadUser32, log: (message: string)
   }
 
   // h 바로 아래 창부터 Progman까지(포함)를 위에서 아래 순서로 돌려준다. Progman을 못 만나면 끝까지(limit까지).
-  // desktopOwned: 소유자나 자신이 Progman이거나 Progman의 자손인 창(DesktopCal의 달력 창은 목록 보기 컨트롤이 소유한다).
+  // owner: 소유자 창(GW_OWNER). desktopOwned: 소유자나 자신이 Progman이거나 Progman의 자손인 창(DesktopCal의 달력 창은 목록 보기 컨트롤이 소유한다).
   function windowsBelow(h: Hwnd, progman: Hwnd, limit = 200): BelowEntry[] {
     const f = u();
     const out: BelowEntry[] = [];
@@ -211,7 +211,7 @@ export function createWin32(load: () => Api = loadUser32, log: (message: string)
       while (cur !== 0n && out.length < limit) {
         const owner = BigInt(f.GetWindow(cur, GW_OWNER));
         const belongs = (w: Hwnd) => progman !== 0n && w !== 0n && (w === progman || f.IsChild(progman, w) !== 0);
-        out.push({ hwnd: cur, desktopOwned: belongs(owner) || belongs(cur) });
+        out.push({ hwnd: cur, owner, desktopOwned: belongs(owner) || belongs(cur) });
         if (cur === progman) break;
         cur = BigInt(f.GetWindow(cur, GW_HWNDNEXT));
       }

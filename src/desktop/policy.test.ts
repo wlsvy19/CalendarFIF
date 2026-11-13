@@ -1,10 +1,28 @@
 import { expect, it } from 'vitest';
 import { BottomLimiter, Reattacher, adjustStep, isAtBottom, shouldKeepBottom } from './policy';
 
-const P = 100n, own = (hwnd: bigint) => ({ hwnd, desktopOwned: true }), other = (hwnd: bigint) => ({ hwnd, desktopOwned: false });
+const P = 100n, own = (hwnd: bigint) => ({ hwnd, owner: 0n, desktopOwned: true }), other = (hwnd: bigint) => ({ hwnd, owner: 0n, desktopOwned: false });
 it('바탕화면에 붙은 창(DesktopCal 같은)들 말고는 아래에 아무것도 없어야 맨 아래다', () => {
   expect([isAtBottom([other(P)], P), isAtBottom([own(7n), other(P)], P), isAtBottom([other(8n), other(P)], P), isAtBottom([other(8n)], P), isAtBottom([], 0n), isAtBottom([other(8n)], 0n)])
     .toEqual([true, true, false, false, true, false]);
+});
+it('바탕화면에 붙은 창이 소유한 창(그 창의 입력기 창 등)도 바탕화면 쪽이다. 소유자를 따라가 바탕화면에 닿지 않으면 아니다', () => {
+  // 목록은 위에서 아래 순서다. Windows는 소유된 창을 늘 소유자보다 위에 둔다.
+  const progman = { hwnd: P, owner: 0n, desktopOwned: true };
+  const cal = { hwnd: 20n, owner: P, desktopOwned: true }; // 다른 달력 창(Progman이 소유)
+  const ime = { hwnd: 21n, owner: 20n, desktopOwned: false }; // 그 창의 입력기 창(IME)
+  const imeUi = { hwnd: 22n, owner: 21n, desktopOwned: false }; // 입력기 창이 소유한 창(MSCTFIME UI)
+  const dcal = { hwnd: 40n, owner: 41n, desktopOwned: true }; // DesktopCal의 달력 창(소유자가 Progman의 자손)
+  const dcalIme = { hwnd: 42n, owner: 40n, desktopOwned: false };
+  const app = { hwnd: 30n, owner: 0n, desktopOwned: false }; // 일반 창
+  const appPopup = { hwnd: 31n, owner: 30n, desktopOwned: false }; // 일반 창이 소유한 창
+  expect([
+    isAtBottom([imeUi, ime, cal, progman], P),
+    isAtBottom([dcalIme, dcal, imeUi, ime, cal, progman], P),
+    isAtBottom([imeUi, ime, cal, app, progman], P),
+    isAtBottom([appPopup, app, cal, progman], P),
+    isAtBottom([ime, progman], P), // 소유자가 아래에 없으면 바탕화면 쪽으로 보지 않는다
+  ]).toEqual([true, true, false, false, false]);
 });
 it('입력 중, 맨 위에 보기, 위치 조정, 숨김 중에는 맨 아래로 보내지 않는다', () => {
   const idle = { interactive: false, alwaysOnTop: false, adjusting: false, hidden: false };

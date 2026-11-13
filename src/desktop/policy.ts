@@ -1,12 +1,22 @@
 import { isAppUrl } from './protocol';
 
-export type BelowEntry = { hwnd: bigint; desktopOwned: boolean };
+// owner는 소유자 창(없으면 0), desktopOwned는 자신이나 소유자가 Progman이거나 Progman의 자손인지다.
+export type BelowEntry = { hwnd: bigint; owner: bigint; desktopOwned: boolean };
 
-// below는 창 바로 아래부터 Progman까지(포함)의 목록이다. Progman 앞에는 바탕화면에 붙은 창만 있어야 맨 아래다.
+// below는 창 바로 아래부터 Progman까지(포함)의 목록이다(위에서 아래 순서). Progman 앞에는 바탕화면 쪽 창만 있어야 맨 아래다.
+// 바탕화면 쪽 창은 바탕화면에 붙은 창(desktopOwned)과 그런 창이 소유한 창이다. 바탕화면에 붙은 다른 창(꾸린 앱의 달력, DesktopCal)도
+// 입력기 창(IME, MSCTFIME UI)을 소유하고, Windows는 그 창들을 늘 소유자 바로 위에 둔다. 이를 남의 창으로 보면 서로 맨 아래를 다툰다.
+// 소유된 창은 늘 소유자보다 위에 있으므로 소유자는 목록에서 더 아래에 있다. 그래서 아래에서부터 본다.
 export function isAtBottom(below: BelowEntry[], progman: bigint): boolean {
   if (progman === 0n) return below.length === 0;
   const i = below.findIndex((e) => e.hwnd === progman);
-  return i >= 0 && below.slice(0, i).every((e) => e.desktopOwned);
+  if (i < 0) return false;
+  const desktop = new Set<bigint>();
+  for (const e of below.slice(0, i).reverse()) {
+    if (!e.desktopOwned && !desktop.has(e.owner)) return false;
+    desktop.add(e.hwnd);
+  }
+  return true;
 }
 
 export function shouldKeepBottom(s: { interactive: boolean; alwaysOnTop: boolean; adjusting: boolean; hidden: boolean }): boolean {
