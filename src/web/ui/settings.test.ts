@@ -27,4 +27,14 @@ it('올리지 못한 편집이 있으면 한 번 더 묻는다', () => {
 it('저장소 문제를 알린다', () => {
   expect(mount({ storageOk: false }).root.textContent).toContain('이 브라우저에서는 대기 중인 편집을 저장할 수 없습니다.');
   expect(mount({ corruptFound: true }).root.textContent).toContain('대기 중이던 편집 기록이 깨져 있어 따로 보관했습니다.');
+  const hidden = (root: HTMLElement, selector: string) => root.querySelector<HTMLElement>(selector)!.hidden;
+  const fine = mount().root;
+  expect(hidden(fine, '.settings-storage')).toBe(true);
+  expect(hidden(fine, '.settings-corrupt')).toBe(true);
+  const storage = mount({ storageOk: false }).root;
+  expect(hidden(storage, '.settings-storage')).toBe(false);
+  expect(hidden(storage, '.settings-corrupt')).toBe(true);
+  const corrupt = mount({ corruptFound: true }).root;
+  expect(hidden(corrupt, '.settings-storage')).toBe(true);
+  expect(hidden(corrupt, '.settings-corrupt')).toBe(false);
 });

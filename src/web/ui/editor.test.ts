@@ -70,3 +70,45 @@ it('한글 조합 중에는 Esc와 Ctrl+Enter를 무시한다', () => {
   expect(onCancel).not.toHaveBeenCalled();
   expect(onSave).not.toHaveBeenCalled();
 });
+it('바깥을 누르면 고친 것이 없을 때만 닫는다', () => {
+  const typed = mount({ text: 'a', color: '' });
+  typed.area.value = 'a\nb';
+  typed.root.querySelector<HTMLElement>('.scrim')!.click();
+  expect(typed.onCancel).not.toHaveBeenCalled();
+  const recoloured = mount({ text: 'a', color: '' });
+  recoloured.root.querySelector<HTMLElement>('[role="radio"][data-color="009300"]')!.click();
+  recoloured.root.querySelector<HTMLElement>('.scrim')!.click();
+  expect(recoloured.onCancel).not.toHaveBeenCalled();
+  const untouched = mount({ text: 'a', color: 'F12424' });
+  untouched.root.querySelector<HTMLElement>('.scrim')!.click();
+  expect(untouched.onCancel).toHaveBeenCalledTimes(1);
+});
+it('보이는 영역의 높이와 위치를 편집 화면에 넘긴다', () => {
+  const listeners = new Map<string, Set<() => void>>();
+  const viewport = {
+    height: 500,
+    offsetTop: 0,
+    addEventListener(type: string, fn: () => void) {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type)!.add(fn);
+    },
+    removeEventListener(type: string, fn: () => void) {
+      listeners.get(type)?.delete(fn);
+    },
+  };
+  const fire = (type: string) => { for (const fn of listeners.get(type) ?? []) fn(); };
+  const root = document.createElement('div');
+  document.body.append(root);
+  const handle = mountEditor(root, { dateKey: '2026-11-13', value: { text: '', color: '' }, onSave: vi.fn(), onCancel: vi.fn() }, { visualViewport: viewport });
+  const sheet = root.querySelector<HTMLElement>('.sheet')!;
+  expect(sheet.style.getPropertyValue('--vv-height')).toBe('500px');
+  expect(sheet.style.getPropertyValue('--vv-top')).toBe('0px');
+  viewport.height = 300;
+  fire('resize');
+  expect(sheet.style.getPropertyValue('--vv-height')).toBe('300px');
+  viewport.offsetTop = 40;
+  fire('scroll');
+  expect(sheet.style.getPropertyValue('--vv-top')).toBe('40px');
+  handle.destroy();
+  expect([...listeners.values()].every((set) => set.size === 0)).toBe(true);
+});

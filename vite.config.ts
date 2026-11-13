@@ -25,9 +25,8 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,png,svg,webmanifest}'],
         navigateFallback: 'index.html',
-        // 새 버전은 열려 있는 탭을 건드리지 않고 다음에 열 때 적용한다.
-        skipWaiting: false,
-        clientsClaim: false,
+        // registerType 'autoUpdate'에서는 새 서비스 워커가 설치되자마자 바로 넘겨받는다(skipWaiting, clientsClaim).
+        // 이미 열려 있는 페이지는 읽어 둔 파일로 계속 돌고, 다음에 불러올 때부터 새 파일을 쓴다.
       },
     }),
   ],

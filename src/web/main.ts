@@ -9,6 +9,7 @@ import { mountCalendar } from './ui/calendar';
 import { mountEditor } from './ui/editor';
 import { mountSettings } from './ui/settings';
 import { parseHash } from './router';
+import { openStorage } from './storage';
 import { splitDateKey, todayKey } from '../core/dates';
 import { EMPTY_DAY } from '../core/types';
 import { FirestoreMonthStore } from '../sync/firestoreStore';
@@ -20,7 +21,8 @@ const { auth, db } = initFirebase(import.meta.env);
 function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
   const editedBy = deviceLabel(navigator.userAgent);
   const source = new FirestoreMonthStore(db, session.uid);
-  const outbox = new Outbox(localStorage, session.uid);
+  const storage = openStorage();
+  const outbox = new Outbox(storage.store, session.uid);
   const engine = new SyncEngine({ store: source, outbox, editedBy });
   const store = new CalendarStore({
     source,
@@ -56,7 +58,7 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
     settings = mountSettings(root, {
       email: session.email,
       pending: engine.status().pending,
-      storageOk: outbox.persistent,
+      storageOk: storage.persistent && outbox.persistent,
       corruptFound: outbox.corruptDetected,
       onClose: () => {
         closeSettings(); // 주소가 바뀌기를 기다리지 않고 바로 닫는다

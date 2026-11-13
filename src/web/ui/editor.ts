@@ -12,6 +12,14 @@ function titleOf(dateKey: string): string {
   return `${month}월 ${day}일 ${WEEKDAY_NAMES[date.getDay()]}요일`;
 }
 
+/** The part of window.visualViewport the editor uses. */
+export type VisualViewportLike = {
+  height: number;
+  offsetTop: number;
+  addEventListener(type: string, fn: () => void): void;
+  removeEventListener(type: string, fn: () => void): void;
+};
+
 export function mountEditor(
   root: HTMLElement,
   props: {
@@ -20,7 +28,9 @@ export function mountEditor(
     onSave(next: DayValue): void;
     onCancel(): void;
   },
+  env?: { visualViewport?: VisualViewportLike | null },
 ): { destroy(): void } {
+  const viewport = env?.visualViewport === undefined ? (window.visualViewport ?? null) : env.visualViewport;
   const previouslyFocused = document.activeElement as HTMLElement | null;
   const scrim = document.createElement('div');
   scrim.className = 'scrim';
@@ -115,7 +125,10 @@ export function mountEditor(
   });
   saveBtn.addEventListener('click', save);
   cancelBtn.addEventListener('click', cancel);
-  scrim.addEventListener('click', cancel);
+  // 바깥을 눌러 닫는 것은 고친 것이 없을 때만이다. 적던 글이 실수로 사라지지 않게 한다.
+  scrim.addEventListener('click', () => {
+    if (area.value === props.value.text && color === props.value.color) cancel();
+  });
   sheet.addEventListener('keydown', (e) => {
     if (e.isComposing) return; // 한글 조합 중의 Esc와 Ctrl+Enter는 조합을 끝내는 키다
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -141,6 +154,17 @@ export function mountEditor(
     }
   });
 
+  // 아이폰 Safari는 화상 키보드가 열려도 화면 단위(dvh)가 바뀌지 않는다. 보이는 영역을 CSS 변수로 넘겨
+  // 좁은 화면에서 시트의 아래 끝이 보이는 영역의 아래 끝에 오게 한다.
+  const followViewport = (): void => {
+    if (!viewport) return;
+    sheet.style.setProperty('--vv-height', `${viewport.height}px`);
+    sheet.style.setProperty('--vv-top', `${viewport.offsetTop}px`);
+  };
+  followViewport();
+  viewport?.addEventListener('resize', followViewport);
+  viewport?.addEventListener('scroll', followViewport);
+
   root.append(scrim, sheet);
   document.documentElement.classList.add('sheet-open');
   if (window.innerWidth >= WIDE_PX) {
@@ -152,6 +176,8 @@ export function mountEditor(
 
   return {
     destroy() {
+      viewport?.removeEventListener('resize', followViewport);
+      viewport?.removeEventListener('scroll', followViewport);
       document.documentElement.classList.remove('sheet-open');
       scrim.remove();
       sheet.remove();

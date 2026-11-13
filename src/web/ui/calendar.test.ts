@@ -1,4 +1,4 @@
-import { expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DayValue } from '../../core/types';
 import type { SyncStatus } from '../../sync/engine';
 import type { CalendarStore } from '../state';
@@ -75,4 +75,46 @@ it('읽기 문제를 보여 주고, 연결이 끊기거나 이어지면 상태�
   window.dispatchEvent(new Event('online'));
   expect(root.querySelector('.sync-text')!.textContent).toBe('동기화됨');
   onLine.mockRestore();
+});
+describe('날짜가 바뀌면', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('자정이 지나면 오늘 표시를 옮긴다', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 10, 13, 23, 59, 50));
+    const midnight = new Date(2026, 10, 14).getTime();
+    const root = document.createElement('div');
+    const handle = mountCalendar(root, {
+      store: fakeStore({}),
+      status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} },
+      today: () => (Date.now() < midnight ? '2026-11-13' : '2026-11-14'),
+      onOpenDay: vi.fn(),
+      onOpenSettings: vi.fn(),
+    });
+    expect(cell(root, '2026-11-13').classList.contains('today')).toBe(true);
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(cell(root, '2026-11-14').classList.contains('today')).toBe(true);
+    expect(cell(root, '2026-11-13').classList.contains('today')).toBe(false);
+    handle.destroy();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('다시 보이게 될 때 날짜가 바뀌었으면 다시 그린다', () => {
+    let today = '2026-11-13';
+    const root = document.createElement('div');
+    const handle = mountCalendar(root, {
+      store: fakeStore({}),
+      status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} },
+      today: () => today,
+      onOpenDay: vi.fn(),
+      onOpenSettings: vi.fn(),
+    });
+    today = '2026-11-14';
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(cell(root, '2026-11-14').classList.contains('today')).toBe(true);
+    const calendar = root.firstElementChild as HTMLElement;
+    handle.destroy();
+    today = '2026-11-15';
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(cell(calendar, '2026-11-15').classList.contains('today')).toBe(false);
+  });
 });

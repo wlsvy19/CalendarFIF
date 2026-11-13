@@ -66,6 +66,8 @@ export function mountCalendar(
     syncText.textContent = statusText(status, readProblem, online);
   }
 
+  let renderedToday = '';
+
   function render(): void {
     const monthId = store.current();
     const [year, month] = monthId.split('-');
@@ -73,6 +75,7 @@ export function mountCalendar(
     monthEl.textContent = `${Number(month)}월`;
     const cells = buildMonthGrid(monthId);
     const today = deps.today();
+    renderedToday = today;
     grid.style.setProperty('--rows', String(cells.length / 7));
 
     const daysByMonth = new Map<string, ReturnType<CalendarStore['days']>>();
@@ -185,6 +188,26 @@ export function mountCalendar(
   window.addEventListener('offline', onConnection);
   const onResize = (): void => render();
   window.addEventListener('resize', onResize);
+
+  // 창을 켜 둔 채 날짜가 바뀌어도 오늘 표시가 따라가게 한다. 자정 직후의 타이머는 숨은 탭에서 늦어질 수 있어
+  // 다시 보이게 될 때도 확인한다.
+  let midnightTimer: ReturnType<typeof setTimeout> | undefined;
+  const checkToday = (): void => {
+    if (deps.today() !== renderedToday) render();
+    armMidnight();
+  };
+  const armMidnight = (): void => {
+    if (midnightTimer !== undefined) clearTimeout(midnightTimer);
+    const now = new Date();
+    const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1);
+    midnightTimer = setTimeout(checkToday, next.getTime() - now.getTime());
+  };
+  const onVisibility = (): void => {
+    if (document.visibilityState === 'visible') checkToday();
+  };
+  document.addEventListener('visibilitychange', onVisibility);
+  armMidnight();
+
   root.appendChild(el);
   render(); // 붙인 뒤에 그려야 칸 높이를 잴 수 있다
 
@@ -195,6 +218,8 @@ export function mountCalendar(
       window.removeEventListener('online', onConnection);
       window.removeEventListener('offline', onConnection);
       window.removeEventListener('resize', onResize);
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (midnightTimer !== undefined) clearTimeout(midnightTimer);
       el.remove();
     },
   };

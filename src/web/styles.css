@@ -147,11 +147,12 @@ body {
 .sheet {
   position: fixed;
   z-index: 21;
-  top: calc(env(safe-area-inset-top, 0px) + 24px);
+  /* --vv-top, --vv-height: 편집 화면이 window.visualViewport에서 넘겨주는 보이는 영역. 없으면 화면 전체(dvh)를 쓴다. */
+  top: calc(var(--vv-top, 0px) + env(safe-area-inset-top, 0px) + 24px);
   left: 0;
   right: 0;
   height: calc(100vh - env(safe-area-inset-top, 0px) - 24px);
-  height: calc(100dvh - env(safe-area-inset-top, 0px) - 24px); /* 화상 키보드가 열려도 입력 칸이 가려지지 않게 dvh를 쓴다 */
+  height: calc(var(--vv-height, 100dvh) - env(safe-area-inset-top, 0px) - 24px);
   display: flex;
   flex-direction: column;
   gap: 16px;
