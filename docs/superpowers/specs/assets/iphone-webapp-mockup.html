@@ -1,0 +1,1194 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>달력 웹앱 아이폰 시안</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: 넓은 화면은 왼쪽에 아이폰 실물 비율 화면(창 높이에 맞춰 축소), 오른쪽에 설명 한 단.
+   좁은 화면은 테두리를 벗기고 화면만 카드로 쌓는다. */
+:root {
+  /* color */
+  --bg: #ECEFF3;
+  --surface: #FFFFFF;
+  --surface-2: #F3F5F8;
+  --ink: #151B26;
+  --muted: #5A6575;
+  --hairline: #DCE1E8;
+  --accent: #2550D0;
+  --on-accent: #FFFFFF;
+  --sun: #D4352C;
+  --sat: #2A5FD6;
+  --ok: #18915A;
+  --scrim: rgba(21, 27, 38, 0.38);
+  --shadow: rgba(21, 27, 38, 0.3);
+  --toast-bg: #151B26;
+  --toast-fg: #F3F5F8;
+  --device: #17191D;
+  --device-edge: #3B3F47;
+  --wall-a: #BFCFE5;
+  --wall-b: #E4EAF2;
+  --tile: rgba(255, 255, 255, 0.62);
+  --tile-label: rgba(21, 27, 38, 0.28);
+  --c-red: #FF9D93;
+  --c-orange: #FFC27A;
+  --c-yellow: #FFE477;
+  --c-green: #A5E2AD;
+  --c-blue: #A6C8FF;
+  --c-purple: #CDB4FF;
+  --c-gray: #D2D8E0;
+  /* type */
+  --font-display: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-body: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-app: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  /* device geometry: 402 x 874 pt screen plus an 11px bezel */
+  --dw: 424px;
+  --dh: 896px;
+  --s: 1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0D1116;
+    --surface: #161B22;
+    --surface-2: #1D232C;
+    --ink: #ECEFF4;
+    --muted: #9BA6B5;
+    --hairline: #2A313B;
+    --accent: #8DAEFF;
+    --on-accent: #0D1116;
+    --sun: #FF7F76;
+    --sat: #86ABFF;
+    --ok: #4BC78C;
+    --scrim: rgba(0, 0, 0, 0.55);
+    --shadow: rgba(0, 0, 0, 0.6);
+    --toast-bg: #ECEFF4;
+    --toast-fg: #151B26;
+    --device-edge: #4A4F59;
+    --wall-a: #1C2636;
+    --wall-b: #0F151E;
+    --tile: rgba(255, 255, 255, 0.13);
+    --tile-label: rgba(236, 239, 244, 0.28);
+    --c-red: #8C2F2A;
+    --c-orange: #86500F;
+    --c-yellow: #6C590C;
+    --c-green: #216538;
+    --c-blue: #224D94;
+    --c-purple: #533699;
+    --c-gray: #3D4550;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0D1116;
+  --surface: #161B22;
+  --surface-2: #1D232C;
+  --ink: #ECEFF4;
+  --muted: #9BA6B5;
+  --hairline: #2A313B;
+  --accent: #8DAEFF;
+  --on-accent: #0D1116;
+  --sun: #FF7F76;
+  --sat: #86ABFF;
+  --ok: #4BC78C;
+  --scrim: rgba(0, 0, 0, 0.55);
+  --shadow: rgba(0, 0, 0, 0.6);
+  --toast-bg: #ECEFF4;
+  --toast-fg: #151B26;
+  --device-edge: #4A4F59;
+  --wall-a: #1C2636;
+  --wall-b: #0F151E;
+  --tile: rgba(255, 255, 255, 0.13);
+  --tile-label: rgba(236, 239, 244, 0.28);
+  --c-red: #8C2F2A;
+  --c-orange: #86500F;
+  --c-yellow: #6C590C;
+  --c-green: #216538;
+  --c-blue: #224D94;
+  --c-purple: #533699;
+  --c-gray: #3D4550;
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  -webkit-text-size-adjust: 100%;
+  padding-block: 24px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- page ---------- */
+.page { max-width: 402px; margin-inline: auto; display: grid; gap: 22px; }
+.intro { display: grid; gap: 10px; justify-items: start; min-width: 0; }
+.eyebrow {
+  margin: 0;
+  padding: 2px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+h1 {
+  margin: 0;
+  font: 600 1.75rem/1.3 var(--font-display);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.lead { margin: 0; max-width: 34rem; }
+
+.stage { display: grid; gap: 14px; justify-items: center; min-width: 0; }
+
+.viewswitch {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.viewswitch button {
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--muted);
+  font: 500 0.8125rem/1 var(--font-body);
+  padding: 9px 14px;
+  cursor: pointer;
+}
+.viewswitch button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+
+.notes { display: grid; gap: 32px; max-width: 34rem; min-width: 0; }
+.notes section { display: grid; gap: 12px; }
+.notes h2 { margin: 0; font: 600 1.0625rem/1.4 var(--font-display); }
+.notes p { margin: 0; }
+.notes ul, .notes ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.notes li { position: relative; }
+.notes ul li { padding-left: 1.25em; }
+.notes ul li::before {
+  content: "";
+  position: absolute;
+  left: 0.3em;
+  top: 0.75em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.notes ol { counter-reset: step; }
+.notes ol li { counter-increment: step; padding-left: 2.1em; }
+.notes ol li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0.22em;
+  width: 1.55em;
+  height: 1.55em;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--muted);
+  font: 600 0.75rem/1.45em var(--font-body);
+  text-align: center;
+}
+.notes strong { font-weight: 700; }
+
+.demo {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.btn {
+  justify-self: start;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: 600 0.9375rem/1.2 var(--font-body);
+  padding: 11px 16px;
+  cursor: pointer;
+}
+.btn:disabled { opacity: 0.55; cursor: default; }
+.demo-status { font-size: 0.8125rem; color: var(--muted); }
+
+/* ---------- device ---------- */
+.device-slot { width: calc(var(--dw) * var(--s)); height: calc(var(--dh) * var(--s)); }
+.device {
+  width: var(--dw);
+  height: var(--dh);
+  padding: 11px;
+  border-radius: 62px;
+  background: var(--device);
+  box-shadow: 0 0 0 1px var(--device-edge), 0 30px 50px -28px var(--shadow);
+  transform: scale(var(--s));
+  transform-origin: 0 0;
+}
+.screen {
+  position: relative;
+  isolation: isolate;
+  width: 402px;
+  height: 874px;
+  border-radius: 51px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-app);
+  line-height: 1.3;
+  word-break: normal;
+}
+.screen[data-view="home"] { background: linear-gradient(165deg, var(--wall-a), var(--wall-b)); }
+
+.statusbar {
+  flex: none;
+  height: 54px;
+  padding: 8px 30px 0 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.island {
+  position: absolute;
+  z-index: 30;
+  top: 11px;
+  left: 50%;
+  width: 122px;
+  height: 35px;
+  margin-left: -61px;
+  border-radius: 18px;
+  background: var(--device);
+}
+.homebar {
+  position: absolute;
+  z-index: 30;
+  bottom: 8px;
+  left: 50%;
+  width: 138px;
+  height: 5px;
+  margin-left: -69px;
+  border-radius: 3px;
+  background: var(--ink);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+/* ---------- app ---------- */
+.app {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 22px;
+  background: var(--surface);
+}
+.app.launch { animation: launch 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes launch { from { transform: scale(0.86); opacity: 0; } }
+
+.app-head {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  padding: 2px 12px 10px 18px;
+}
+.app-meta {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.app-head h2 { margin: 0; font-size: 30px; line-height: 1.15; font-weight: 700; letter-spacing: -0.02em; }
+.app-nav { display: flex; align-items: center; gap: 2px; }
+.pill {
+  height: 34px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 17px;
+  background: var(--surface-2);
+  color: var(--accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.iconbtn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.sync { display: inline-flex; align-items: center; gap: 5px; }
+.sync i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.sync[data-state="busy"] i { background: var(--accent); animation: blink 0.7s ease-in-out infinite alternate; }
+@keyframes blink { to { opacity: 0.25; } }
+
+.dow {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--hairline);
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.dow span:first-child { color: var(--sun); }
+.dow span:last-child { color: var(--sat); }
+
+.grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-rows: repeat(var(--rows, 5), minmax(0, 1fr));
+  gap: 1px;
+  background: var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  touch-action: pan-y;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.cell {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+  padding: 4px 3px 2px;
+  border: 0;
+  border-radius: 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.cell:focus-visible { outline-offset: -2px; }
+.cell[data-color="red"] { background: var(--c-red); }
+.cell[data-color="orange"] { background: var(--c-orange); }
+.cell[data-color="yellow"] { background: var(--c-yellow); }
+.cell[data-color="green"] { background: var(--c-green); }
+.cell[data-color="blue"] { background: var(--c-blue); }
+.cell[data-color="purple"] { background: var(--c-purple); }
+.cell[data-color="gray"] { background: var(--c-gray); }
+.cell.flash { animation: flash 1.8s ease-out; }
+@keyframes flash {
+  0%, 55% { box-shadow: inset 0 0 0 3px var(--accent); }
+  100% { box-shadow: inset 0 0 0 3px transparent; }
+}
+
+.num {
+  flex: none;
+  align-self: flex-start;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.cell.sun .num { color: var(--sun); }
+.cell.sat .num { color: var(--sat); }
+.cell[data-color] .num { color: var(--ink); }
+.cell.today .num { background: var(--accent); color: var(--on-accent); }
+.cell.other .num, .cell.other .memo { opacity: 0.4; }
+
+.memo { display: block; min-height: 0; overflow: hidden; }
+.ln {
+  display: block;
+  height: 13px;
+  font-size: 10px;
+  line-height: 13px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ln.cut {
+  -webkit-mask-image: linear-gradient(to right, #000 78%, transparent);
+  mask-image: linear-gradient(to right, #000 78%, transparent);
+}
+.ln.more { opacity: 0.65; font-weight: 600; }
+
+.toast {
+  position: absolute;
+  z-index: 15;
+  left: 50%;
+  bottom: 36px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  padding: 9px 15px;
+  border-radius: 999px;
+  background: var(--toast-bg);
+  color: var(--toast-fg);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 8px 20px -10px var(--shadow);
+  animation: toast-in 0.22s ease-out;
+}
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
+
+/* ---------- editor sheet ---------- */
+.scrim { position: absolute; z-index: 20; inset: 0; background: var(--scrim); }
+.sheet {
+  position: absolute;
+  z-index: 21;
+  inset: 50px 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 6px 16px 28px;
+  border-radius: 18px 18px 0 0;
+  background: var(--surface);
+  box-shadow: 0 -10px 30px -16px var(--shadow);
+  animation: sheet-in 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.sheet:focus { outline: none; }
+@keyframes sheet-in { from { transform: translateY(28px); opacity: 0; } }
+.sheet-bar {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  min-height: 44px;
+}
+.sheet-bar h3 { margin: 0; font-size: 16px; font-weight: 600; }
+.textbtn {
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 16px;
+  padding: 8px 4px;
+  cursor: pointer;
+}
+.textbtn.start { justify-self: start; }
+.textbtn.end { justify-self: end; font-weight: 700; }
+.field { display: grid; gap: 8px; min-height: 0; }
+.field.grow { flex: 1; grid-template-rows: auto minmax(0, 1fr); }
+.field-label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.swatches { display: flex; flex-wrap: wrap; gap: 10px; padding: 4px; margin: -4px; }
+.swatch {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  background: var(--sw, var(--surface));
+  cursor: pointer;
+}
+.swatch.none {
+  background:
+    linear-gradient(to top right, transparent calc(50% - 1px), var(--sun) calc(50% - 1px), var(--sun) calc(50% + 1px), transparent calc(50% + 1px)),
+    var(--surface);
+}
+.swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.memo-input {
+  width: 100%;
+  min-height: 140px;
+  resize: none;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.memo-input:focus-visible { outline-offset: 0; }
+
+/* ---------- home screen ---------- */
+.home { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 30px 24px; }
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 26px; justify-items: center; }
+.tile { display: grid; justify-items: center; gap: 7px; }
+.tile i { display: block; width: 62px; height: 62px; border-radius: 15px; background: var(--tile); font-style: normal; }
+.tile b { display: block; width: 36px; height: 6px; margin-block: 3px; border-radius: 3px; background: var(--tile-label); }
+button.tile { border: 0; border-radius: 15px; padding: 0; background: none; color: var(--ink); font: inherit; cursor: pointer; }
+button.tile i {
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 27px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 8px 16px -8px var(--shadow);
+}
+button.tile span { height: 12px; font-size: 12px; font-weight: 500; line-height: 12px; }
+.home-hint { margin: auto 0 18px; text-align: center; font-size: 13px; font-weight: 500; opacity: 0.75; }
+.dock {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  justify-items: center;
+  padding: 14px 10px;
+  border-radius: 34px;
+  background: var(--tile);
+}
+.dock i { display: block; width: 62px; height: 62px; border-radius: 15px; background: var(--tile); }
+
+/* ---------- wide: phone on the left, notes on the right ---------- */
+@media (min-width: 880px) {
+  body {
+    padding-left: max(40px, env(safe-area-inset-left, 0px));
+    padding-right: max(40px, env(safe-area-inset-right, 0px));
+  }
+  .page {
+    max-width: 1040px;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    grid-template-areas: "stage intro" "stage notes";
+    column-gap: 64px;
+    row-gap: 30px;
+    align-items: start;
+  }
+  .stage { grid-area: stage; }
+  .stage.fits { position: sticky; top: 24px; }
+  .intro { grid-area: intro; padding-top: 28px; }
+  .notes { grid-area: notes; }
+}
+
+/* ---------- narrow: no bezel, the screen becomes a card ---------- */
+@media (max-width: 879.98px) {
+  .stage { justify-items: stretch; }
+  .device-slot { width: auto; height: auto; }
+  .device { width: auto; height: auto; padding: 0; border-radius: 0; background: none; box-shadow: none; transform: none; }
+  .screen { width: auto; height: auto; border: 1px solid var(--hairline); border-radius: 20px; }
+  .statusbar, .island, .homebar, .viewswitch, .wide-only { display: none; }
+  .app { padding-top: 12px; padding-bottom: 0; }
+  .grid { flex: none; grid-template-rows: none; grid-auto-rows: 112px; border-bottom: 0; }
+  .scrim { position: fixed; }
+  .sheet {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 24px);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  }
+  .toast { position: fixed; bottom: calc(env(safe-area-inset-bottom, 0px) + 20px); }
+  :root.sheet-open { overflow: hidden; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet, .toast, .app.launch, .sync[data-state="busy"] i { animation: none; }
+  .cell.flash { animation: none; box-shadow: inset 0 0 0 3px var(--accent); }
+}
+</style>
+
+<div class="page">
+  <header class="intro">
+    <p class="eyebrow">시안 · 예시 데이터</p>
+    <h1>아이폰에서 보는 웹앱 달력</h1>
+    <p class="lead">홈 화면에 추가한 웹앱이 아이폰에서 어떻게 보이는지 눌러 볼 수 있습니다. 메모는 예시이고, 저장과 동기화는 흉내만 냅니다.</p>
+  </header>
+
+  <div class="stage" id="stage">
+    <div class="device-slot" id="slot">
+      <div class="device">
+        <div class="screen" id="screen" data-view="app">
+          <div class="statusbar" aria-hidden="true">
+            <span id="clock">10:28</span>
+            <svg viewBox="0 0 66 14" width="66" height="14" fill="currentColor">
+              <rect x="0" y="9" width="3" height="5" rx="1"></rect>
+              <rect x="5" y="6.5" width="3" height="7.5" rx="1"></rect>
+              <rect x="10" y="3.5" width="3" height="10.5" rx="1"></rect>
+              <rect x="15" y="0.5" width="3" height="13.5" rx="1"></rect>
+              <rect x="38.5" y="1" width="23" height="12" rx="3.5" fill="none" stroke="currentColor" opacity="0.45"></rect>
+              <rect x="40.5" y="3" width="17" height="8" rx="2"></rect>
+              <rect x="63" y="4.5" width="2" height="5" rx="1" opacity="0.45"></rect>
+            </svg>
+          </div>
+          <div class="island" aria-hidden="true"></div>
+
+          <section class="app" id="app" aria-label="달력 앱 화면">
+            <div class="app-head">
+              <div class="app-meta">
+                <span id="yearLabel">2026년</span>
+                <span class="sync" id="sync" data-state="ok"><i></i><span id="syncText">동기화됨</span></span>
+              </div>
+              <h2 id="monthLabel">11월</h2>
+              <div class="app-nav">
+                <button type="button" class="pill" id="todayBtn">오늘</button>
+                <button type="button" class="iconbtn" id="prevBtn" aria-label="이전 달">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>
+                </button>
+                <button type="button" class="iconbtn" id="nextBtn" aria-label="다음 달">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg>
+                </button>
+              </div>
+            </div>
+            <div class="dow" aria-hidden="true"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>
+            <div class="grid" id="grid"></div>
+            <div class="toast" id="toast" aria-hidden="true" hidden></div>
+          </section>
+
+          <section class="home" id="home" aria-label="아이폰 홈 화면 예시" hidden>
+            <div class="tiles">
+              <span class="tile"><i></i><b></b></span>
+              <span class="tile"><i></i><b></b></span>
+              <span class="tile"><i></i><b></b></span>
+              <span class="tile"><i></i><b></b></span>
+              <span class="tile"><i></i><b></b></span>
+              <span class="tile"><i></i><b></b></span>
+              <button type="button" class="tile" id="ourIcon" aria-label="달력 앱 열기"><i id="ourIconDay">13</i><span>달력</span></button>
+              <span class="tile"><i></i><b></b></span>
+              <span class="tile"><i></i><b></b></span>
+              <span class="tile"><i></i><b></b></span>
+              <span class="tile"><i></i><b></b></span>
+              <span class="tile"><i></i><b></b></span>
+            </div>
+            <p class="home-hint">달력 아이콘을 눌러 보세요</p>
+            <div class="dock" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+          </section>
+
+          <div class="scrim" id="scrim" hidden></div>
+          <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" tabindex="-1" hidden>
+            <div class="sheet-bar">
+              <button type="button" class="textbtn start" id="cancelBtn">취소</button>
+              <h3 id="sheetTitle">날짜</h3>
+              <button type="button" class="textbtn end" id="doneBtn">완료</button>
+            </div>
+            <div class="field">
+              <span class="field-label" id="colorLabel">배경색</span>
+              <div class="swatches" id="swatches" role="radiogroup" aria-labelledby="colorLabel"></div>
+            </div>
+            <div class="field grow">
+              <label class="field-label" for="memoInput">메모</label>
+              <textarea class="memo-input" id="memoInput" placeholder="한 줄에 하나씩 적으세요"></textarea>
+            </div>
+          </div>
+
+          <div class="homebar" aria-hidden="true"></div>
+        </div>
+      </div>
+    </div>
+    <div class="viewswitch" role="group" aria-label="아이폰 화면 전환">
+      <button type="button" data-view="app" aria-pressed="true">달력 화면</button>
+      <button type="button" data-view="home" aria-pressed="false">홈 화면 아이콘</button>
+    </div>
+  </div>
+
+  <div class="notes">
+    <section>
+      <h2>눌러 보기</h2>
+      <ul>
+        <li>날짜를 누르면 메모와 배경색을 고칠 수 있습니다.</li>
+        <li>‹ ›를 누르거나 달력을 좌우로 밀면 달이 바뀝니다.</li>
+      </ul>
+      <div class="demo">
+        <p>PC에서 저장하면 열려 있는 아이폰 화면이 바로 바뀝니다. 아래 버튼으로 그 모습을 볼 수 있습니다.</p>
+        <button type="button" class="btn" id="remoteBtn">PC에서 수정한 것처럼 해 보기</button>
+        <p class="demo-status" id="remoteStatus" role="status" aria-live="polite">버튼을 누르면 약 1초 뒤에 화면이 바뀝니다.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>설치 방법</h2>
+      <ol>
+        <li>Safari에서 앱 주소를 엽니다.</li>
+        <li>공유 버튼을 누르고 <strong>홈 화면에 추가</strong>를 고릅니다.</li>
+        <li>홈 화면의 아이콘으로 실행합니다. 주소창 없이 전체 화면으로 열립니다.</li>
+      </ol>
+      <p class="wide-only">아이폰 화면 아래의 <strong>홈 화면 아이콘</strong>을 누르면 아이콘이 놓인 모습을 볼 수 있습니다.</p>
+    </section>
+
+    <section>
+      <h2>앱스토어 앱과 다른 점</h2>
+      <ul>
+        <li>홈 화면 위젯과 잠금 화면 위젯은 만들 수 없습니다.</li>
+        <li>앱이 닫혀 있는 동안에는 동기화하지 않습니다. 열면 바로 최신 내용으로 맞춥니다.</li>
+        <li>알림은 서버에서 보내 주는 방식만 됩니다. 이번 범위에는 넣지 않았습니다.</li>
+        <li>앱스토어 심사 없이 설치하고, 고친 내용도 바로 반영됩니다.</li>
+      </ul>
+    </section>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+  const root = document.documentElement;
+  root.lang = 'ko';
+
+  const $ = (id) => document.getElementById(id);
+  const slot = $('slot');
+  const stage = $('stage');
+  const screenEl = $('screen');
+  const app = $('app');
+  const home = $('home');
+  const grid = $('grid');
+  const sheet = $('sheet');
+  const scrim = $('scrim');
+  const memoInput = $('memoInput');
+  const swatches = $('swatches');
+  const sync = $('sync');
+  const syncText = $('syncText');
+  const toastEl = $('toast');
+  const remoteBtn = $('remoteBtn');
+  const remoteStatus = $('remoteStatus');
+  const viewBtns = Array.from(document.querySelectorAll('.viewswitch button'));
+  const wide = window.matchMedia('(min-width: 880px)');
+
+  const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
+  const COLORS = [
+    { id: '', name: '없음' },
+    { id: 'red', name: '빨강' },
+    { id: 'orange', name: '주황' },
+    { id: 'yellow', name: '노랑' },
+    { id: 'green', name: '초록' },
+    { id: 'blue', name: '파랑' },
+    { id: 'purple', name: '보라' },
+    { id: 'gray', name: '회색' },
+  ];
+  const colorName = (id) => (COLORS.find((c) => c.id === id) || COLORS[0]).name;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  let view = new Date(today.getFullYear(), today.getMonth(), 1);
+  const data = new Map(); // 'YYYY-MM-DD' -> { text, color }
+
+  const pad = (n) => String(n).padStart(2, '0');
+  const keyOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const dateOf = (k) => {
+    const [y, m, d] = k.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+  const dayLabel = (d) => `${d.getMonth() + 1}월 ${d.getDate()}일`;
+
+  /* ----- example data, placed in the current month ----- */
+  function seed() {
+    data.clear();
+    const y = today.getFullYear();
+    const m = today.getMonth();
+    const dim = new Date(y, m + 1, 0).getDate();
+    const add = (n, text, color) => {
+      const k = keyOf(new Date(y, m, Math.min(n, dim)));
+      const cur = data.get(k);
+      data.set(k, {
+        text: cur ? `${cur.text}\n${text}` : text,
+        color: color || (cur ? cur.color : ''),
+      });
+    };
+    for (let n = 1; n <= dim; n++) {
+      if (new Date(y, m, n).getDay() === 1) add(n, '09:00 주간 회의');
+    }
+    add(3, '점심 약속 12:00');
+    add(5, '치과 14:30', 'blue');
+    add(6, '세탁소 들르기\n장보기');
+    add(7, '가족 저녁', 'yellow');
+    add(9, '견적서 보내기\n메일 답장');
+    add(11, '배포 점검\n백업 확인', 'green');
+    add(14, '결혼식 13:00', 'red');
+    add(18, '건강검진 08:30\n전날 저녁 금식', 'orange');
+    add(20, '월간 보고 마감', 'red');
+    add(21, '등산');
+    add(23, '분기 계획 정리');
+    add(25, '자동차 보험 갱신', 'purple');
+    add(27, '회식 19:00');
+    add(28, '대청소', 'gray');
+    add(today.getDate(), '10:00 디자인 리뷰\n택배 받기\n운동');
+    data.set(keyOf(new Date(y, m + 1, 3)), { text: '세금 납부', color: '' });
+  }
+
+  /* ----- month grid ----- */
+  function render() {
+    const y = view.getFullYear();
+    const m = view.getMonth();
+    $('yearLabel').textContent = `${y}년`;
+    $('monthLabel').textContent = `${m + 1}월`;
+
+    const lead = new Date(y, m, 1).getDay();
+    const dim = new Date(y, m + 1, 0).getDate();
+    const rows = Math.ceil((lead + dim) / 7);
+    grid.style.setProperty('--rows', String(rows));
+
+    const cells = [];
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < rows * 7; i++) {
+      const d = new Date(y, m, 1 - lead + i);
+      const k = keyOf(d);
+      const rec = data.get(k);
+      const lines = rec && rec.text ? rec.text.split('\n').filter((s) => s.trim()) : [];
+
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      cell.className = 'cell';
+      cell.dataset.key = k;
+      if (d.getMonth() !== m) cell.classList.add('other');
+      if (d.getDay() === 0) cell.classList.add('sun');
+      if (d.getDay() === 6) cell.classList.add('sat');
+      if (d.getTime() === today.getTime()) cell.classList.add('today');
+      if (rec && rec.color) cell.dataset.color = rec.color;
+      cell.setAttribute(
+        'aria-label',
+        `${dayLabel(d)} ${WEEK[d.getDay()]}요일` +
+          (rec && rec.color ? `, 배경 ${colorName(rec.color)}` : '') +
+          (lines.length ? `, 메모 ${lines.length}줄` : ', 메모 없음')
+      );
+
+      const num = document.createElement('span');
+      num.className = 'num';
+      num.textContent = String(d.getDate());
+      cell.append(num);
+
+      cells.push({ cell, lines });
+      frag.append(cell);
+    }
+    grid.replaceChildren(frag);
+
+    // How many memo lines fit under the date number in one cell.
+    const cellH = cells[0].cell.clientHeight;
+    const maxLines = Math.max(1, Math.floor((cellH - 30) / 13));
+    const lineEls = [];
+    for (const { cell, lines } of cells) {
+      if (!lines.length) continue;
+      const box = document.createElement('span');
+      box.className = 'memo';
+      const shown = lines.length > maxLines ? lines.slice(0, maxLines - 1) : lines;
+      for (const text of shown) {
+        const ln = document.createElement('span');
+        ln.className = 'ln';
+        ln.textContent = text;
+        box.append(ln);
+        lineEls.push(ln);
+      }
+      if (lines.length > shown.length) {
+        const more = document.createElement('span');
+        more.className = 'ln more';
+        more.textContent = `+${lines.length - shown.length}`;
+        box.append(more);
+      }
+      cell.append(box);
+    }
+    const cut = lineEls.filter((el) => el.scrollWidth > el.clientWidth);
+    for (const el of cut) el.classList.add('cut');
+  }
+
+  function go(step) {
+    view = new Date(view.getFullYear(), view.getMonth() + step, 1);
+    render();
+  }
+
+  /* ----- sync indicator and toast ----- */
+  let syncTimer = 0;
+  function setSync(state, label) {
+    sync.dataset.state = state;
+    syncText.textContent = label;
+  }
+  let toastTimer = 0;
+  function toast(message) {
+    toastEl.textContent = message;
+    toastEl.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toastEl.hidden = true; }, 2600);
+  }
+  function flash(k) {
+    const cell = grid.querySelector(`[data-key="${k}"]`);
+    if (!cell) return;
+    cell.classList.add('flash');
+    setTimeout(() => cell.classList.remove('flash'), 2000);
+  }
+
+  /* ----- day editor ----- */
+  let editing = null;
+  let draftColor = '';
+
+  for (const c of COLORS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = c.id ? 'swatch' : 'swatch none';
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-label', c.name);
+    b.title = c.name;
+    b.dataset.color = c.id;
+    if (c.id) b.style.setProperty('--sw', `var(--c-${c.id})`);
+    swatches.append(b);
+  }
+  function paintSwatches() {
+    for (const b of swatches.children) {
+      const on = b.dataset.color === draftColor;
+      b.setAttribute('aria-checked', String(on));
+      b.tabIndex = on ? 0 : -1;
+    }
+  }
+
+  function openSheet(k) {
+    const d = dateOf(k);
+    const rec = data.get(k) || { text: '', color: '' };
+    editing = k;
+    draftColor = rec.color;
+    $('sheetTitle').textContent = `${dayLabel(d)} ${WEEK[d.getDay()]}요일`;
+    memoInput.value = rec.text;
+    paintSwatches();
+    scrim.hidden = false;
+    sheet.hidden = false;
+    root.classList.add('sheet-open');
+    if (wide.matches) {
+      memoInput.focus();
+      memoInput.setSelectionRange(memoInput.value.length, memoInput.value.length);
+    } else {
+      sheet.focus();
+    }
+  }
+
+  function closeSheet(save) {
+    if (!editing) return;
+    const k = editing;
+    editing = null;
+    sheet.hidden = true;
+    scrim.hidden = true;
+    root.classList.remove('sheet-open');
+    if (save) {
+      const text = memoInput.value
+        .replace(/\r/g, '')
+        .split('\n')
+        .map((s) => s.replace(/\s+$/, ''))
+        .join('\n')
+        .replace(/^\n+|\n+$/g, '');
+      const prev = data.get(k) || { text: '', color: '' };
+      if (prev.text !== text || prev.color !== draftColor) {
+        if (text || draftColor) data.set(k, { text, color: draftColor });
+        else data.delete(k);
+        render();
+        setSync('busy', '동기화 중…');
+        clearTimeout(syncTimer);
+        syncTimer = setTimeout(() => setSync('ok', '동기화됨'), 900);
+      }
+    }
+    const cell = grid.querySelector(`[data-key="${k}"]`);
+    if (cell) cell.focus({ preventScroll: true });
+  }
+
+  swatches.addEventListener('click', (e) => {
+    const b = e.target.closest('.swatch');
+    if (!b) return;
+    draftColor = b.dataset.color;
+    paintSwatches();
+  });
+  swatches.addEventListener('keydown', (e) => {
+    const step =
+      e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 :
+      e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+    if (!step) return;
+    e.preventDefault();
+    const list = Array.from(swatches.children);
+    const i = list.findIndex((b) => b.dataset.color === draftColor);
+    const next = list[(i + step + list.length) % list.length];
+    draftColor = next.dataset.color;
+    paintSwatches();
+    next.focus();
+  });
+
+  sheet.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      closeSheet(true);
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const stops = Array.from(sheet.querySelectorAll('button, textarea')).filter((el) => el.tabIndex >= 0);
+    const first = stops[0];
+    const last = stops[stops.length - 1];
+    if (e.shiftKey && (document.activeElement === first || document.activeElement === sheet)) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && editing) {
+      e.preventDefault();
+      closeSheet(false);
+    }
+  });
+  $('cancelBtn').addEventListener('click', () => closeSheet(false));
+  $('doneBtn').addEventListener('click', () => closeSheet(true));
+  scrim.addEventListener('click', () => closeSheet(false));
+
+  /* ----- month navigation: buttons and swipe ----- */
+  $('prevBtn').addEventListener('click', () => go(-1));
+  $('nextBtn').addEventListener('click', () => go(1));
+  $('todayBtn').addEventListener('click', () => {
+    view = new Date(today.getFullYear(), today.getMonth(), 1);
+    render();
+  });
+
+  let down = null;
+  let swiped = false;
+  grid.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY }; });
+  grid.addEventListener('pointercancel', () => { down = null; });
+  grid.addEventListener('pointerup', (e) => {
+    if (!down) return;
+    const dx = e.clientX - down.x;
+    const dy = e.clientY - down.y;
+    down = null;
+    if (Math.abs(dx) > 44 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      swiped = true;
+      setTimeout(() => { swiped = false; }, 0);
+      go(dx < 0 ? 1 : -1);
+    }
+  });
+  grid.addEventListener('click', (e) => {
+    if (swiped) return;
+    const cell = e.target.closest('.cell');
+    if (cell) openSheet(cell.dataset.key);
+  });
+
+  /* ----- calendar screen / home screen ----- */
+  function setView(name) {
+    if (!wide.matches) name = 'app';
+    if (name === 'home') closeSheet(false);
+    screenEl.dataset.view = name;
+    home.hidden = name !== 'home';
+    app.hidden = name !== 'app';
+    for (const b of viewBtns) b.setAttribute('aria-pressed', String(b.dataset.view === name));
+    if (name === 'app') render();
+  }
+  for (const b of viewBtns) b.addEventListener('click', () => setView(b.dataset.view));
+  $('ourIcon').addEventListener('click', () => {
+    setView('app');
+    app.classList.add('launch');
+  });
+  app.addEventListener('animationend', (e) => {
+    if (e.animationName === 'launch') app.classList.remove('launch');
+  });
+
+  /* ----- a change arriving from the PC ----- */
+  const REMOTE_LABEL = remoteBtn.textContent;
+  const REMOTE_STEPS = [
+    { offset: 4, text: '고객사 미팅 15:00', color: 'red' },
+    { offset: 6, text: '자료 검토', color: 'green' },
+    { offset: 4, text: null, color: 'blue' },
+  ];
+  let remoteIndex = 0;
+
+  remoteBtn.addEventListener('click', () => {
+    if (remoteIndex >= REMOTE_STEPS.length) {
+      seed();
+      remoteIndex = 0;
+      view = new Date(today.getFullYear(), today.getMonth(), 1);
+      if (editing) closeSheet(false);
+      setView('app');
+      remoteBtn.textContent = REMOTE_LABEL;
+      remoteStatus.textContent = '처음 상태로 되돌렸습니다.';
+      return;
+    }
+    const step = REMOTE_STEPS[remoteIndex++];
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + step.offset);
+    const k = keyOf(d);
+    remoteBtn.disabled = true;
+    remoteStatus.textContent = 'PC에서 저장했습니다. 아이폰으로 보내는 중입니다.';
+    setSync('busy', '받는 중…');
+    setTimeout(() => {
+      const prev = data.get(k) || { text: '', color: '' };
+      const text = step.text === null ? prev.text : (prev.text ? `${prev.text}\n${step.text}` : step.text);
+      data.set(k, { text, color: step.color });
+      if (editing) closeSheet(false);
+      view = new Date(d.getFullYear(), d.getMonth(), 1);
+      setView('app');
+      flash(k);
+      toast(`PC에서 변경됨 · ${dayLabel(d)}`);
+      clearTimeout(syncTimer);
+      setSync('ok', '동기화됨');
+      remoteStatus.textContent = step.text === null
+        ? `${dayLabel(d)} 배경이 ${colorName(step.color)}으로 바뀌었습니다.`
+        : `${dayLabel(d)}에 메모가 들어오고 배경이 ${colorName(step.color)}으로 바뀌었습니다.`;
+      remoteBtn.disabled = false;
+      if (remoteIndex >= REMOTE_STEPS.length) remoteBtn.textContent = '처음 상태로 되돌리기';
+    }, 900);
+  });
+
+  /* ----- fit the phone to the window height ----- */
+  const MIN_SCALE = 0.8;
+  const DEVICE_H = 896;
+  const RESERVE = 104; // page padding plus the view switch under the phone
+  function fit() {
+    if (wide.matches) {
+      const raw = (window.innerHeight - RESERVE) / DEVICE_H;
+      const s = Math.max(MIN_SCALE, Math.min(1, raw));
+      slot.style.setProperty('--s', s.toFixed(3));
+      stage.classList.toggle('fits', raw >= MIN_SCALE);
+    } else {
+      slot.style.removeProperty('--s');
+      stage.classList.remove('fits');
+      if (screenEl.dataset.view !== 'app') setView('app');
+    }
+  }
+
+  let raf = 0;
+  function refresh() {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => {
+      fit();
+      render();
+    });
+  }
+  window.addEventListener('resize', refresh);
+
+  /* ----- status bar clock and home icon ----- */
+  function tick() {
+    const now = new Date();
+    $('clock').textContent = `${now.getHours()}:${pad(now.getMinutes())}`;
+  }
+  tick();
+  setInterval(tick, 30000);
+  $('ourIconDay').textContent = String(today.getDate());
+
+  /* ----- start ----- */
+  seed();
+  fit();
+  render();
+
+  // Fonts load without blocking the first paint; re-measure the grid when they arrive.
+  const fontLink = document.createElement('link');
+  fontLink.rel = 'stylesheet';
+  fontLink.href = 'https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@500;600&family=Noto+Sans+KR:wght@400;500;700&display=swap';
+  document.head.append(fontLink);
+  if (document.fonts && document.fonts.addEventListener) {
+    document.fonts.addEventListener('loadingdone', refresh);
+  }
+})();
+</script>
+
+</body></html>
