@@ -19,9 +19,9 @@ Windows PC와 아이폰에서 날짜별 메모와 날짜 배경색을 양방향�
 | `npm run test:emu` | 에뮬레이터로 규칙과 동기화 테스트를 돌린다. |
 | `npm run dev:desktop-emu` | 에뮬레이터에 예시 데이터를 넣고 PC 앱 화면을 브라우저에서 띄운다. |
 | `npm run desktop:emu` | 에뮬레이터에 붙여 PC 앱을 Electron으로 띄운다(시험용 계정으로 자동 로그인). |
-| `npm run desktop:smoke` | PC 앱을 에뮬레이터에 붙여 자동으로 점검하고 결과를 `build/desktop-smoke/`에 적는다. `CALFIF_SMOKE=attach`(기본), `bounds`, `tray`, `settings`, `e2e` 중 하나를 고른다. |
+| `npm run desktop:smoke` | PC 앱을 에뮬레이터에 붙여 자동으로 점검하고 결과를 `build/desktop-smoke/`에 적는다. PowerShell에서 `$env:CALFIF_SMOKE='attach'; npm run desktop:smoke`처럼 환경 변수로 `attach`(기본), `bounds`, `tray`, `settings`, `e2e` 중 하나를 고른다. |
 | `npm run desktop:pack:emu` | 에뮬레이터용으로 꾼 앱을 `build/release-emu/`에 만든다. 실제 프로젝트에는 붙지 않고 Windows 시작 시 실행도 걸지 않는다. |
-| `npm run desktop:pack:check` | 위에서 꾼 앱을 시험 실행으로 점검한다. `CALFIF_SMOKE=e2e`를 붙이면 에뮬레이터에서 한 편집이 5초 안에 오가는지까지 본다. |
+| `npm run desktop:pack:check` | 위에서 꾼 앱을 시험 실행으로 점검한다. `$env:CALFIF_SMOKE='e2e'; npm run desktop:pack:check`로 돌리면 에뮬레이터에서 한 편집이 5초 안에 오가는지까지 본다. |
 
 에뮬레이터에는 Java 21 이상이 필요하다. PC의 Java가 더 낮으면 `npx tsx scripts/jdk.ts`가 JDK 21을 `.tools/`에 내려받는다.
 
@@ -77,7 +77,7 @@ Safari에서 주소를 열고 로그인한 뒤 공유 버튼으로 홈 화면에
 `npm run desktop:pack`은 `release/CalendarFIF-win32-x64/` 폴더를 만든다. 서명은 하지 않고 설치 프로그램도 없다.
 
 1. 이 폴더를 원하는 곳(예: `C:\Apps\CalendarFIF`)에 통째로 옮긴다.
-2. 그 안의 `CalendarFIF.exe`를 실행하고 로그인한다.
+2. 그 안의 `CalendarFIF.exe`를 실행한다. 앱은 브라우저와 따로 자기 로그인 화면에서 [docs/firebase-setup.md](docs/firebase-setup.md) 3단계에서 만든 계정의 이메일과 비밀번호로 로그인한다.
 3. 첫 실행에서 Windows 시작 시 실행이 켜진다. 다음 로그인부터 저절로 뜬다.
 
 회사 PC가 서명 없는 실행 파일을 막으면 꾸린 앱은 쓸 수 없다. 그때는 저장소 폴더에서 `npm run desktop`을 실행하는 바로가기를 만들어 쓴다. 이 방식은 Windows 시작 시 실행을 걸지 않으므로 필요하면 이 바로가기를 시작 프로그램 폴더에 직접 둔다.
@@ -89,7 +89,7 @@ Safari에서 주소를 열고 로그인한 뒤 공유 버튼으로 홈 화면에
 - 트레이 메뉴: 캘린더 숨기기/보이기, 내용 숨기기/보이기, 맨 위에 보기, 위치 및 크기, 설정, Windows 시작 시 실행, 제품 정보, 닫기.
 - 위치 및 크기는 메뉴에서 연 조정 화면에서 끌어 바꾸고 적용을 누르면 저장된다(취소하면 원래대로 돌아간다). 모니터 배치마다 따로 기억한다.
 - 단축키는 전역이고 처음에는 꺼져 있다. 설정의 고급 쪽에서 켠다. 기본 조합은 캘린더 숨기기 `Ctrl+Alt+H`, 내용 숨기기 `Ctrl+Alt+F`다.
-- 설정은 캘린더, 셀, 글꼴 및 색상, 고급, 계정 다섯 쪽이다. 달력 모양(배치, 색, 투명도 등)은 앱 안의 이 기기 저장소에, 창 위치와 단축키 등 시스템 설정은 `%APPDATA%\CalendarFIF\settings.json`에 있다. 설정은 기기별이고 동기화하지 않는다.
+- 설정은 캘린더, 셀, 글꼴 및 색상, 고급, 계정 다섯 쪽이다. 달력 모양(배치, 색, 투명도 등)은 앱 안의 이 기기 저장소에, 창 위치와 단축키 등 시스템 설정은 `%APPDATA%\CalendarFIF\settings.json`에 있다. 설정은 기기별이고 동기화하지 않는다. 로그인 정보와 오프라인 사본도 앱의 프로필 폴더 `%APPDATA%\CalendarFIF`에 `settings.json`과 함께 있으므로, 이 폴더를 지우면 앱이 로그아웃되고 설정이 처음으로 돌아간다. 에뮬레이터용으로 꾸린 앱을 직접 띄우면 프로필은 `%APPDATA%\CalendarFIF-emu`를 따로 쓴다.
 - DesktopCal과 함께 쓰는 동안은 CalendarFIF를 DesktopCal 반대쪽 모니터에 둔다. 위치 및 크기에서 옮긴다.
 
 ### 지우는 방법
@@ -112,6 +112,7 @@ Safari에서 주소를 열고 로그인한 뒤 공유 버튼으로 홈 화면에
 8. 단축키: 설정의 고급 쪽에서 두 단축키를 켜고 눌러 본다. 다른 프로그램이 같은 조합을 쓰고 있으면 설정 화면에 알림이 나온다.
 9. 설정 다섯 쪽: 쪽마다 줄을 바꿔 보고 달력이 바로 따라 바뀌는지 본다. 계정 쪽에서 로그아웃과 로그인이 된다.
 10. 시작 시 실행: 트레이 메뉴의 Windows 시작 시 실행에 체크가 있는지 보고, Windows에서 로그아웃했다가 다시 로그인하면 달력이 저절로 뜬다.
+11. 아이폰 달 넘기기: 웹앱을 `npm run deploy`로 다시 배포한 뒤, 아이폰에서 달을 넘길 때 달력이 손가락을 따라오며 밀려 넘어가는지 본다.
 
 ## 무료 한도 (2026-11-13 확인)
 

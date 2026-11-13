@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { packager } from '@electron/packager';
+import { bundleProblem } from './pack-check';
 import { stageManifest } from './pack-manifest';
 
 // 사용법: tsx scripts/pack-desktop.ts [--emu]
@@ -17,6 +18,17 @@ const build = (extra: NodeJS.ProcessEnv, cliArgs: string[]) => {
 
 const emuBuild = emu ? '1' : '0';
 build({}, ['--mode', emu ? 'desktop-emu' : 'desktop']);
+// 고른 변형과 화면 묶음이 맞아야 한다(실제 앱에 에뮬레이터 설정이 들어가거나 그 반대가 되지 않게).
+const rendererDir = resolve(root, emu ? 'dist-desktop-emu' : 'dist-desktop');
+const bundleText = readdirSync(resolve(rendererDir, 'assets'))
+  .filter((name) => name.endsWith('.js'))
+  .map((name) => readFileSync(resolve(rendererDir, 'assets', name), 'utf8'))
+  .join('\n');
+const problem = bundleProblem(emu, bundleText);
+if (problem) {
+  console.error(problem);
+  process.exit(1);
+}
 build({ CALFIF_EMU_BUILD: emuBuild }, ['-c', 'vite.desktop.config.ts']);
 build({ CALFIF_EMU_BUILD: emuBuild, VITE_DESKTOP_ENTRY: 'preload' }, ['-c', 'vite.desktop.config.ts']);
 
@@ -25,7 +37,7 @@ rmSync(stage, { recursive: true, force: true });
 mkdirSync(stage, { recursive: true });
 writeFileSync(resolve(stage, 'package.json'), JSON.stringify(stageManifest(readJson('package.json'), readJson('node_modules/koffi/package.json').version), null, 2));
 cpSync(resolve(root, 'build/desktop'), resolve(stage, 'desktop'), { recursive: true });
-cpSync(resolve(root, emu ? 'dist-desktop-emu' : 'dist-desktop'), resolve(stage, 'dist-desktop'), { recursive: true });
+cpSync(rendererDir, resolve(stage, 'dist-desktop'), { recursive: true });
 // koffi의 실행 파일(.node)은 플랫폼별 패키지에 들어 있다.
 for (const dir of ['koffi', '@koromix/koffi-win32-x64']) cpSync(resolve(root, 'node_modules', dir), resolve(stage, 'node_modules', dir), { recursive: true });
 

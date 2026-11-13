@@ -7,7 +7,7 @@ import { CSP, contentType, isAppUrl, resolveAppPath } from './protocol';
 import { BottomLimiter, PageInput, Reattacher, adjustStep, isAtBottom, leavesPage, shouldKeepBottom } from './policy';
 import type { Runtime } from './runtime';
 import { loadDesktopSettings, saveDesktopSettings, type DesktopSettings } from './settings';
-import { findProgman, isWindow, makeToolWindow, sendToBottom, setOwner, windowsBelow, type Hwnd } from './win32';
+import { adoptWindow, findProgman, isWindow, sendToBottom, windowsBelow, type Hwnd } from './win32';
 
 const WM_WINDOWPOSCHANGED = 0x47;
 const ATTACH_FALLBACK_MS = 2000;
@@ -260,17 +260,17 @@ function watchDisplays(): void {
   screen.on('display-metrics-changed', scheduleLayout);
 }
 
-function adopt(progman: Hwnd): void {
-  setOwner(currentHwnd, progman);
-  makeToolWindow(currentHwnd);
+// 못 붙이면(Win32 호출이 막히면) 일반 맨 아래 창으로 남는다.
+function adopt(progman: Hwnd): boolean {
+  if (!adoptWindow(currentHwnd, progman)) return false;
   currentProgman = progman;
   mode = 'owned';
+  return true;
 }
 
 function attach(win: BrowserWindow): void {
   const progman = findProgman();
-  if (progman !== 0n) {
-    adopt(progman);
+  if (progman !== 0n && adopt(progman)) {
     win.showInactive();
     if (shouldKeepBottom(windowState)) toBottom(currentHwnd);
     return;
@@ -283,7 +283,7 @@ function attach(win: BrowserWindow): void {
     const found = findProgman();
     if (found === 0n) return;
     clearInterval(poll);
-    adopt(found);
+    if (!adopt(found)) return;
     if (shouldKeepBottom(windowState)) toBottom(currentHwnd);
   }, PROGMAN_POLL_MS);
 }
