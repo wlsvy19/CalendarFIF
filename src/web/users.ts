@@ -1,4 +1,5 @@
 import type { AccessDoc } from './access';
+import { MIN_PASSWORD, codeOf, normalizeEmail } from './authCommon';
 
 export type UserRow = AccessDoc & { uid: string };
 export type UsersSource = {
@@ -13,23 +14,10 @@ export type AccountMaker = {
   /** 이미 있는 계정에 그 비밀번호로 로그인해 uid를 돌려준다. 지금 로그인은 바뀌지 않는다. */
   lookup(email: string, password: string): Promise<string>;
 };
-export type AddFailure = 'invalid-email' | 'weak-password' | 'exists-wrong-password' | 'network' | 'denied' | 'unknown';
+export type AddFailure = 'invalid-email' | 'weak-password' | 'exists-wrong-password' | 'network' | 'denied' | 'throttled' | 'unknown';
 export type AddResult = { ok: true; uid: string; existed: boolean } | { ok: false; reason: AddFailure; code: string };
 
-export const MIN_PASSWORD = 8;
-
-/** 앞뒤 공백을 떼고 소문자로. */
-export function normalizeEmail(raw: string): string {
-  return raw.trim().toLowerCase();
-}
-
 const EMAIL_SHAPE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-
-/** 던져진 값에서 오류 코드를 꺼낸다. */
-export function codeOf(e: unknown): string {
-  const code = (e as { code?: unknown } | null)?.code;
-  return typeof code === 'string' && code !== '' ? code : 'unknown';
-}
 
 function failure(code: string): AddResult {
   const reason: AddFailure =
@@ -37,6 +25,7 @@ function failure(code: string): AddResult {
     : code === 'auth/weak-password' ? 'weak-password'
     : code === 'auth/network-request-failed' || code === 'unavailable' ? 'network'
     : code === 'permission-denied' || code === 'auth/admin-restricted-operation' || code === 'auth/operation-not-allowed' ? 'denied'
+    : code === 'auth/too-many-requests' ? 'throttled'
     : 'unknown';
   return { ok: false, reason, code };
 }
@@ -85,6 +74,7 @@ export function addUserMessage(result: AddResult): string {
     case 'exists-wrong-password': return '이미 있는 이메일입니다. 그 계정의 비밀번호를 넣으면 다시 등록합니다.';
     case 'network': return '네트워크에 연결할 수 없습니다.';
     case 'denied': return '권한이 없어 추가하지 못했습니다.';
+    case 'throttled': return '시도가 너무 많습니다. 잠시 뒤 다시 해 주세요.';
     case 'unknown': return `추가하지 못했습니다. (${result.code})`;
   }
 }

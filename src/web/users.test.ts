@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AccessDoc } from './access';
-import { addUser, addUserMessage, normalizeEmail, type AccountMaker, type AddResult, type UsersSource } from './users';
+import { normalizeEmail } from './authCommon';
+import { addUser, addUserMessage, type AccountMaker, type AddResult, type UsersSource } from './users';
 
 function setup(opts: { create?: () => Promise<string>; lookup?: () => Promise<string>; put?: () => Promise<void> } = {}) {
   const calls: string[] = [];
@@ -52,6 +53,11 @@ describe('addUser', () => {
     const t = setup({ create: rej('auth/email-already-in-use'), lookup: rej('auth/network-request-failed') });
     expect(await t.run('a@b.c', 'password1')).toMatchObject({ ok: false, reason: 'network' });
   });
+  it('lookup이 너무 많은 시도로 막히면 throttled', async () => {
+    const t = setup({ create: rej('auth/email-already-in-use'), lookup: rej('auth/too-many-requests') });
+    expect(await t.run('a@b.c', 'password1')).toEqual({ ok: false, reason: 'throttled', code: 'auth/too-many-requests' });
+    expect(t.puts).toEqual([]);
+  });
   it.each([
     ['auth/invalid-email', 'invalid-email'],
     ['auth/weak-password', 'weak-password'],
@@ -60,6 +66,7 @@ describe('addUser', () => {
     ['permission-denied', 'denied'],
     ['auth/admin-restricted-operation', 'denied'],
     ['auth/operation-not-allowed', 'denied'],
+    ['auth/too-many-requests', 'throttled'],
     ['auth/something', 'unknown'],
   ])('create의 %s -> %s', async (code, reason) => {
     const t = setup({ create: rej(code) });
@@ -97,6 +104,7 @@ describe('addUserMessage', () => {
     expect(addUserMessage(f('exists-wrong-password'))).toBe('이미 있는 이메일입니다. 그 계정의 비밀번호를 넣으면 다시 등록합니다.');
     expect(addUserMessage(f('network'))).toBe('네트워크에 연결할 수 없습니다.');
     expect(addUserMessage(f('denied'))).toBe('권한이 없어 추가하지 못했습니다.');
+    expect(addUserMessage(f('throttled'))).toBe('시도가 너무 많습니다. 잠시 뒤 다시 해 주세요.');
     expect(addUserMessage(f('unknown', 'auth/x'))).toBe('추가하지 못했습니다. (auth/x)');
   });
 });

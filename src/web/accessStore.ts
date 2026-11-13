@@ -1,7 +1,8 @@
 import { collection, doc, onSnapshot, runTransaction, setDoc, type Firestore, type Transaction } from 'firebase/firestore';
 import { parseAccess, type AccessDoc, type AccessSource } from './access';
 import { withTimeLimit } from './timeLimit';
-import { codeOf, type UserRow, type UsersSource } from './users';
+import { codeOf } from './authCommon';
+import type { UserRow, UsersSource } from './users';
 
 async function rethrow<T>(p: Promise<T>): Promise<T> {
   try {

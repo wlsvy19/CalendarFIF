@@ -8,7 +8,8 @@ import {
   signOut,
   type Auth,
 } from 'firebase/auth';
-import { codeOf, type AccountMaker } from './users';
+import { codeOf } from './authCommon';
+import type { AccountMaker } from './users';
 
 let counter = 0;
 
