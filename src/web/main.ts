@@ -27,7 +27,7 @@ import { mountSettings } from './ui/settings';
 import { mountUsers } from './ui/users';
 import type { WidgetInstallDeps } from './ui/widgetInstall';
 import { isBusy, reloadOnUpdate } from './update';
-import { parseHash } from './router';
+import { closeAction, parseHash } from './router';
 import { openStorage } from './storage';
 import { splitDateKey, todayKey } from '../core/dates';
 import { EMPTY_DAY } from '../core/types';
@@ -176,9 +176,15 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     settingsPage = undefined;
     interactivity.begin('settings');
   };
+  // 주소로 곧바로 연 시트의 기록은 달력 주소로 바꾼다. 해시를 비우면 기록이 하나 더 쌓여 뒤로 가기가 시트를 다시 연다.
+  // 주소를 바꾸는 것은 hashchange를 내지 않으므로 화면은 직접 맞춘다.
   const backToCalendar = (): void => {
-    if (pushedByApp) history.back();
-    else location.hash = '';
+    if (closeAction(pushedByApp) === 'back') {
+      history.back();
+      return;
+    }
+    history.replaceState(null, '', location.pathname + location.search);
+    syncRoute();
   };
   const openEditor = (dateKey: string): void => {
     const { monthId, day } = splitDateKey(dateKey)!;

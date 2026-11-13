@@ -14,7 +14,7 @@ const ADMIN = { email: 'test@example.com', password: 'test-password' };
 const USER = { email: 'user@example.com', password: 'user-password' };
 const MEMO = '새 사용자의 메모';
 const HOLD_MEMO = '중지되는 동안 적은 메모';
-const STEPS = 19;
+const STEPS = 20;
 const FIRESTORE = `http://${process.env.FIRESTORE_EMULATOR_HOST ?? '127.0.0.1:8085'}/v1/projects/demo-calfif/databases/(default)/documents`;
 const OWNER = { authorization: 'Bearer owner', 'content-type': 'application/json' };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -468,6 +468,25 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     '19. 지운 사용자가 로그인하면 달력 대신 허가 없음 안내를 보고, 로그아웃할 수 있다',
     noneNotice === NONE_TEXT && noneNoCalendar && noneOut,
     `안내 "${noneNotice}", 달력 ${noneNoCalendar ? '없음' : '있음'}, 로그아웃 뒤 ${noneOut ? '로그인 화면' : '로그인 화면 아님'}`,
+  );
+
+  // 20
+  const adminCold = await logIn(ADMIN);
+  await load('about:blank'); // 앞 기록을 빈 페이지로 두고 #users를 새로 읽는다
+  await sleep(500);
+  await load(`${base.origin}${base.pathname}${base.search}#users`);
+  const coldUsers = adminCold && (await waitFor<boolean>(`!!${sheet('.users')}`, 20000)) === true;
+  await sleep(700);
+  const lengthBefore = await js<number>('history.length');
+  const coldClosed = coldUsers && (await press(`${sheet('.users')}?.querySelector('.sheet-bar .textbtn.end')`)) && (await waitFor<boolean>(NO_SHEET, 5000)) === true;
+  const lengthSame = (await js<number>('history.length')) === lengthBefore;
+  await js('history.back()');
+  await sleep(700);
+  const reopenedUsers = await js<boolean>(`!!${sheet('.users')}`).catch(() => false);
+  record(
+    '20. #users로 곧바로 연 사용자 관리를 닫은 뒤 뒤로 가도 다시 열리지 않는다',
+    coldUsers && coldClosed && lengthSame && !reopenedUsers,
+    `열림 ${coldUsers ? '예' : '아니오'}, 닫음 ${coldClosed ? '예' : '아니오'}, 기록 수 ${lengthSame ? '그대로' : '바뀜'}, 뒤로 간 뒤 사용자 관리 ${reopenedUsers ? '다시 열림' : '없음'}`,
   );
   return results;
 }
