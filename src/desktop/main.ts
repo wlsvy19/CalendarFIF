@@ -13,7 +13,10 @@ import {
   sendCommand, setAlwaysOnTop, setContentHidden, setInteractive, showWindow, signals, startAdjust, startDesktopWindow, toggleHidden, updateSettings,
 } from './window';
 
-const rt = resolveRuntime({ env: process.env, isPackaged: app.isPackaged, appPath: app.getAppPath(), appData: app.getPath('appData') });
+// 빌드할 때 vite.desktop.config.ts가 정한다. 에뮬레이터용으로 꾸린 앱이면 true다.
+declare const __CALFIF_EMU_BUILD__: boolean;
+
+const rt = resolveRuntime({ env: process.env, isPackaged: app.isPackaged, appPath: app.getAppPath(), appData: app.getPath('appData'), emulatorBuild: __CALFIF_EMU_BUILD__ });
 app.setPath('userData', rt.profileDir);
 app.enableSandbox();
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }]);

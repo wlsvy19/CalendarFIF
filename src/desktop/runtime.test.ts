@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { resolveRuntime } from './runtime';
 
-const base = { appPath: 'C:\\app', appData: 'C:\\Users\\u\\AppData\\Roaming' };
+const base = { appPath: 'C:\\app', appData: 'C:\\Users\\u\\AppData\\Roaming', emulatorBuild: false };
 it('꾸린 앱은 앱 안의 화면과 %APPDATA%\\CalendarFIF를 쓰고 자동 실행을 관리한다', () => {
   expect(resolveRuntime({ ...base, env: { CALFIF_RENDERER_DIR: 'C:\\evil' }, isPackaged: true })).toEqual({
     rendererDir: join('C:\\app', 'dist-desktop'), profileDir: join(base.appData, 'CalendarFIF'), statusDir: null, smoke: null, emulator: false, manageLoginItem: true,
@@ -14,4 +14,11 @@ it('개발 실행은 정해 준 폴더를 쓰고, 시험 실행은 따로 둔 �
   expect(() => resolveRuntime({ ...base, isPackaged: false, env: { CALFIF_SMOKE: 'attach' } })).toThrow('CALFIF_PROFILE_DIR');
   expect(() => resolveRuntime({ ...base, isPackaged: false, env: { CALFIF_SMOKE: 'dance', CALFIF_PROFILE_DIR: 'C:\\s\\profile' } })).toThrow('CALFIF_SMOKE');
   expect(resolveRuntime({ ...base, isPackaged: true, env: { CALFIF_SMOKE: '1', CALFIF_PROFILE_DIR: 'C:\\s\\profile' } })).toMatchObject({ smoke: 'attach', manageLoginItem: false, statusDir: 'C:\\s' });
+});
+it('에뮬레이터용으로 꾸린 앱은 환경 변수와 상관없이 자동 실행을 건드리지 않고 실제 프로필을 쓰지 않는다', () => {
+  for (const env of [{}, { CALFIF_EMU: '1' }, { CALFIF_SMOKE: '1', CALFIF_PROFILE_DIR: 'C:\\s\\profile' }]) {
+    expect(resolveRuntime({ ...base, emulatorBuild: true, isPackaged: true, env })).toMatchObject({ emulator: true, manageLoginItem: false });
+  }
+  expect(resolveRuntime({ ...base, emulatorBuild: true, isPackaged: true, env: {} }).profileDir).toBe(join(base.appData, 'CalendarFIF-emu'));
+  expect(resolveRuntime({ ...base, emulatorBuild: true, isPackaged: true, env: { CALFIF_PROFILE_DIR: 'C:\\p\\profile' } }).profileDir).toBe('C:\\p\\profile');
 });

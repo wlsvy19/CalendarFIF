@@ -1,6 +1,7 @@
 {
   "name": "calendarfif",
   "private": true,
+  "version": "0.3.0",
   "type": "module",
   "main": "build/desktop/main.cjs",
   "scripts": {
@@ -18,13 +19,17 @@
     "desktop:setup": "node node_modules/electron/install.js",
     "desktop": "tsx scripts/desktop-run.ts",
     "desktop:emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && tsx scripts/desktop-run.ts --emu\"",
-    "desktop:smoke": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && tsx scripts/desktop-run.ts --smoke\""
+    "desktop:smoke": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && tsx scripts/desktop-run.ts --smoke\"",
+    "desktop:pack": "tsx scripts/pack-desktop.ts",
+    "desktop:pack:emu": "tsx scripts/pack-desktop.ts --emu",
+    "desktop:pack:check": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && tsx scripts/desktop-run.ts --smoke --packaged build/release-emu/CalendarFIF-win32-x64/CalendarFIF.exe\""
   },
   "dependencies": {
     "firebase": "^13.3.0",
     "koffi": "^3.3.8"
   },
   "devDependencies": {
+    "@electron/packager": "^20.3.0",
     "@firebase/rules-unit-testing": "^6.0.0",
     "electron": "^45.3.1",
     "firebase-tools": "^15.36.0",

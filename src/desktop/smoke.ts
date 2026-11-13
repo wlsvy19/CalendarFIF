@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { app, globalShortcut, type BrowserWindow, type MenuItem } from 'electron';
 import type { SystemPatch, SystemState } from './api';
@@ -383,7 +383,55 @@ async function settings(_rt: Runtime, desk: Desk): Promise<Result> {
   return { fields, checks };
 }
 
-const SCENARIOS: Partial<Record<Scenario, (rt: Runtime, desk: Desk) => Promise<Result>>> = { attach, bounds, tray, settings };
+// 끝에서 끝까지: 시험 스크립트(desktop-run.ts)가 에뮬레이터에 아이폰의 편집을 흉내 내어 쓰면 앱이 5초 안에 보여 주고,
+// 앱에서 바꾼 배경색이 에뮬레이터에 올라간다. 진행은 e2e.json에 단계마다 적어 스크립트가 읽는다.
+async function e2e(rt: Runtime): Promise<Result> {
+  const win = getWindow();
+  if (!win) return { fields: {}, checks: { window: false } };
+  const dir = rt.statusDir as string;
+  const progress: Record<string, unknown> = {};
+  const mark = (patch: Record<string, unknown>) => {
+    Object.assign(progress, patch);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'e2e.json'), JSON.stringify({ scenario: 'e2e', ...progress }));
+  };
+  const todayHas = "!!document.querySelector('.cell.today')?.textContent.includes('원격 시험 메모')";
+  const synced = async () => ((await js(win, "document.querySelector('.sync-text')?.textContent")) as string | null) === '동기화됨';
+  const menuClick = (selector: string) => js(win, `document.querySelector('${selector}').click()`);
+
+  await until(() => getMode() !== null, 10000);
+  const ready = await until(async () => (await js(win, RENDERED)) === 'calendar', 15000);
+  mark({ phase: ready ? 'ready' : 'failed' });
+
+  let remoteSeen = false;
+  const waitEnd = Date.now() + 30000;
+  while (ready && !remoteSeen && Date.now() < waitEnd) {
+    remoteSeen = (await js(win, todayHas)) === true;
+    if (!remoteSeen) await sleep(250);
+  }
+  mark({ remoteSeen });
+
+  let localEditDone = false;
+  let uploaded = false;
+  if (remoteSeen) {
+    await js(win, "document.querySelector('.cell.today').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }))");
+    await until(async () => (await js(win, "!!document.querySelector('.cellmenu [data-action=\"color\"]')")) as boolean, 3000);
+    await menuClick('.cellmenu [data-action="color"]');
+    await menuClick('.cellmenu .swatch[data-color="F12424"]');
+    // 색을 고르면 메뉴가 닫힌다.
+    localEditDone = await until(async () => !((await js(win, "!!document.querySelector('.cellmenu')")) as boolean), 3000);
+    mark({ localEditDone });
+    // 올리는 중으로 바뀌었다가 다시 동기화됨이 되면 올라간 것이다. 너무 빨라 못 본 경우도 있어 기다림은 짧게 둔다.
+    await until(async () => !(await synced()), 2000);
+    uploaded = await until(synced, 20000);
+    mark({ uploaded });
+  }
+  // 시험 스크립트가 에뮬레이터에서 색을 확인해 결과 파일을 쓸 때까지 기다린다. 그 전에 끝나면 올리는 일이 끊긴다.
+  const verified = await until(() => existsSync(join(dir, 'e2e-result.json')), 20000);
+  return { fields: { ...progress, loginItemCalls }, checks: { ready, remoteSeen, localEditDone, uploaded, verified, loginItemCalls: loginItemCalls === 0 } };
+}
+
+const SCENARIOS: Partial<Record<Scenario, (rt: Runtime, desk: Desk) => Promise<Result>>> = { attach, bounds, tray, settings, e2e };
 
 export async function runSmoke(rt: Runtime, desk: Desk): Promise<void> {
   const scenario = rt.smoke as Scenario;

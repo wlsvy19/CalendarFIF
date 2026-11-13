@@ -14,5 +14,7 @@ export default defineConfig({
     minify: false,
     rolldownOptions: { output: { format: 'cjs', entryFileNames: `${entry}.cjs` } },
   },
+  // 에뮬레이터용으로 꾸릴 때(CALFIF_EMU_BUILD=1)만 true. 이 앱은 환경과 상관없이 자동 실행을 걸지 않는다.
+  define: { __CALFIF_EMU_BUILD__: JSON.stringify(process.env.CALFIF_EMU_BUILD === '1') },
   ssr: { external: ['electron', 'koffi'] },
 });
