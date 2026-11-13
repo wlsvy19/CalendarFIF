@@ -58,7 +58,11 @@ function readFromCopy(dbPath: string): SourceRow[] | 'busy' | 'corrupt' {
     }
     return queryCopy(copy) ?? 'corrupt';
   } finally {
-    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch {
+      // 임시 복사본 정리는 최선만 한다. 실패해도 읽은 결과나 원래 오류를 바꾸지 않는다.
+    }
   }
 }
 

@@ -49,12 +49,19 @@ export function convertRows(rows: SourceRow[]): { days: Map<string, ConvertedDay
   const colorCounts = new Map<string, { stored: string; rgb: string; count: number }>();
   const stats: ConvertStats = { rows: rows.length, converted: 0, skippedEmpty: 0, skippedBadKey: 0, badColors: 0, fontTags: 0, colors: [] };
 
+  // 같은 날짜가 여러 번 나오면 stime이 가장 큰 행 하나만 본다(같으면 입력에서 나중 행).
+  const latest = new Map<string, SourceRow>();
   for (const row of rows) {
     const dateKey = parseItemKey(row.key);
     if (dateKey === null) {
       stats.skippedBadKey++;
       continue;
     }
+    const existing = latest.get(dateKey);
+    if (!existing || (row.stime ?? 0) >= (existing.stime ?? 0)) latest.set(dateKey, row);
+  }
+
+  for (const [dateKey, row] of latest) {
     const stored = row.bgcolor ?? '';
     const rgb = bgrToRgb(stored);
     if (rgb === null) stats.badColors++;
@@ -71,9 +78,7 @@ export function convertRows(rows: SourceRow[]): { days: Map<string, ConvertedDay
       else colorCounts.set(stored, { stored, rgb: color, count: 1 });
     }
     const editedAt = row.stime === null ? 0 : row.stime * 1000;
-    // 같은 날짜가 두 번 나오면 나중에 고친 쪽을 남긴다.
-    const existing = days.get(dateKey);
-    if (!existing || editedAt >= existing.editedAt) days.set(dateKey, { dateKey, value: { text, color }, editedAt });
+    days.set(dateKey, { dateKey, value: { text, color }, editedAt });
   }
 
   stats.converted = days.size;

@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { bgrToRgb, convertRows, decodeContent, parseItemKey } from './convert';
 
 describe('DesktopCal 변환', () => {
+  it('같은 날짜가 여러 번 나오면 더 늦게 고친 행만 본다', () => {
+    const older = { key: 'dkcal_mdays_20261113', content: 'old', bgcolor: '', stime: 100 };
+    const newer = { key: 'dkcal_mdays_20261113', content: 'new', bgcolor: '', stime: 200 };
+    expect(convertRows([newer, older]).days.get('2026-11-13')!.value.text).toBe('new');
+    expect(convertRows([older, newer]).days.get('2026-11-13')!.value.text).toBe('new');
+    const cleared = { key: 'dkcal_mdays_20261113', content: '', bgcolor: '', stime: 300 };
+    const result = convertRows([older, cleared]);
+    expect(result.days.has('2026-11-13')).toBe(false);
+    expect(result.stats).toMatchObject({ rows: 2, converted: 0, skippedEmpty: 1 });
+  });
   it('키에서 날짜를 읽는다', () => {
     expect(parseItemKey('dkcal_mdays_20261113')).toBe('2026-11-13');
     expect(parseItemKey('dkcal_mdays_20260230')).toBeNull();

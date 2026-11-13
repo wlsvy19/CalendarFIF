@@ -49,6 +49,17 @@ it('이벤트가 없어도 파일이 바뀌었으면 돈다', async () => {
   await vi.advanceTimersByTimeAsync(30000);
   expect(runOnce).toHaveBeenCalledTimes(1);
 });
+it('실패한 뒤에는 파일이 그대로여도 다음 확인 때 다시 돈다', async () => {
+  const runOnce = vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValue(undefined);
+  const { emit } = setup(runOnce);
+  emit('calendar.db');
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(runOnce).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(30000);
+  expect(runOnce).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(30000);
+  expect(runOnce).toHaveBeenCalledTimes(2);
+});
 it('실패해도 계속 돌고, 멈추면 더 돌지 않는다', async () => {
   const runOnce = vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValue(undefined);
   const { follower, emit, close, log } = setup(runOnce);

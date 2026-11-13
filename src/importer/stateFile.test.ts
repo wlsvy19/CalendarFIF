@@ -1,6 +1,6 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { expect, it } from 'vitest';
 import { ImportStateCorruptError, defaultStatePath, loadState, saveState } from './stateFile';
 
@@ -13,6 +13,13 @@ it('저장한 상태를 같은 프로젝트와 계정으로만 읽는다', () =>
   expect(loadState(p, 'proj', 'u1')).toEqual({ '2026-11-13': { text: 'A', color: '' } });
   expect(loadState(p, 'proj', 'other')).toBeNull();
   expect(loadState(p, 'other-proj', 'u1')).toBeNull();
+});
+it('여러 번 저장해도 임시 파일이 남지 않는다', () => {
+  const p = path();
+  saveState(p, { projectId: 'proj', uid: 'u1', days: {} });
+  saveState(p, { projectId: 'proj', uid: 'u1', days: { '2026-11-13': { text: 'A', color: '' } } });
+  expect(readdirSync(dirname(p))).toEqual(['import-state.json']);
+  expect(loadState(p, 'proj', 'u1')).toEqual({ '2026-11-13': { text: 'A', color: '' } });
 });
 it('깨진 상태 파일은 오류로 알린다', () => {
   const p = join(mkdtempSync(join(tmpdir(), 'calfif-state-')), 'import-state.json');

@@ -34,6 +34,16 @@ it('달마다 한 번씩 올리고, 끊기면 다시 돌려 이어서 끝낸다'
   expect(store.docs.get('2026-11')!.days['13'].text).toBe('A');
   expect(store.docs.get('2026-12')!.days['01'].text).toBe('C');
 });
+it('쓴 뒤에 실패로 보고된 달을 다시 돌려도 줄이 겹치지 않는다', async () => {
+  const store = new FakeMonthStore({ '2026-11': { days: { '13': rec('A\nP', '', 500, 'iphone') } } });
+  const edits = [ie('13', v('A'), v('A\nB'), 300, true)];
+  store.failAfterCommit.add('2026-11');
+  await expect(uploadEdits(store, edits, () => {})).rejects.toThrow();
+  expect(store.docs.get('2026-11')!.days['13'].text).toBe('A\nB\nP');
+  store.failAfterCommit.clear();
+  expect(await uploadEdits(store, edits, () => {})).toEqual({ months: 1, days: 1 });
+  expect(store.docs.get('2026-11')!.days['13'].text).toBe('A\nB\nP');
+});
 it('원본과 클라우드를 날짜별로 대조한다', async () => {
   const days = new Map<string, ConvertedDay>([
     ['2026-11-13', { dateKey: '2026-11-13', value: v('A'), editedAt: 1 }],

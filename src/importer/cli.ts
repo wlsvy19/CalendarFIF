@@ -7,7 +7,7 @@ import type { DayValue } from '../core/types';
 import { convertRows, type ConvertedDay } from './convert';
 import { createFollower } from './follow';
 import type { LiteMonthStore } from './liteStore';
-import { planEdits } from './plan';
+import { checkDeletes, planEdits, type DeleteCheck } from './plan';
 import { dayReport, previewReport, verifyReport } from './report';
 import { SourceBusyError, SourceCorruptError, SourceMissingError, defaultDbPath, readSourceRows } from './source';
 import { ImportStateCorruptError, defaultStatePath, loadState, saveState } from './stateFile';
@@ -15,10 +15,10 @@ import { uploadEdits, verifyAgainstCloud } from './upload';
 
 export class UsageError extends Error {}
 
-export type CliOptions = { mode: 'preview' | 'upload' | 'follow'; dbPath: string; statePath: string; show: string[]; yes: boolean };
+export type CliOptions = { mode: 'preview' | 'upload' | 'follow'; dbPath: string; statePath: string; show: string[]; yes: boolean; allowDeletes: boolean };
 
 export const USAGE = [
-  '사용법: npm run import -- [--preview | --upload | --follow] [--db <경로>] [--state <경로>] [--show <YYYY-MM-DD>]... [--yes]',
+  '사용법: npm run import -- [--preview | --upload | --follow] [--db <경로>] [--state <경로>] [--show <YYYY-MM-DD>]... [--yes] [--allow-deletes]',
   '  --preview   읽고 변환한 결과만 보여 준다(기본). 클라우드에 접속하지 않는다.',
   '  --upload    바뀐 날짜를 클라우드에 올리고 대조한다.',
   '  --follow    올린 뒤 DesktopCal 파일을 지켜보며 바뀔 때마다 올린다.',
@@ -26,6 +26,7 @@ export const USAGE = [
   '  --state     가져오기 상태 파일 경로',
   '  --show      그 날짜의 변환 결과를 화면에 보여 준다. 여러 번 줄 수 있다.',
   '  --yes       올리기 전에 묻지 않는다.',
+  '  --allow-deletes  DesktopCal에서 사라진 날짜가 많아도 지운다(--upload와만 쓴다).',
 ].join('\n');
 
 export function parseArgs(argv: string[], env: Record<string, string | undefined>): CliOptions {
@@ -34,6 +35,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
   let statePath: string | undefined;
   const show: string[] = [];
   let yes = false;
+  let allowDeletes = false;
 
   const value = (i: number, flag: string): string => {
     const v = argv[i];
@@ -64,11 +66,15 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
       case '--yes':
         yes = true;
         break;
+      case '--allow-deletes':
+        allowDeletes = true;
+        break;
       default:
         throw new UsageError(`모르는 인자입니다: ${arg}`);
     }
   }
   if (modes.length > 1) throw new UsageError('--preview, --upload, --follow 중 하나만 줄 수 있습니다.');
+  if (allowDeletes && modes[0] !== 'upload') throw new UsageError('--allow-deletes는 --upload와만 쓸 수 있습니다.');
 
   try {
     dbPath ??= defaultDbPath(env);
@@ -76,7 +82,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
   } catch (e) {
     throw new UsageError(`${e instanceof Error ? e.message : String(e)} --db와 --state로 경로를 주세요.`);
   }
-  return { mode: modes[0] ?? 'preview', dbPath, statePath, show, yes };
+  return { mode: modes[0] ?? 'preview', dbPath, statePath, show, yes, allowDeletes };
 }
 
 export type CliDeps = {
@@ -100,10 +106,20 @@ async function readDays(dbPath: string) {
   return convertRows(await readSourceRows(dbPath));
 }
 
-/** 바뀐 날짜를 올리고, 달이 끝날 때마다 상태 파일을 저장한다. 올린 날짜 수를 돌려준다. */
-async function uploadChanges(opts: CliOptions, conn: Connection, days: Map<string, ConvertedDay>, now: number): Promise<number> {
+/**
+ * 바뀐 날짜를 올리고, 달이 끝날 때마다 상태 파일을 저장한다. 올린 날짜 수를 돌려준다.
+ * 지운 날짜가 너무 많으면(막아야 하면) 아무것도 올리거나 저장하지 않고 검사 결과를 돌려준다.
+ */
+async function uploadChanges(
+  opts: CliOptions,
+  conn: Connection,
+  days: Map<string, ConvertedDay>,
+  now: number,
+): Promise<{ uploaded: number } | { blocked: DeleteCheck }> {
   const state = loadState(opts.statePath, conn.projectId, conn.uid);
   const edits = planEdits(days, state, now);
+  const check = checkDeletes(edits, state);
+  if (check.blocked && !opts.allowDeletes) return { blocked: check };
   const working: Record<string, DayValue> = { ...(state ?? {}) };
   const result = await uploadEdits(conn.store, edits, (_monthId, done) => {
     for (const edit of done) {
@@ -113,12 +129,16 @@ async function uploadChanges(opts: CliOptions, conn: Connection, days: Map<strin
     }
     saveState(opts.statePath, { projectId: conn.projectId, uid: conn.uid, days: working });
   });
-  return result.days;
+  return { uploaded: result.days };
 }
 
 function clock(ms: number): string {
   const d = new Date(ms);
   return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
+}
+
+function blockedFollowLine(now: number, check: DeleteCheck): string {
+  return `${clock(now)} 사라진 날짜가 ${check.deletes}일이라 올리지 않았습니다. 확인한 뒤 --upload --allow-deletes로 한 번 실행해 주세요.`;
 }
 
 export async function main(argv: string[], env: Record<string, string | undefined>, deps: CliDeps): Promise<number> {
@@ -143,9 +163,19 @@ export async function main(argv: string[], env: Record<string, string | undefine
       return 0;
     }
     const conn = await deps.connect();
-    const uploaded = await uploadChanges(opts, conn, days, deps.now());
-    deps.out(`바뀐 날짜 ${uploaded}일을 올렸습니다.`);
-    deps.out(verifyReport(await verifyAgainstCloud(conn.store, days)));
+    const first = await uploadChanges(opts, conn, days, deps.now());
+    if ('blocked' in first) {
+      if (opts.mode === 'upload') {
+        deps.out(
+          `DesktopCal에서 사라진 날짜가 ${first.blocked.deletes}일입니다(지난번에 가져온 ${first.blocked.stateDays}일 중). 파일이 바뀌었거나 다른 파일일 수 있어 올리지 않았습니다. 맞다면 --allow-deletes를 붙여 다시 실행해 주세요.`,
+        );
+        return 1;
+      }
+      deps.out(blockedFollowLine(deps.now(), first.blocked));
+    } else {
+      deps.out(`바뀐 날짜 ${first.uploaded}일을 올렸습니다.`);
+      deps.out(verifyReport(await verifyAgainstCloud(conn.store, days)));
+    }
     if (opts.mode === 'upload') return 0;
 
     deps.out('DesktopCal 파일을 지켜봅니다. 끝내려면 Ctrl+C를 누르세요.');
@@ -155,8 +185,9 @@ export async function main(argv: string[], env: Record<string, string | undefine
       runOnce: async () => {
         try {
           const latest = await readDays(opts.dbPath);
-          const n = await uploadChanges(opts, conn, latest.days, deps.now());
-          deps.out(`${clock(deps.now())} 바뀐 날짜 ${n}일을 올렸습니다.`);
+          const round = await uploadChanges(opts, conn, latest.days, deps.now());
+          if ('blocked' in round) deps.out(blockedFollowLine(deps.now(), round.blocked));
+          else deps.out(`${clock(deps.now())} 바뀐 날짜 ${round.uploaded}일을 올렸습니다.`);
         } catch (e) {
           throw new Error(`${clock(deps.now())} ${friendlyMessage(e, opts.dbPath)}`);
         }

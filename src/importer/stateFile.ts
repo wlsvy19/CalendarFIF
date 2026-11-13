@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, win32 } from 'node:path';
 import type { DayValue } from '../core/types';
 
@@ -41,7 +42,20 @@ export function loadState(path: string, projectId: string, uid: string): Record<
 /** 쓰다가 끊겨도 기존 파일이 깨지지 않게 임시 파일에 쓰고 이름을 바꾼다. */
 export function saveState(path: string, file: ImportStateFile): void {
   mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp`;
+  const tmp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
   writeFileSync(tmp, JSON.stringify(file), 'utf8');
-  renameSync(tmp, path);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      renameSync(tmp, path);
+      return;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (attempt < 2 && (code === 'EPERM' || code === 'EBUSY' || code === 'EACCES')) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+        continue;
+      }
+      rmSync(tmp, { force: true });
+      throw e;
+    }
+  }
 }

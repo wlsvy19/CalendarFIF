@@ -57,10 +57,13 @@ export function createFollower(opts: FollowerOptions): { start(): void; stop(): 
 
   async function run(): Promise<void> {
     running = true;
-    lastPrint = readPrint();
+    const print = readPrint();
     try {
       await opts.runOnce();
+      lastPrint = print;
     } catch (e) {
+      // 실패했으면 파일이 그대로여도 다음 확인 때 다시 돌도록 지문을 맞지 않게 둔다.
+      lastPrint = '\0failed';
       log(`올리지 못했습니다: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       running = false;
