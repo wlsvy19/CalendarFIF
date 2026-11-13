@@ -141,3 +141,66 @@ it('계정 쪽은 웹앱 설정 화면의 문구와 로그아웃 확인을 그�
   button('그래도 로그아웃').click();
   expect(onSignOut).toHaveBeenCalledTimes(1);
 });
+
+const INVALID = 'Ctrl 또는 Alt를 넣은 조합을 고르세요.';
+const press = (el: Element, init: KeyboardEventInit) => el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+async function advancedRow(bridge = new FakeBridge()) {
+  const root = document.createElement('div');
+  document.body.append(root);
+  mountDesktopSettings(root, { appearance: DEFAULT_APPEARANCE, onAppearance: vi.fn(), bridge, onClose: vi.fn(),
+    account: { email: 'a@example.com', pending: 0, storageOk: true, corruptFound: false, onSignOut: vi.fn() } });
+  tab(root, '고급').click();
+  const r = row(root, '캘린더 숨기기 단축키');
+  const input = r.querySelector<HTMLInputElement>('input.hotkey')!;
+  const sw = r.querySelector<HTMLInputElement>('input[role="switch"]')!;
+  await vi.waitFor(() => expect(input.disabled).toBe(false));
+  return { r, input, sw, bridge };
+}
+it('받을 수 없는 조합을 누르면 알리고, 수식키만 누르면 아무 말도 하지 않는다', async () => {
+  const { r, input, bridge } = await advancedRow();
+  press(input, { code: 'ControlLeft', key: 'Control', ctrlKey: true });
+  press(input, { code: 'ShiftLeft', key: 'Shift', shiftKey: true });
+  expect(r.textContent).not.toContain(INVALID);
+  press(input, { code: 'KeyJ', key: 'j' });
+  expect(r.textContent).toContain(INVALID);
+  press(input, { code: 'F4', key: 'F4', altKey: true });
+  press(input, { code: 'KeyJ', key: 'j', metaKey: true, ctrlKey: true });
+  expect([input.value, bridge.calls.some((c) => c[0] === 'setSystem')]).toEqual(['Ctrl+Alt+H', false]);
+  press(input, { code: 'KeyJ', key: 'j', ctrlKey: true, altKey: true });
+  await vi.waitFor(() => expect([input.value, r.textContent!.includes(INVALID)]).toEqual(['Ctrl+Alt+J', false]));
+});
+it('응답이 요청과 다르면 칸과 스위치를 응답대로 맞추고 알린다', async () => {
+  const { r, input, sw, bridge } = await advancedRow();
+  bridge.setSystem = async () => bridge.system; // 요청을 버리고 지금 상태를 돌려준다
+  press(input, { code: 'KeyJ', key: 'j', ctrlKey: true, altKey: true });
+  await vi.waitFor(() => expect([input.value, r.textContent!.includes(INVALID)]).toEqual(['Ctrl+Alt+H', true]));
+  sw.click();
+  await vi.waitFor(() => expect([sw.checked, r.textContent!.includes('적용하지 못했습니다.')]).toEqual([false, true]));
+});
+it('설정을 바꾸는 요청이 던지면 마지막으로 받은 값으로 되돌린다', async () => {
+  const { r, input, sw, bridge } = await advancedRow();
+  bridge.setSystem = async () => { throw new Error('끊김'); };
+  press(input, { code: 'KeyJ', key: 'j', ctrlKey: true, altKey: true });
+  sw.click();
+  await vi.waitFor(() => expect(r.textContent).toContain('적용하지 못했습니다.'));
+  expect([input.value, sw.checked]).toEqual(['Ctrl+Alt+H', false]);
+});
+it('닫기를 누르면 적고 아직 반영하지 않은 16진수 값을 반영하고, 잘못됐으면 닫지 않고 알린다', () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const onAppearance = vi.fn();
+  const onClose = vi.fn();
+  mountDesktopSettings(root, { appearance: DEFAULT_APPEARANCE, onAppearance, bridge: null, onClose,
+    account: { email: 'a@example.com', pending: 0, storageOk: true, corruptFound: false, onSignOut: vi.fn() } });
+  tab(root, '글꼴 및 색상').click();
+  const bg = row(root, '캘린더 배경');
+  const hex = bg.querySelector<HTMLInputElement>('input.hex')!;
+  const close = [...root.querySelectorAll('button')].find((b) => b.textContent === '닫기')!;
+  hex.value = 'zz';
+  close.click();
+  expect([onClose.mock.calls.length, bg.textContent!.includes('16진수 6자리로 적어 주세요.')]).toEqual([0, true]);
+  hex.value = '#00ff7f';
+  close.click();
+  expect(onAppearance.mock.lastCall![0].calendarBg).toBe('00FF7F');
+  expect(onClose).toHaveBeenCalledTimes(1);
+});

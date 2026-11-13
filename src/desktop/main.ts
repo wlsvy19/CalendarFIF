@@ -125,7 +125,10 @@ if (!app.requestSingleInstanceLock()) {
     installSecurity();
     ipcMain.on(CH.interactive, (e, on: unknown) => {
       const value = parseBool(on);
-      if (isFromWindow(e) && value !== null) setInteractive(value);
+      if (!isFromWindow(e) || value === null) return;
+      setInteractive(value);
+      // 입력을 받는 동안은 전역 단축키를 멈춘다(누르는 조합을 화면이 받을 수 있게). 끝나면 그때의 설정으로 다시 등록한다.
+      hotkeyState = hotkeys.setPaused(value) ?? hotkeyState;
     });
     // 창 자리 조정 메시지: 보낸 곳이 앱의 화면이고 값이 맞을 때만 쓴다.
     ipcMain.on(CH.dragStart, (e) => {

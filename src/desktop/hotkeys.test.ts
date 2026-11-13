@@ -35,3 +35,40 @@ it('다시 적용하면 앞서 등록한 것을 풀고, 두 단축키가 같으�
   m.dispose();
   expect(registered.size).toBe(0);
 });
+it('창이 입력을 받는 동안은 아무것도 등록하지 않고, 끝나면 그때의 설정으로 등록한다', () => {
+  const { reg, registered } = fakeRegistrar();
+  const m = new HotkeyManager(reg);
+  const actions = acts();
+  m.apply({ hideHotkey: hk('Ctrl+Alt+H'), contentHotkey: hk('Ctrl+Alt+F') }, actions);
+  expect(registered.size).toBe(2);
+  expect(m.setPaused(true)).toBeNull();
+  expect(registered.size).toBe(0);
+  expect(m.setPaused(true)).toBeNull();
+  expect(m.setPaused(false)).toEqual({ hide: 'ok', content: 'ok' });
+  expect([...registered.keys()].sort()).toEqual(['Ctrl+Alt+F', 'Ctrl+Alt+H']);
+  registered.get('Ctrl+Alt+H')!();
+  expect(actions.hide).toHaveBeenCalledTimes(1);
+});
+it('멈춘 동안 바꾼 설정은 바로 결과를 알려 주되 등록은 다시 켠 뒤에 한다', () => {
+  const { reg, registered } = fakeRegistrar(['Ctrl+Alt+T']);
+  const m = new HotkeyManager(reg);
+  m.apply({ hideHotkey: hk('Ctrl+Alt+H'), contentHotkey: hk('Ctrl+Alt+F', false) }, acts());
+  m.setPaused(true);
+  expect(m.apply({ hideHotkey: hk('Ctrl+Alt+J'), contentHotkey: hk('Ctrl+Alt+F') }, acts())).toEqual({ hide: 'ok', content: 'ok' });
+  expect(m.apply({ hideHotkey: hk('Ctrl+Alt+T'), contentHotkey: hk('Ctrl+Alt+T') }, acts())).toEqual({ hide: 'taken', content: 'taken' });
+  expect(m.apply({ hideHotkey: hk('Ctrl+Alt+J'), contentHotkey: hk('Ctrl+Alt+J') }, acts())).toEqual({ hide: 'ok', content: 'taken' });
+  expect(m.apply({ hideHotkey: hk('K'), contentHotkey: hk('Ctrl+Alt+F') }, acts())).toEqual({ hide: 'invalid', content: 'ok' });
+  expect(registered.size).toBe(0);
+  m.apply({ hideHotkey: hk('Ctrl+Alt+J'), contentHotkey: hk('Ctrl+Alt+F') }, acts());
+  expect(m.setPaused(false)).toEqual({ hide: 'ok', content: 'ok' });
+  expect([...registered.keys()].sort()).toEqual(['Ctrl+Alt+F', 'Ctrl+Alt+J']);
+});
+it('멈춘 채로 끝내면 등록된 것이 없다', () => {
+  const { reg, registered } = fakeRegistrar();
+  const m = new HotkeyManager(reg);
+  m.apply({ hideHotkey: hk('Ctrl+Alt+H'), contentHotkey: hk('Ctrl+Alt+F') }, acts());
+  m.setPaused(true);
+  m.apply({ hideHotkey: hk('Ctrl+Alt+J'), contentHotkey: hk('Ctrl+Alt+F') }, acts());
+  m.dispose();
+  expect(registered.size).toBe(0);
+});

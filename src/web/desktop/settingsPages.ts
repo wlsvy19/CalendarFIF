@@ -1,7 +1,7 @@
 import { acceleratorFromKey } from '../../core/accelerator';
 import { PALETTE } from '../../core/color';
 import type { Layout } from '../../core/layout';
-import type { CalfifDesktop, SettingsPage } from '../../desktop/api';
+import type { CalfifDesktop, Hotkey, SettingsPage } from '../../desktop/api';
 import type { Appearance, Bullet } from '../appearance';
 import { accountSection, type AccountProps } from '../ui/settings';
 import { playDoneTone } from './tone';
@@ -27,6 +27,8 @@ const DAYS = ['일요일', '월요일', '화요일', '수요일', '목요일', '
 const SHORT_DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const SAVE_FAILED = '이 기기에 저장하지 못했습니다. 지금 화면에만 적용됩니다.';
 const BROWSER_ONLY = '바탕화면 앱에서만 바꿀 수 있습니다.';
+const INVALID_HOTKEY = 'Ctrl 또는 Alt를 넣은 조합을 고르세요.';
+const MODIFIER_KEYS = new Set(['Control', 'Alt', 'Shift', 'Meta', 'AltGraph', 'OS']);
 const HEX_ERROR = '16진수 6자리로 적어 주세요.';
 const NONE_COLOR = new Set<keyof Appearance>(['calendarBg', 'restBg', 'todayBorder']);
 
@@ -207,6 +209,7 @@ export function mountDesktopSettings(root: HTMLElement, props: Props): { destroy
   }));
 
   // 글꼴 및 색상 쪽
+  const hexCommits: (() => boolean)[] = [];
   const colorRow = (label: string, get: () => string, put: (hex: string) => void, withNone: boolean, extra?: HTMLElement): void => {
     const row = add('font', makeRow(label));
     const button = el('button', 'color-btn');
@@ -245,16 +248,28 @@ export function mountDesktopSettings(root: HTMLElement, props: Props): { destroy
     hex.placeholder = 'RRGGBB';
     hex.maxLength = 8;
     hex.setAttribute('autocomplete', 'off');
-    hex.addEventListener('change', () => {
+    // 적은 값을 반영한다. 비어 있으면 할 일이 없고, 잘못되면 오류를 보이고 false를 돌려준다.
+    const commitHex = (): boolean => {
       const value = hex.value.trim().replace(/^#/, '').toUpperCase();
+      if (value === '') return true;
       if (!/^[0-9A-F]{6}$/.test(value)) {
         row.error(HEX_ERROR);
-        return;
+        return false;
       }
       row.error('');
       put(value);
+      hex.value = '';
       paint();
+      return true;
+    };
+    hexCommits.push(() => {
+      if (commitHex()) return true;
+      showPage('font'); // 닫기 전에 잘못 적은 칸을 보여 준다
+      picker.hidden = false;
+      hex.focus();
+      return false;
     });
+    hex.addEventListener('change', commitHex);
     hexLabel.append(el('span', 'srow-hex-label', '직접 입력'), hex);
     picker.append(swatches, hexLabel);
     button.addEventListener('click', () => {
@@ -323,17 +338,40 @@ export function mountDesktopSettings(root: HTMLElement, props: Props): { destroy
     input.setAttribute('aria-label', label);
     const toggle = switchInput(`${label} 켜기`, false, () => send());
     row.ctl.append(input, toggle);
+    // 응답이 오면 칸과 스위치는 늘 돌려받은 값으로 맞춘다. 요청이 던지면 마지막으로 받은 값으로 되돌린다.
+    let good: Hotkey = { accelerator: '', enabled: false };
+    let latest = 0;
+    const show = (h: Hotkey): void => {
+      input.value = h.accelerator;
+      toggle.checked = h.enabled;
+    };
+    const load = (h: Hotkey): void => {
+      good = h;
+      show(h);
+      input.disabled = false;
+      toggle.disabled = false;
+    };
     const send = (): void => {
       if (!bridge) return;
-      const patch = { [field]: { accelerator: input.value, enabled: toggle.checked } };
+      const requested = { accelerator: input.value, enabled: toggle.checked };
+      const mine = ++latest;
       queue = queue.then(async () => {
         try {
-          const next = await bridge.setSystem(patch);
+          const next = await bridge.setSystem({ [field]: requested });
           if (destroyed) return;
+          good = next.settings[field];
+          if (mine !== latest) return; // 더 새 요청이 있으면 그 응답으로 맞춘다
+          show(good);
           const state = next.hotkeys[stateKey];
-          row.error(state === 'taken' ? '다른 프로그램이 이 단축키를 쓰고 있습니다. 다른 조합을 고르세요.' : state === 'invalid' ? 'Ctrl 또는 Alt를 넣은 조합을 고르세요.' : '');
+          row.error(
+            state === 'taken' ? '다른 프로그램이 이 단축키를 쓰고 있습니다. 다른 조합을 고르세요.'
+              : state === 'invalid' || good.accelerator !== requested.accelerator ? INVALID_HOTKEY
+                : good.enabled !== requested.enabled ? '적용하지 못했습니다.' : '',
+          );
         } catch {
-          if (!destroyed) row.error('적용하지 못했습니다.');
+          if (destroyed || mine !== latest) return;
+          show(good);
+          row.error('적용하지 못했습니다.');
         }
       });
     };
@@ -345,9 +383,13 @@ export function mountDesktopSettings(root: HTMLElement, props: Props): { destroy
         sheet.focus();
         return;
       }
-      const accelerator = acceleratorFromKey(e);
-      if (accelerator === null) return; // Tab 같은 이동 키는 그대로 둔다
+      if (MODIFIER_KEYS.has(e.key) || e.key === 'Tab') return; // 수식키만 누른 것과 이동 키는 그대로 둔다
       e.preventDefault();
+      const accelerator = acceleratorFromKey(e);
+      if (accelerator === null) {
+        row.error(INVALID_HOTKEY); // 받을 수 없는 조합(Ctrl이나 Alt가 없음, Alt+F4, Windows 키 등)
+        return;
+      }
       input.value = accelerator;
       send();
     });
@@ -356,7 +398,7 @@ export function mountDesktopSettings(root: HTMLElement, props: Props): { destroy
       toggle.disabled = true;
       row.help(BROWSER_ONLY);
     }
-    return { row, input, toggle };
+    return { row, input, toggle, load };
   };
   const hide = hotkeyRow('advanced', '캘린더 숨기기 단축키', 'hideHotkey', 'hide');
   const content = hotkeyRow('advanced', '내용 표시 및 숨기기 단축키', 'contentHotkey', 'content');
@@ -385,10 +427,7 @@ export function mountDesktopSettings(root: HTMLElement, props: Props): { destroy
       (state) => {
         if (destroyed) return;
         for (const [h, saved] of [[hide, state.settings.hideHotkey], [content, state.settings.contentHotkey]] as const) {
-          h.input.value = saved.accelerator;
-          h.toggle.checked = saved.enabled;
-          h.input.disabled = false;
-          h.toggle.disabled = false;
+          h.load(saved);
         }
         start.checked = state.canStartWithWindows && state.settings.startWithWindows === true;
         start.disabled = !state.canStartWithWindows;
@@ -447,13 +486,17 @@ export function mountDesktopSettings(root: HTMLElement, props: Props): { destroy
   sheet.append(tablist, notice, ...panels.values());
 
   const closeBtn = sheet.querySelector<HTMLButtonElement>('.textbtn.end')!;
-  closeBtn.addEventListener('click', props.onClose);
-  scrim.addEventListener('click', props.onClose);
+  // 적고 아직 반영하지 않은 16진수 값은 닫기 전에 반영한다. 잘못된 값이 있으면 닫지 않고 오류를 보인다.
+  const requestClose = (): void => {
+    if (hexCommits.map((commit) => commit()).every(Boolean)) props.onClose();
+  };
+  closeBtn.addEventListener('click', requestClose);
+  scrim.addEventListener('click', requestClose);
   sheet.addEventListener('keydown', (e) => {
     if (e.isComposing) return;
     if (e.key === 'Escape') {
       e.preventDefault();
-      props.onClose();
+      requestClose();
       return;
     }
     if (e.key !== 'Tab') return;

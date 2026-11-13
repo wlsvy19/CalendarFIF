@@ -316,27 +316,34 @@ async function settings(_rt: Runtime, desk: Desk): Promise<Result> {
   await until(async () => ((await js(win, `${hideRow}.querySelector('input.hotkey').disabled`)) as boolean) === false, 5000);
   await js(win, `${hideRow}.querySelector('input.hotkey').dispatchEvent(new KeyboardEvent('keydown', { code: 'F9', key: 'F9', ctrlKey: true, altKey: true, shiftKey: true, bubbles: true }))`);
   await js(win, `${hideRow}.querySelector('input[role="switch"]').click()`);
-  await until(() => globalShortcut.isRegistered(HIDE_KEY), 3000);
+  // 설정 화면이 열려 있는 동안은 전역 단축키를 모두 멈춘다. 바꾼 값은 저장되고 결과(ok)는 등록해 보고 풀어서 알린다.
+  await until(() => getSettings().hideHotkey.enabled, 3000);
+  const registered = () => [HIDE_KEY, CONTENT_KEY].filter((k) => globalShortcut.isRegistered(k)).length;
+  const registeredWhileInteractive = registered();
   const saved = getSettings().hideHotkey;
   const hotkeyState = desk.applySystem({}).hotkeys.hide;
-  const hotkey = { accelerator: saved.accelerator, state: hotkeyState, registered: globalShortcut.isRegistered(HIDE_KEY) };
+  const registeredWhileInteractiveAfterApply = registered();
   const startSwitchDisabled = (await js(win, `${rowOf('Windows 시작 시 실행')}.querySelector('input[role="switch"]').disabled`)) as boolean;
-
-  // 시험이 끝나면 단축키를 풀고 설정도 되돌린다.
-  desk.applySystem({ hideHotkey: { accelerator: HIDE_KEY, enabled: false } });
-  const noneRegistered = !globalShortcut.isRegistered(HIDE_KEY);
 
   await js(win, "[...document.querySelectorAll('.desk-settings .textbtn')].find((b) => b.textContent === '닫기').click()");
   const closed = await sheet(false);
   await until(() => !win.isFocusable(), 3000);
   const interactiveAfterClose = win.isFocusable();
   const atBottomAfterClose = await until(bottom, 3000);
+  // 입력이 끝나면 켜 둔 단축키(하나)가 다시 등록된다.
+  const registeredAfterClose = await until(() => registered() === 1, 3000) ? 1 : registered();
+  const hotkey = { accelerator: saved.accelerator, state: hotkeyState, registered: globalShortcut.isRegistered(HIDE_KEY) };
 
-  const fields = { opened, tabs, interactiveWhileOpen, cellBg, savedTransparency, hotkey, startSwitchDisabled, noneRegistered, closed, interactiveAfterClose, atBottomAfterClose, loginItemCalls };
+  // 시험이 끝나면 단축키를 풀고 설정도 되돌린다.
+  desk.applySystem({ hideHotkey: { accelerator: HIDE_KEY, enabled: false } });
+  const noneRegistered = registered() === 0;
+
+  const fields = { opened, tabs, interactiveWhileOpen, cellBg, savedTransparency, hotkey, registeredWhileInteractive, registeredWhileInteractiveAfterApply, registeredAfterClose, startSwitchDisabled, noneRegistered, closed, interactiveAfterClose, atBottomAfterClose, loginItemCalls };
   const checks = {
     opened, tabs: JSON.stringify(tabs) === JSON.stringify(['캘린더', '셀', '글꼴 및 색상', '고급', '계정']), interactiveWhileOpen,
     cellBg: cellBg === 'rgba(20, 24, 32, 0.7)', savedTransparency: savedTransparency === 30,
-    hotkey: hotkey.accelerator === HIDE_KEY && hotkey.state === 'ok' && hotkey.registered, startSwitchDisabled, noneRegistered, closed,
+    hotkey: hotkey.accelerator === HIDE_KEY && hotkey.state === 'ok' && hotkey.registered, startSwitchDisabled,
+    registeredWhileInteractive: registeredWhileInteractive === 0 && registeredWhileInteractiveAfterApply === 0, registeredAfterClose: registeredAfterClose === 1, noneRegistered, closed,
     interactiveAfterClose: interactiveAfterClose === false, atBottomAfterClose, loginItemCalls: loginItemCalls === 0,
   };
   return { fields, checks };
