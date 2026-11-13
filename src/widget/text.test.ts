@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { capLines, estimateWidth, fitText, memoLines } from './text';
+import { capLines, estimateWidth, fitText, memoLines, wrapText } from './text';
 
 describe('estimateWidth', () => {
   it('is 0 for an empty string', () => expect(estimateWidth('', 10)).toBe(0));
@@ -41,4 +41,18 @@ describe('capLines', () => {
   it('keeps lines that fit', () => expect(capLines(['a', 'b'], 3)).toEqual({ shown: ['a', 'b'], more: 0 }));
   it('keeps exactly max lines', () => expect(capLines(['a', 'b', 'c'], 3)).toEqual({ shown: ['a', 'b', 'c'], more: 0 }));
   it('shows nothing for max <= 0', () => expect(capLines(['a', 'b'], 0)).toEqual({ shown: [], more: 2 }));
+});
+
+describe('wrapText', () => {
+  it('keeps a line that fits', () => expect(wrapText('안녕', 10, 30)).toEqual(['안녕']));
+  it('returns nothing for an empty string', () => expect(wrapText('', 10, 30)).toEqual([]));
+  it('breaks at the last space that fits', () => {
+    expect(wrapText('가나 다라 마바', 10, 50)).toEqual(['가나 다라', '마바']);
+  });
+  it('breaks exactly at a space', () => expect(wrapText('가나다 라마', 10, 30)).toEqual(['가나다', '라마']));
+  it('breaks inside a word that is too wide', () => expect(wrapText('가나다라마바사', 10, 30)).toEqual(['가나다', '라마바', '사']));
+  it('stops when not even one character fits', () => expect(wrapText('가나', 10, 5)).toEqual([]));
+  it('fits every piece', () => {
+    for (const piece of wrapText('이 스크립트를 한 번 실행해 Scriptable', 12, 60)) expect(estimateWidth(piece, 12)).toBeLessThanOrEqual(60);
+  });
 });

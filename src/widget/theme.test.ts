@@ -16,4 +16,8 @@ describe('dayBackground', () => {
   it('lays the colour over the dark surface at 45%', () => {
     expect(dayBackground('F12424', 'dark')).toBe(mixHex('#F12424', PALETTES.dark.surface, 0.45));
   });
+  it('falls back to the plain surface for a colour that is not valid', () => {
+    expect(dayBackground('zzz', 'light')).toBe(PALETTES.light.surface);
+    expect(dayBackground('', 'dark')).toBe(PALETTES.dark.surface);
+  });
 });

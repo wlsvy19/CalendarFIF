@@ -45,3 +45,26 @@ export function capLines<T>(lines: T[], max: number): { shown: T[]; more: number
   if (lines.length <= max) return { shown: lines, more: 0 };
   return { shown: lines.slice(0, max - 1), more: lines.length - (max - 1) };
 }
+
+/** 폭을 넘는 줄을 여러 줄로 나눈다. 폭 안에 들어가는 마지막 공백에서 끊고, 공백이 없으면 낱말 안에서 끊는다. 한 글자도 안 들어가는 폭이면 거기서 멈춘다. */
+export function wrapText(text: string, size: number, maxWidth: number): string[] {
+  const out: string[] = [];
+  let rest = text;
+  while (rest !== '') {
+    const fit = fitText(rest, size, maxWidth);
+    if (fit === '') break;
+    if (fit === rest) {
+      out.push(fit);
+      break;
+    }
+    const space = rest[fit.length] === ' ' ? fit.length : fit.lastIndexOf(' ');
+    if (space > 0) {
+      out.push(rest.slice(0, space).trimEnd());
+      rest = rest.slice(space + 1).trimStart();
+    } else {
+      out.push(fit);
+      rest = rest.slice(fit.length);
+    }
+  }
+  return out;
+}

@@ -55,7 +55,7 @@ const shots: Shot[] = [
   { name: 'widget-small-dark', scene: make('small', 'dark', november, '2026-11-13') },
   {
     name: 'widget-message-light',
-    scene: messageScene({ theme: 'light', size: widgetSize(SCREEN, 'small'), title: 'CalendarFIF', lines: ['Scriptable에서 이 스크립트를 한 번 실행해', '로그인하세요.'] }),
+    scene: messageScene({ theme: 'light', size: widgetSize(SCREEN, 'small'), title: 'CalendarFIF', lines: ['Scriptable 앱에서', '이 스크립트를 한 번 실행해', '로그인하세요.'] }),
   },
 ];
 

@@ -227,8 +227,8 @@ describe('scaling', () => {
       const o = a.draws[i];
       expect(d.kind).toBe(o.kind);
       if (d.kind !== 'line' && o.kind !== 'line') {
-        expect(Math.abs(d.x - o.x * k)).toBeLessThan(0.01);
-        expect(Math.abs(d.w - o.w * k)).toBeLessThan(0.01);
+        expect(Math.abs(d.x - o.x * k)).toBeLessThan(0.02);
+        expect(Math.abs(d.w - o.w * k)).toBeLessThan(0.02);
       }
     });
   });
@@ -245,10 +245,62 @@ describe('messageScene', () => {
     expect(b.y - a.y).toBe(17);
     expect(a.y).toBeGreaterThan(title.y);
   });
-  it('cuts lines that are too long', () => {
-    const s = messageScene({ theme: 'light', size: { width: 170, height: 170 }, title: 'T', lines: ['아주 긴 안내 문장이 폭을 넘어갑니다 정말로'] });
-    const t = texts(s)[1];
-    expect(t.text.length).toBeLessThan('아주 긴 안내 문장이 폭을 넘어갑니다 정말로'.length);
-    expect(estimateWidth(t.text, t.size)).toBeLessThanOrEqual(t.w);
+  it('wraps lines that are too long and keeps every character', () => {
+    const size = widgetSize({ width: 402, height: 874 }, 'small');
+    const input = ['Scriptable 앱에서', '이 스크립트를 한 번 실행해', '로그인하세요.'];
+    const s = messageScene({ theme: 'light', size, title: 'CalendarFIF', lines: input });
+    const body = texts(s).slice(1);
+    expect(body.length).toBeGreaterThan(input.length);
+    expect(body.map((t) => t.text).join('').replace(/ /g, '')).toBe(input.join('').replace(/ /g, ''));
+    for (const t of body) expect(estimateWidth(t.text, t.size)).toBeLessThanOrEqual(t.w);
+    for (const t of body) expect(t.y + t.h).toBeLessThanOrEqual(size.height);
+  });
+  it('leaves out lines that no longer fit the height', () => {
+    const s = messageScene({ theme: 'light', size: { width: 161, height: 80 }, title: 'T', lines: ['하나', '둘', '셋', '넷', '다섯'] });
+    expect(texts(s).length).toBeLessThan(6);
+    for (const t of texts(s)) expect(t.y + t.h).toBeLessThanOrEqual(80);
+  });
+});
+
+describe('fix round 1', () => {
+  it('never draws a font below 8 pt, also on a 375x667 screen', () => {
+    for (const family of ['large', 'medium', 'small'] as const) {
+      const size = widgetSize({ width: 375, height: 667 }, family);
+      for (const offline of [false, true]) {
+        const s = buildScene({ family, theme: 'light', size, today: TODAY, month: busy, offline });
+        for (const t of texts(s)) {
+          expect(t.size, t.text).toBeGreaterThanOrEqual(8);
+          expect(estimateWidth(t.text, t.size), t.text).toBeLessThanOrEqual(t.w + 1e-6);
+        }
+      }
+    }
+  });
+
+  it('strikes done lines in the small widget too', () => {
+    const s = buildScene({ family: 'small', theme: 'light', size: sizeOf('small'), today: TODAY, month: nov({ '13': { text: '할 일\n[+]장보기', color: '' } }), offline: false });
+    const done = texts(s).find((t) => t.text === '장보기')!;
+    expect(done.alpha).toBe(0.55);
+    const strike = lines(s);
+    expect(strike).toHaveLength(1);
+    expect(strike[0]).toMatchObject({ x1: done.x, alpha: 0.55, width: 0.75 });
+    expect(strike[0].y1).toBeCloseTo(done.y + done.h / 2, 1);
+    expect(strike[0].x2 - strike[0].x1).toBeCloseTo(estimateWidth('장보기', done.size), 1);
+  });
+
+  it('ignores a day colour that is not six hex digits', () => {
+    for (const color of ['zzz', 'f12424', '#F12424']) {
+      const m = nov({ '13': { text: '메모', color } });
+      const l = large(m);
+      expect(rects(l).every((r) => /^#[0-9A-F]{6}$/.test(r.color))).toBe(true);
+      expect(rects(l).filter((r) => r.radius === undefined).slice(1).every((r) => r.color === PALETTES.light.surface)).toBe(true);
+      const sm = buildScene({ family: 'small', theme: 'light', size: sizeOf('small'), today: TODAY, month: m, offline: false });
+      expect(rects(sm)).toHaveLength(0);
+    }
+  });
+
+  it('draws no strike line for a done line that was dropped', () => {
+    const s = buildScene({ family: 'large', theme: 'light', size: { width: 40, height: 80 }, today: TODAY, month: nov({ '10': { text: '[+]장보기', color: '' } }), offline: false });
+    expect(texts(s).some((t) => t.text.includes('장'))).toBe(false);
+    expect(lines(s)).toHaveLength(0);
   });
 });

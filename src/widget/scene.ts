@@ -2,7 +2,8 @@ import { buildPage } from '../core/layout';
 import type { GridCell } from '../core/dates';
 import type { DayValue } from '../core/types';
 import type { Family, Size } from './sizes';
-import { capLines, estimateWidth, fitText, memoLines } from './text';
+import { isColor } from '../core/color';
+import { capLines, estimateWidth, fitText, memoLines, wrapText } from './text';
 import { PALETTES, dayBackground, type Palette, type Theme } from './theme';
 
 export type Draw =
@@ -19,14 +20,31 @@ const MONTH_OPTS = { layout: 'month', maxRows: 6, pastWeeks: 0, weekStart: 0, fi
 type TextOpts = { size: number; weight?: 'regular' | 'semibold' | 'bold'; color: string; alpha?: number; align?: 'left' | 'center' | 'right' };
 
 /** 글자 폭에 맞게 잘라서 text 명령을 더한다. 높이는 글자 크기의 1.25배. */
-function pushText(draws: Draw[], x: number, y: number, w: number, h: number, text: string, o: TextOpts): void {
-  const fitted = fitText(text, o.size, w);
-  if (fitted === '') return;
-  draws.push({
-    kind: 'text', x: r2(x), y: r2(y), w: r2(w), h: r2(h), text: fitted, size: r2(o.size),
+const MIN_FONT = 8;
+
+/** 글자 폭에 맞게 잘라서 text 명령을 더한다. 글자는 8 아래로 줄이지 않는다. 아무 글자도 들어가지 않으면 더하지 않고 null을 돌려준다. */
+function pushText(draws: Draw[], x: number, y: number, w: number, h: number, text: string, o: TextOpts): Extract<Draw, { kind: 'text' }> | null {
+  const size = Math.max(MIN_FONT, o.size);
+  const fitted = fitText(text, size, w);
+  if (fitted === '') return null;
+  const cmd: Extract<Draw, { kind: 'text' }> = {
+    kind: 'text', x: r2(x), y: r2(y), w: r2(w), h: r2(h), text: fitted, size: r2(size),
     weight: o.weight ?? 'regular', color: o.color, ...(o.alpha === undefined ? {} : { alpha: o.alpha }), align: o.align ?? 'left',
-  });
+  };
+  draws.push(cmd);
+  return cmd;
 }
+
+/** 메모 한 줄. 완료 줄은 흐리게 하고 글자 가운데를 지나는 줄을 긋는다. 글자가 안 그려지면 줄도 긋지 않는다. */
+function pushMemoLine(draws: Draw[], x: number, y: number, w: number, h: number, line: { text: string; done: boolean }, size: number, color: string, strokeWidth: number): void {
+  const cmd = pushText(draws, x, y, w, h, line.text, { size, color, ...(line.done ? { alpha: 0.55 } : {}) });
+  if (!cmd || !line.done) return;
+  const mid = r2(y + h / 2);
+  const len = Math.min(estimateWidth(cmd.text, cmd.size), w);
+  draws.push({ kind: 'line', x1: r2(x), y1: mid, x2: r2(x + len), y2: mid, color, alpha: 0.55, width: r2(strokeWidth) });
+}
+
+const validColor = (day: DayValue | undefined): string => (day && day.color !== '' && isColor(day.color) ? day.color : '');
 
 function pushRect(draws: Draw[], x: number, y: number, w: number, h: number, color: string, extra: { alpha?: number; radius?: number } = {}): void {
   draws.push({ kind: 'rect', x: r2(x), y: r2(y), w: r2(w), h: r2(h), color, ...extra });
@@ -55,8 +73,9 @@ function drawWeekdays(c: Ctx, gridX: number, cellW: number, gap: number, y: numb
 
 function drawCell(c: Ctx, cell: GridCell, x: number, y: number, w: number, h: number, day: DayValue | undefined, today: string, maxLines: number): void {
   const { draws, p, theme, s } = c;
-  const hasColor = !!day && day.color !== '';
-  pushRect(draws, x, y, w, h, hasColor ? dayBackground(day.color, theme) : p.surface);
+  const color = validColor(day);
+  const hasColor = color !== '';
+  pushRect(draws, x, y, w, h, hasColor ? dayBackground(color, theme) : p.surface);
 
   const pad = 3 * s;
   const innerW = w - 2 * pad;
@@ -80,13 +99,7 @@ function drawCell(c: Ctx, cell: GridCell, x: number, y: number, w: number, h: nu
   const { shown, more } = capLines(memoLines(day.text), capacity);
   let ly = y + 16 * s;
   for (const line of shown) {
-    const alpha = line.done ? { alpha: 0.55 } : {};
-    pushText(draws, x + pad, ly, innerW, lineH, line.text, { size, color: p.ink, ...alpha });
-    if (line.done) {
-      const mid = r2(ly + lineH / 2);
-      const len = Math.min(estimateWidth(fitText(line.text, size, innerW), size), innerW);
-      draws.push({ kind: 'line', x1: r2(x + pad), y1: mid, x2: r2(x + pad + len), y2: mid, color: p.ink, alpha: 0.55, width: r2(0.75 * s) });
-    }
+    pushMemoLine(draws, x + pad, ly, innerW, lineH, line, size, p.ink, 0.75 * s);
     ly += lineH;
   }
   if (more > 0) pushText(draws, x + pad, ly, innerW, lineH, `+${more}`, { size, color: p.muted });
@@ -133,7 +146,8 @@ function buildSmall(input: Parameters<typeof buildScene>[0], p: Palette): Scene 
   const day = month.days[today.slice(8, 10)];
   const pad = 12 * s;
 
-  if (day && day.color !== '') pushRect(draws, 0, 0, 4 * s, size.height, `#${day.color}`);
+  const barColor = validColor(day);
+  if (barColor !== '') pushRect(draws, 0, 0, 4 * s, size.height, `#${barColor}`);
   pushText(draws, pad, pad, 46 * s, 41 * s, String(Number(today.slice(8, 10))), { size: 34 * s, weight: 'bold', color: dowColor(p, dow) });
   const labelX = pad + 48 * s;
   const labelW = size.width - labelX - pad;
@@ -148,7 +162,7 @@ function buildSmall(input: Parameters<typeof buildScene>[0], p: Palette): Scene 
     const { shown, more } = capLines(lines, 6);
     let y = 62 * s;
     for (const line of shown) {
-      pushText(draws, pad, y, size.width - 2 * pad, lineH, line.text, { size: 11 * s, color: p.ink, ...(line.done ? { alpha: 0.55 } : {}) });
+      pushMemoLine(draws, pad, y, size.width - 2 * pad, lineH, line, 11 * s, p.ink, 0.75 * s);
       y += lineH;
     }
     if (more > 0) pushText(draws, pad, y, size.width - 2 * pad, lineH, `+${more}`, { size: 11 * s, color: p.muted });
@@ -177,7 +191,8 @@ export function messageScene(input: { theme: Theme; size: Size; title: string; l
   const pad = 14;
   const w = size.width - 2 * pad;
   pushText(draws, pad, pad, w, 19, input.title, { size: 15, weight: 'bold', color: p.ink });
-  input.lines.forEach((line, i) => {
+  const wrapped = input.lines.flatMap((line) => wrapText(line, 12, w));
+  wrapped.forEach((line, i) => {
     const y = pad + 25 + i * 17;
     if (y + 15 <= size.height - pad) pushText(draws, pad, y, w, 15, line, { size: 12, color: p.muted });
   });

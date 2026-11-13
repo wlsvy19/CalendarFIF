@@ -1,3 +1,5 @@
+import { isColor } from '../core/color';
+
 export type Theme = 'light' | 'dark';
 export type Palette = {
   surface: string;
@@ -26,7 +28,8 @@ export function mixHex(a: string, b: string, ratio: number): string {
   return `#${mixed.join('').toUpperCase()}`;
 }
 
-/** 날짜 배경색(RRGGBB, '#' 없음)을 칸 바탕에 깐 색. 밝은 화면 38%, 어두운 화면 45%. */
+/** 날짜 배경색(RRGGBB, '#' 없음)을 칸 바탕에 깐 색. 색이 올바르지 않으면 칸 바탕 그대로. */
 export function dayBackground(color: string, theme: Theme): string {
+  if (color === '' || !isColor(color)) return PALETTES[theme].surface;
   return mixHex(`#${color}`, PALETTES[theme].surface, theme === 'light' ? 0.38 : 0.45);
 }
