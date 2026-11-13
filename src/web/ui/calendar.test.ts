@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DayValue } from '../../core/types';
 import type { SyncStatus } from '../../sync/engine';
 import type { CalendarStore } from '../state';
+import { shiftMonth } from '../../core/dates';
 import { DEFAULT_APPEARANCE, type Appearance } from '../appearance';
 import { displayLines, mountCalendar, visibleLines } from './calendar';
 
@@ -231,5 +232,51 @@ describe('화면 설정', () => {
     expect([[...cell(root, '2026-12-01').classList].filter((c) => c.startsWith('m-')), has(cell(root, '2026-11-01'), 'm-top')]).toEqual([['m-top', 'm-left'], false]);
     const off = mountA({ shadow: false, titleBar: false }).querySelector<HTMLElement>('.calendar')!;
     expect([has(off, 'shadow'), off.querySelector<HTMLElement>('.app-head')!.hidden]).toEqual([false, true]);
+  });
+});
+describe('구독과 날짜 열기', () => {
+  function mountS(a: Partial<Appearance> | undefined) {
+    const root = document.createElement('div');
+    let month = '2026-11';
+    const subscribed = new Set<string>();
+    const store = {
+      current: () => month,
+      show: vi.fn((m: string, also: string[] = []) => {
+        month = m;
+        subscribed.clear();
+        for (const x of [shiftMonth(m, -1), m, shiftMonth(m, 1), ...also]) subscribed.add(x);
+      }),
+      covers: (m: string) => subscribed.has(m),
+      days: () => ({}),
+      onChange: () => () => {},
+      readProblem: () => null,
+    } as unknown as CalendarStore & { show: ReturnType<typeof vi.fn> };
+    store.show('2026-11');
+    store.show.mockClear();
+    const handle = mountCalendar(root, { store, status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} }, today: () => '2026-11-13', onOpenDay: vi.fn(), onOpenSettings: vi.fn(), appearance: a && { ...DEFAULT_APPEARANCE, ...a } });
+    return { root, store, handle, subscribed };
+  }
+  const title = (root: HTMLElement) => root.querySelector('.month')!.textContent;
+  it('여러 달에 걸친 쪽은 앞뒤 한 달 밖의 달을 더해서 구독한다', () => {
+    const { store } = mountS({ layout: 'floating', maxRows: 8, pastWeeks: 0 });
+    expect(store.show).toHaveBeenLastCalledWith('2026-11', ['2027-01']);
+  });
+  it('쪽이 바뀌면 앞 쪽이 더한 달을 정리한다', () => {
+    const { handle, subscribed } = mountS({ layout: 'floating', maxRows: 8, pastWeeks: 0 });
+    expect(subscribed.has('2027-01')).toBe(true);
+    handle.setAppearance({ ...DEFAULT_APPEARANCE, layout: 'month' });
+    expect([...subscribed].sort()).toEqual(['2026-10', '2026-11', '2026-12']);
+  });
+  it('전체 월은 다른 달의 날짜를 열면 그 달로 넘어간다', () => {
+    const { root, store, handle } = mountS(undefined);
+    handle.showMonth('2026-12');
+    expect([store.current(), title(root)]).toEqual(['2026-12', '12월']);
+  });
+  it('다른 배치는 보이는 쪽에 있는 날짜를 열어도 쪽을 바꾸지 않는다', () => {
+    const { root, store, handle } = mountS({ layout: 'floating' });
+    handle.showMonth('2026-12'); // 쪽은 11월 1일부터 12월 5일까지
+    expect([store.current(), title(root)]).toEqual(['2026-11', '11월']);
+    handle.showMonth('2027-06');
+    expect([store.current(), title(root)]).toEqual(['2027-06', '6월']);
   });
 });

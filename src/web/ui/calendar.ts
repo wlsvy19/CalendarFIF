@@ -42,7 +42,7 @@ export type CalendarDeps = {
   appearance?: Appearance;
 };
 
-export type CalendarHandle = { destroy(): void; setAppearance(a: Appearance): void; goToday(): void };
+export type CalendarHandle = { destroy(): void; setAppearance(a: Appearance): void; goToday(): void; showMonth(monthId: string): void };
 
 const dowSpan = (dow: number): string => `<span${dow === 0 ? ' class="sun"' : dow === 6 ? ' class="sat"' : ''}>${WEEKDAYS[dow]}</span>`;
 
@@ -200,7 +200,10 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
 
   function render(): void {
     // 바로가기 주소 등으로 저장소가 다른 달로 옮겨졌으면 그 달 1일부터 보여 준다.
-    if (store.current() !== anchor.slice(0, 7)) anchor = `${store.current()}-01`;
+    if (store.current() !== anchor.slice(0, 7)) {
+      anchor = `${store.current()}-01`;
+      extraMonths = [];
+    }
     const page = buildPage(pageOptions(appearance), anchor);
     const [year, month] = page.title.split('-');
     yearEl.textContent = `${year}년`;
@@ -212,12 +215,15 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   }
 
   // 구독할 달을 알리고 다시 그린다. 쪽의 달 중 앞뒤 한 달 밖의 것은 더해서 구독한다.
+  // 앞 쪽이 더한 달이 남아 있으면 더할 달이 없어도 알려서 정리한다.
+  let extraMonths: string[] = [];
   function showAnchor(next: string, always: boolean): void {
     anchor = next;
     const page = buildPage(pageOptions(appearance), anchor);
     const also = pageMonths(page).filter((m) => m < shiftMonth(page.title, -1) || m > shiftMonth(page.title, 1));
     if (also.length > 0) store.show(page.title, also);
-    else if (always) store.show(page.title);
+    else if (always || extraMonths.length > 0) store.show(page.title);
+    extraMonths = also;
     render();
   }
 
@@ -415,6 +421,13 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
       showAnchor(anchor, false);
     },
     goToday,
+    // 열려는 날짜의 달로 간다. 전체 월은 늘 그 달로 넘어가고, 다른 배치는 이미 구독 중이면(보이는 쪽에 있으면) 그대로 둔다.
+    showMonth(monthId) {
+      if (appearance.layout !== 'month' && store.covers(monthId)) return;
+      store.show(monthId);
+      extraMonths = [];
+      render();
+    },
     destroy() {
       offChange();
       offStatus();
