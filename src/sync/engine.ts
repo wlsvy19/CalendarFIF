@@ -1,5 +1,5 @@
 import { normalizeColor } from '../core/color';
-import { resolveEdit } from '../core/merge';
+import { resolveEdits } from '../core/merge';
 import { normalizeText } from '../core/text';
 import type { DayChange, DayValue, MonthDoc, PendingEdit } from '../core/types';
 import type { Outbox } from './outbox';
@@ -77,13 +77,8 @@ export class SyncEngine {
     let read: PendingEdit[] = [];
     try {
       await this.store.transactMonth(monthId, (server) => {
-        read = this.outbox.list().filter((e) => e.monthId === monthId);
-        const changes: Record<string, DayChange> = {};
-        for (const edit of read) {
-          const change = resolveEdit(edit, server?.days[edit.day] ?? null, this.editedBy);
-          if (change !== null) changes[edit.day] = change;
-        }
-        return changes;
+        read = this.outbox.markSent(monthId);
+        return resolveEdits(read, server?.days ?? {}, this.editedBy);
       });
     } catch {
       return 0;

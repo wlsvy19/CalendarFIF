@@ -85,3 +85,17 @@ export function resolveEdit(edit: PendingEdit, server: DayRecord | null, editedB
   if (merged.text === '' && merged.color === '') return 'delete';
   return { text: merged.text, color: merged.color, editedAt, editedBy };
 }
+
+/** Applies one month's pending edits, in queue order, on top of the server's days. Returns the day changes to write. */
+export function resolveEdits(edits: PendingEdit[], days: Record<string, DayRecord>, editedBy: string): Record<string, DayChange> {
+  const running = new Map<string, DayRecord | null>();
+  const changes: Record<string, DayChange> = {};
+  for (const edit of edits) {
+    const current = running.has(edit.day) ? running.get(edit.day)! : (days[edit.day] ?? null);
+    const change = resolveEdit(edit, current, editedBy);
+    if (change === null) continue;
+    changes[edit.day] = change;
+    running.set(edit.day, change === 'delete' ? null : change);
+  }
+  return changes;
+}

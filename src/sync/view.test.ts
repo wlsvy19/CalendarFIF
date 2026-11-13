@@ -16,3 +16,8 @@ it('서버 문서가 없어도 대기 편집은 보인다', () => {
 it('지우는 편집이면 그 날짜가 빠진다', () => {
   expect(applyPending('2026-11', { days: { '13': rec('A') } }, [edit('2026-11', '13', 'A', '')], 'pc')).toEqual({});
 });
+it('같은 날짜의 편집 두 개는 서버가 첫 편집을 이미 받았어도 같게 보인다', () => {
+  const pending = [{ ...edit('2026-11', '13', 'A', 'A\nB', 100), sent: true as const }, edit('2026-11', '13', 'A\nB', 'A\nB\nC', 200)];
+  expect(applyPending('2026-11', { days: { '13': rec('A') } }, pending, 'pc')).toEqual({ '13': { text: 'A\nB\nC', color: '' } });
+  expect(applyPending('2026-11', { days: { '13': rec('A\nB') } }, pending, 'pc')).toEqual({ '13': { text: 'A\nB\nC', color: '' } });
+});

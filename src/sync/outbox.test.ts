@@ -47,3 +47,39 @@ it('저장소에 쓸 수 없으면 메모리에 두고 알린다', () => {
   expect(o.list()).toHaveLength(1);
   expect(o.persistent).toBe(false);
 });
+it('보낸 항목 뒤의 편집은 자기 base로 따로 쌓인다', () => {
+  const o = new Outbox(new MemoryStorage(), 'u1');
+  o.put(edit('2026-11', '13', 'A\nB', 'A', 100));
+  o.markSent('2026-11');
+  o.put(edit('2026-11', '13', 'A', 'A\nB', 200));
+  expect(o.list()).toEqual([{ ...edit('2026-11', '13', 'A\nB', 'A', 100), sent: true }, edit('2026-11', '13', 'A', 'A\nB', 200)]);
+});
+it('markSent는 같은 저장소의 다른 Outbox에도 보인다', () => {
+  const s = new MemoryStorage();
+  const a = new Outbox(s, 'u1');
+  const b = new Outbox(s, 'u1');
+  a.put(edit('2026-11', '13', '', 'X'));
+  a.put(edit('2026-12', '01', '', 'Y'));
+  expect(a.markSent('2026-11').map((e) => e.day)).toEqual(['13']);
+  expect(b.list().map((e) => e.sent)).toEqual([true, undefined]);
+});
+it('remove는 보낸 표시가 없는 같은 항목은 지우지 않는다', () => {
+  const o = new Outbox(new MemoryStorage(), 'u1');
+  o.put(edit('2026-11', '13', 'A\nB', 'A', 100));
+  const sent = o.markSent('2026-11');
+  o.put(edit('2026-11', '13', 'A', 'A\nB', 100));
+  o.remove(sent);
+  expect(o.list()).toEqual([edit('2026-11', '13', 'A', 'A\nB', 100)]);
+});
+it.each([['[null]'], ['[{"monthId":"2026-11"}]']])('항목이 올바르지 않은 %s는 따로 보관하고 빈 대기열로 시작한다', (raw) => {
+  const s = new MemoryStorage();
+  s.setItem(KEY, raw);
+  const o = new Outbox(s, 'u1');
+  expect(o.list()).toEqual([]);
+  expect([...s.data].some(([k, value]) => k.startsWith(`${KEY}.corrupt.`) && value === raw)).toBe(true);
+});
+it('깨진 내용은 만들자마자 알린다', () => {
+  const s = new MemoryStorage();
+  s.setItem(KEY, '{oops');
+  expect(new Outbox(s, 'u1').corruptDetected).toBe(true);
+});

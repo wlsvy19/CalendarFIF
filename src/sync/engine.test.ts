@@ -72,3 +72,58 @@ it('올리는 도중에 같은 날짜를 또 고쳐도 줄이 겹치지 않는�
   expect(store.docs.get('2026-11')!.days['13'].text).toBe('A\nB\nC');
   expect(engine.status().pending).toBe(0);
 });
+it('올린 직후 지운 줄을 다시 써도 사라지지 않는다', async () => {
+  const { store, outbox, engine } = setup({ '2026-11': { days: { '13': rec('A\nB') } } });
+  store.afterCommit = () => { engine.saveEdit('2026-11', '13', val('A'), val('A\nB')); };
+  engine.saveEdit('2026-11', '13', val('A\nB'), val('A'));
+  await engine.flush();
+  expect(store.docs.get('2026-11')!.days['13'].text).toBe('A\nB');
+  expect(outbox.list()).toEqual([]);
+});
+it('올린 직후 일부를 되돌려도 지운 줄이 살아나지 않는다', async () => {
+  const { store, engine } = setup({ '2026-11': { days: { '13': rec('A') } } });
+  store.afterCommit = () => { engine.saveEdit('2026-11', '13', val('A\nB'), val('A\nC')); };
+  engine.saveEdit('2026-11', '13', val('A'), val('A\nB'));
+  await engine.flush();
+  expect(store.docs.get('2026-11')!.days['13'].text).toBe('A\nC');
+});
+it('올린 직후 배경색을 지워도 색이 되살아나지 않는다', async () => {
+  const { store, engine, setNow } = setup({ '2026-11': { days: { '13': rec('A') } } });
+  store.afterCommit = () => {
+    setNow(2000);
+    engine.saveEdit('2026-11', '13', val('A', 'F12424'), val('A'));
+  };
+  engine.saveEdit('2026-11', '13', val('A'), val('A', 'F12424'));
+  await engine.flush();
+  expect(store.docs.get('2026-11')!.days['13'].color).toBe('');
+});
+it('서버에 반영됐는데 실패로 알려져도 다시 써서 되돌리지 않는다', async () => {
+  const { store, outbox, engine } = setup({ '2026-11': { days: { '13': rec('A\nB') } } });
+  store.failAfterCommit.add('2026-11');
+  engine.saveEdit('2026-11', '13', val('A\nB'), val('A'));
+  await engine.flush();
+  expect(store.docs.get('2026-11')!.days['13'].text).toBe('A');
+  expect(outbox.list()).toHaveLength(1);
+  expect(engine.status().state).toBe('waiting');
+  engine.saveEdit('2026-11', '13', val('A'), val('A\nB'));
+  store.failAfterCommit.clear();
+  await engine.flush();
+  expect(store.docs.get('2026-11')!.days['13'].text).toBe('A\nB');
+  expect(engine.status().pending).toBe(0);
+});
+it('decide 뒤에 실패하면 두 편집이 모두 남아 다음에 한 번에 올라간다', async () => {
+  const { store, outbox, engine } = setup({ '2026-11': { days: { '13': rec('A') } } });
+  store.failAfterDecide.add('2026-11');
+  engine.saveEdit('2026-11', '13', val('A'), val('A\nB'));
+  await engine.flush();
+  expect(store.docs.get('2026-11')!.days['13'].text).toBe('A');
+  expect(outbox.list()).toHaveLength(1);
+  engine.saveEdit('2026-11', '13', val('A\nB'), val('A\nB\nC'));
+  expect(outbox.list()).toHaveLength(2);
+  store.failAfterDecide.clear();
+  store.calls.length = 0;
+  await engine.flush();
+  expect(store.docs.get('2026-11')!.days['13'].text).toBe('A\nB\nC');
+  expect(engine.status().pending).toBe(0);
+  expect(store.calls).toEqual(['2026-11']);
+});

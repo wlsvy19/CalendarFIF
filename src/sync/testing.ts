@@ -24,6 +24,9 @@ export class FakeMonthStore implements MonthStore {
   failMonths = new Set<string>();
   hold?: Promise<void>;
   beforeSecondDecide?: () => void;
+  failAfterDecide = new Set<string>();
+  failAfterCommit = new Set<string>();
+  afterCommit?: () => void;
 
   constructor(docs: Record<string, MonthDoc> = {}) {
     this.docs = new Map(Object.entries(docs));
@@ -40,12 +43,19 @@ export class FakeMonthStore implements MonthStore {
       hook();
     }
     const changes = decide(this.docs.get(monthId) ?? null);
+    if (this.failAfterDecide.has(monthId)) throw new Error(`transaction failed after decide: ${monthId}`);
     const days = { ...(this.docs.get(monthId)?.days ?? {}) };
     for (const [day, change] of Object.entries(changes)) {
       if (change === 'delete') delete days[day];
       else days[day] = change;
     }
     this.docs.set(monthId, { days });
+    if (this.afterCommit) {
+      const hook = this.afterCommit;
+      this.afterCommit = undefined;
+      hook();
+    }
+    if (this.failAfterCommit.has(monthId)) throw new Error(`transaction failed after commit: ${monthId}`);
   }
 }
 

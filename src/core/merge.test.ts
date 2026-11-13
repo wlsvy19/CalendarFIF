@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DayRecord, DayValue, PendingEdit } from './types';
-import { mergeColor, mergeText, resolveEdit } from './merge';
+import { mergeColor, mergeText, resolveEdit, resolveEdits } from './merge';
 
 const v = (text: string, color = ''): DayValue => ({ text, color });
 const r = (text: string, color = '', editedAt = 5, editedBy = 'pc'): DayRecord => ({ text, color, editedAt, editedBy });
@@ -69,5 +69,24 @@ describe('resolveEdit', () => {
   });
   it('합친 글에 빈 줄만 남고 색도 없으면 날짜를 지운다', () => {
     expect(resolveEdit(E(v('A\nB'), v('')), r('A\n\n\nB'), 'pc')).toBe('delete');
+  });
+});
+
+describe('resolveEdits', () => {
+  const E2 = (day: string, base: DayValue, next: DayValue, editedAt = 100): PendingEdit => ({ monthId: '2026-11', day, base, next, editedAt });
+  it('같은 날짜의 편집은 차례로 이어서 적용한다', () => {
+    const out = resolveEdits([E(v('A'), v('A\nB'), 100), E(v('A\nB'), v('A\nB\nC'), 200)], { '13': r('A') }, 'pc');
+    expect(out).toEqual({ '13': { text: 'A\nB\nC', color: '', editedAt: 200, editedBy: 'pc' } });
+  });
+  it('쓰는 편집 뒤에 지우는 편집이 오면 지운다', () => {
+    expect(resolveEdits([E(v('A'), v('B'), 100), E(v('B'), v(''), 200)], { '13': r('A') }, 'pc')).toEqual({ '13': 'delete' });
+  });
+  it('모두 바뀔 것이 없으면 빈 결과다', () => {
+    expect(resolveEdits([E(v('A'), v('A'), 100)], { '13': r('A') }, 'pc')).toEqual({});
+  });
+  it('다른 날짜는 각자 자기 값을 기준으로 한다', () => {
+    const out = resolveEdits([E2('13', v('A'), v('A1')), E2('14', v(''), v('Z'))], { '13': r('A') }, 'pc');
+    expect(Object.keys(out).sort()).toEqual(['13', '14']);
+    expect((out['14'] as DayRecord).text).toBe('Z');
   });
 });
