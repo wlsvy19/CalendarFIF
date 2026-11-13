@@ -1,5 +1,7 @@
 # CalendarFIF ① 단계: 동기화 코어, 웹앱, DesktopCal 가져오기 Implementation Plan
 
+> **상태:** 2026-11-13에 Task 1~13을 모두 끝냈다. 결과와 미뤄 둔 것은 `docs/superpowers/phase1-results.md`에 있다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** PC 브라우저와 아이폰 Safari에서 날짜별 메모, 완료 표시, 배경색을 양방향으로 동기화하는 웹앱과, DesktopCal 기록을 옮기고 따라가는 명령줄 도구를 만든다.
