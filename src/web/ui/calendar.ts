@@ -3,8 +3,8 @@ import { parseLine, splitLines } from '../../core/text';
 import type { SyncStatus } from '../../sync/engine';
 import type { CalendarStore } from '../state';
 import { statusText } from './status';
+import { dragOffset, lockAxis, SWIPE, swipeOutcome, velocity, type Sample } from './swipe';
 
-const SWIPE_PX = 44;
 const WIDE_PX = 880;
 const NUMBER_AREA_PX = 30; // 날짜 숫자와 칸 안쪽 여백이 차지하는 높이
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -20,6 +20,8 @@ export function visibleLines(lines: string[], maxLines: number): { shown: string
   return { shown, more: lines.length - shown.length };
 }
 
+export type CalendarEnv = { frame?(cb: () => void): void; reducedMotion?(): boolean; now?(): number };
+
 export function mountCalendar(
   root: HTMLElement,
   deps: {
@@ -29,6 +31,7 @@ export function mountCalendar(
     onOpenDay(dateKey: string): void;
     onOpenSettings(): void;
   },
+  env: CalendarEnv = {},
 ): { destroy(): void } {
   const { store } = deps;
   const el = document.createElement('section');
@@ -49,12 +52,14 @@ export function mountCalendar(
       </div>
     </div>
     <div class="dow" aria-hidden="true">${WEEKDAYS.map((d) => `<span>${d}</span>`).join('')}</div>
-    <div class="grid"></div>`;
+    <div class="pager"><div class="track"><div class="grid"></div></div></div>`;
   const q = (selector: string): HTMLElement => el.querySelector<HTMLElement>(selector)!;
   const yearEl = q('.year');
   const monthEl = q('.month');
   const syncEl = q('.sync');
   const syncText = q('.sync-text');
+  const pager = q('.pager');
+  const track = q('.track');
   const grid = q('.grid');
   const [todayBtn, prevBtn, nextBtn, settingsBtn] = [...el.querySelectorAll<HTMLButtonElement>('.app-nav button')];
 
@@ -68,15 +73,11 @@ export function mountCalendar(
 
   let renderedToday = '';
 
-  function render(): void {
-    const monthId = store.current();
-    const [year, month] = monthId.split('-');
-    yearEl.textContent = `${year}년`;
-    monthEl.textContent = `${Number(month)}월`;
+  // 격자 요소 하나에 한 달의 칸을 채운다. maxLinesHint가 있으면 칸 높이를 재지 않고 그 줄 수를 쓴다(끄는 중에 옆 달을 그릴 때).
+  // 쓴 줄 수를 돌려준다.
+  function fillGrid(target: HTMLElement, monthId: string, today: string, maxLinesHint?: number): number {
     const cells = buildMonthGrid(monthId);
-    const today = deps.today();
-    renderedToday = today;
-    grid.style.setProperty('--rows', String(cells.length / 7));
+    target.style.setProperty('--rows', String(cells.length / 7));
 
     const daysByMonth = new Map<string, ReturnType<CalendarStore['days']>>();
     const built = cells.map((c) => {
@@ -105,12 +106,15 @@ export function mountCalendar(
       const lines = splitLines(value?.text ?? '').filter((l) => l.trim() !== '');
       return { button, lines };
     });
-    grid.replaceChildren(...built.map((b) => b.button));
+    target.replaceChildren(...built.map((b) => b.button));
 
     // 칸 높이를 재서 들어가는 줄 수를 정한다. 높이가 0이면(배치가 없으면) 제한하지 않는다.
-    const cellHeight = built[0]?.button.clientHeight ?? 0;
-    const lineHeight = window.innerWidth >= WIDE_PX ? 17 : 13;
-    const maxLines = cellHeight > 0 ? Math.max(1, Math.floor((cellHeight - NUMBER_AREA_PX) / lineHeight)) : Infinity;
+    let maxLines = maxLinesHint;
+    if (maxLines === undefined) {
+      const cellHeight = built[0]?.button.clientHeight ?? 0;
+      const lineHeight = window.innerWidth >= WIDE_PX ? 17 : 13;
+      maxLines = cellHeight > 0 ? Math.max(1, Math.floor((cellHeight - NUMBER_AREA_PX) / lineHeight)) : Infinity;
+    }
     for (const { button, lines } of built) {
       if (lines.length === 0) continue;
       const { shown, more } = visibleLines(lines, maxLines);
@@ -131,9 +135,25 @@ export function mountCalendar(
       }
       button.append(memo);
     }
-    for (const ln of grid.querySelectorAll<HTMLElement>('.ln:not(.more)')) {
-      if (ln.scrollWidth > ln.clientWidth) ln.classList.add('cut');
+    // 잘린 줄 표시는 배치를 읽어야 해서 본 격자에서만 한다.
+    if (maxLinesHint === undefined) {
+      for (const ln of target.querySelectorAll<HTMLElement>('.ln:not(.more)')) {
+        if (ln.scrollWidth > ln.clientWidth) ln.classList.add('cut');
+      }
     }
+    return maxLines;
+  }
+
+  let lastMaxLines: number | undefined;
+
+  function render(): void {
+    const monthId = store.current();
+    const [year, month] = monthId.split('-');
+    yearEl.textContent = `${year}년`;
+    monthEl.textContent = `${Number(month)}월`;
+    const today = deps.today();
+    renderedToday = today;
+    lastMaxLines = fillGrid(grid, monthId, today);
   }
 
   function go(monthId: string): void {
@@ -141,7 +161,7 @@ export function mountCalendar(
     render();
   }
 
-  grid.addEventListener('click', (event) => {
+  pager.addEventListener('click', (event) => {
     if (swiped) return;
     // 누르는 사이에 칸이 다시 그려지면 target이 격자가 된다. 누른 자리의 칸을 찾아 쓴다.
     let cell = (event.target as Element).closest<HTMLElement>('.cell');
@@ -153,27 +173,113 @@ export function mountCalendar(
   todayBtn.addEventListener('click', () => go(splitDateKey(deps.today())!.monthId));
   settingsBtn.addEventListener('click', () => deps.onOpenSettings());
 
-  let start: { x: number; y: number } | null = null;
+  const frame = env.frame ?? ((cb: () => void) => void requestAnimationFrame(cb));
+  const reducedMotion = env.reducedMotion ?? (() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const now = env.now ?? (() => performance.now());
+
+  type Drag = { id: number; x0: number; y0: number; width: number; axis: 'x' | 'y' | null; samples: Sample[]; x: number; queued: boolean };
+  let drag: Drag | null = null;
   let swiped = false;
-  grid.addEventListener('pointerdown', (e) => {
-    start = { x: e.clientX, y: e.clientY };
-  });
-  grid.addEventListener('pointercancel', () => {
-    start = null;
-  });
-  grid.addEventListener('pointerup', (e) => {
-    if (!start) return;
-    const dx = e.clientX - start.x;
-    const dy = e.clientY - start.y;
-    start = null;
-    if (Math.abs(dx) > SWIPE_PX && Math.abs(dx) > Math.abs(dy)) {
-      go(shiftMonth(store.current(), dx < 0 ? 1 : -1));
-      // 밀기 끝에 뜨는 click이 날짜 칸을 열지 않게 한다.
-      swiped = true;
-      setTimeout(() => {
-        swiped = false;
-      }, 300);
+  let swipedTimer: ReturnType<typeof setTimeout> | undefined;
+  let settle: { finish(): void; timer: ReturnType<typeof setTimeout> } | null = null;
+
+  const setTransform = (x: number): void => {
+    track.style.transform = `translate3d(${x}px, 0px, 0px)`;
+  };
+
+  // 끌기가 x로 정해진 뒤 300ms 동안은 click이 날짜 칸을 열지 않게 한다.
+  function holdClicks(): void {
+    clearTimeout(swipedTimer);
+    swipedTimer = setTimeout(() => {
+      swiped = false;
+    }, 300);
+  }
+
+  function ensurePeek(side: 'next' | 'prev'): void {
+    const current = track.querySelector<HTMLElement>('.grid.peek');
+    if (current?.dataset.side === side) return;
+    const peek = current ?? document.createElement('div');
+    peek.className = 'grid peek';
+    peek.dataset.side = side;
+    fillGrid(peek, shiftMonth(store.current(), side === 'next' ? 1 : -1), deps.today(), lastMaxLines);
+    if (!current) track.append(peek);
+  }
+
+  function release(width: number, outcome: -1 | 0 | 1): void {
+    if (reducedMotion()) {
+      if (outcome !== 0) go(shiftMonth(store.current(), outcome));
+      return;
     }
+    if (outcome !== 0) ensurePeek(outcome === 1 ? 'next' : 'prev');
+    track.style.transition = `transform ${SWIPE.durationMs}ms ease-out`;
+    setTransform(-outcome * width);
+    let done = false;
+    const finish = (): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      track.removeEventListener('transitionend', finish);
+      settle = null;
+      track.style.transition = '';
+      track.style.transform = '';
+      track.querySelector('.peek')?.remove();
+      if (outcome !== 0) go(shiftMonth(store.current(), outcome));
+    };
+    const timer = setTimeout(finish, SWIPE.durationMs + 60);
+    track.addEventListener('transitionend', finish);
+    settle = { finish, timer };
+  }
+
+  pager.addEventListener('pointerdown', (e) => {
+    if (drag) return;
+    settle?.finish();
+    // 레이아웃은 여기서 한 번만 읽는다.
+    drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, width: pager.clientWidth || window.innerWidth, axis: null, samples: [{ x: e.clientX, t: now() }], x: 0, queued: false };
+  });
+  pager.addEventListener('pointermove', (e) => {
+    const d = drag;
+    if (!d || e.pointerId !== d.id || d.axis === 'y') return;
+    const dx = e.clientX - d.x0;
+    if (d.axis === null) {
+      d.axis = lockAxis(dx, e.clientY - d.y0);
+      if (d.axis === 'x') {
+        swiped = true;
+        try {
+          pager.setPointerCapture(e.pointerId);
+        } catch {
+          /* 없거나 실패해도 계속한다 */
+        }
+      }
+    }
+    if (d.axis !== 'x') return;
+    d.samples.push({ x: e.clientX, t: now() });
+    if (reducedMotion() || dx === 0) return;
+    ensurePeek(dx < 0 ? 'next' : 'prev');
+    d.x = dragOffset(dx, d.width);
+    if (!d.queued) {
+      d.queued = true;
+      frame(() => {
+        d.queued = false;
+        if (drag === d) setTransform(d.x);
+      });
+    }
+  });
+  pager.addEventListener('pointerup', (e) => {
+    const d = drag;
+    if (!d || e.pointerId !== d.id) return;
+    drag = null;
+    if (d.axis !== 'x') return;
+    d.samples.push({ x: e.clientX, t: now() });
+    holdClicks();
+    release(d.width, swipeOutcome(e.clientX - d.x0, d.width, velocity(d.samples)));
+  });
+  pager.addEventListener('pointercancel', (e) => {
+    const d = drag;
+    if (!d || e.pointerId !== d.id) return;
+    drag = null;
+    if (d.axis !== 'x') return;
+    holdClicks();
+    release(d.width, 0);
   });
 
   // 읽기 문제는 store가 바뀔 때, 연결 상태는 창의 online/offline 이벤트로 알 수 있다.
@@ -220,6 +326,8 @@ export function mountCalendar(
       window.removeEventListener('resize', onResize);
       document.removeEventListener('visibilitychange', onVisibility);
       if (midnightTimer !== undefined) clearTimeout(midnightTimer);
+      clearTimeout(swipedTimer);
+      if (settle) clearTimeout(settle.timer);
       el.remove();
     },
   };

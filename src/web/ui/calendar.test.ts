@@ -118,3 +118,53 @@ describe('날짜가 바뀌면', () => {
     expect(cell(calendar, '2026-11-15').classList.contains('today')).toBe(false);
   });
 });
+describe('달 넘기기', () => {
+  afterEach(() => { vi.useRealTimers(); });
+  function swipeMount(reduced = false) {
+    let t = 0;
+    const root = document.createElement('div');
+    const store = fakeStore({});
+    const onOpenDay = vi.fn();
+    mountCalendar(root, { store, status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} }, today: () => '2026-11-13', onOpenDay, onOpenSettings: vi.fn() },
+      { frame: (cb) => cb(), reducedMotion: () => reduced, now: () => t });
+    const pager = root.querySelector<HTMLElement>('.pager')!;
+    const fire = (type: string, x: number, y: number, at: number) => {
+      t = at;
+      pager.dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, pointerId: 1, bubbles: true }));
+    };
+    return { root, store, onOpenDay, fire, track: root.querySelector<HTMLElement>('.track')! };
+  }
+  it('끄는 동안 손가락을 따라 움직이고, 20%를 넘게 끌고 놓으면 200ms 미끄러진 뒤 넘어간다', () => {
+    vi.useFakeTimers();
+    const { root, store, track, fire } = swipeMount(); // 폭은 window.innerWidth = 1024
+    fire('pointerdown', 600, 300, 0);
+    fire('pointermove', 550, 302, 30);
+    expect(track.style.transform).toBe('translate3d(-50px, 0px, 0px)');
+    const peek = root.querySelector<HTMLElement>('.grid.peek')!;
+    expect([peek.dataset.side, peek.querySelector('.cell[data-key="2026-12-01"]') !== null]).toEqual(['next', true]);
+    fire('pointermove', 390, 300, 800);
+    fire('pointerup', 390, 300, 1000);
+    expect([track.style.transform, track.style.transition.includes('200ms')]).toEqual(['translate3d(-1024px, 0px, 0px)', true]);
+    expect(store.show).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(300);
+    expect(store.show).toHaveBeenLastCalledWith('2026-12');
+    expect([track.style.transform, root.querySelector('.grid.peek')]).toEqual(['', null]);
+  });
+  it('세로로 움직이면 넘기지 않는다', () => {
+    const { root, store, track, fire } = swipeMount();
+    fire('pointerdown', 500, 300, 0);
+    fire('pointermove', 505, 380, 30);
+    fire('pointerup', 505, 420, 60);
+    expect([track.style.transform, root.querySelector('.grid.peek'), store.show.mock.calls.length]).toEqual(['', null, 0]);
+  });
+  it('동작 줄이기가 켜져 있으면 따라 움직이지 않고 손을 떼는 순간 넘기며, 그 뒤의 click은 날짜를 열지 않는다', () => {
+    const { root, store, onOpenDay, track, fire } = swipeMount(true);
+    fire('pointerdown', 600, 300, 0);
+    fire('pointermove', 300, 300, 100);
+    expect(track.style.transform).toBe('');
+    fire('pointerup', 300, 300, 200);
+    expect(store.show).toHaveBeenLastCalledWith('2026-12');
+    cell(root, '2026-12-10').click();
+    expect(onOpenDay).not.toHaveBeenCalled();
+  });
+});

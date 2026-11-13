@@ -117,10 +117,22 @@ body {
   gap: 1px;
   background: var(--hairline);
   border-bottom: 1px solid var(--hairline);
-  touch-action: pan-y;
   -webkit-user-select: none;
   user-select: none;
 }
+/* 달 넘기기: 손가락을 따라 .track이 움직이고, 옆 달(.peek)이 그 양옆에 붙는다 */
+.pager {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  touch-action: pan-y;
+}
+.track { position: absolute; inset: 0; will-change: transform; }
+.track > .grid { height: 100%; }
+.grid.peek { position: absolute; top: 0; width: 100%; }
+.grid.peek[data-side="next"] { left: 100%; }
+.grid.peek[data-side="prev"] { right: 100%; }
 .cell {
   -webkit-appearance: none;
   appearance: none;
