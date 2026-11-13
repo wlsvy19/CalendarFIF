@@ -45,6 +45,7 @@
 }
 :root.desk .dow .sun,
 :root.desk .dow .sat { color: var(--desk-cal-ink); }
+:root.desk .pager { overflow-x: hidden; } /* PC 앱은 단추로만 넘긴다 */
 :root.desk .grid { gap: var(--desk-gap); background: transparent; border-bottom: 0; }
 :root.desk .wk { background: transparent; color: var(--desk-cal-ink); font-size: var(--desk-cal-size); }
 :root.desk .calendar .cell {

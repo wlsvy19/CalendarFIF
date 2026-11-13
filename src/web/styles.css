@@ -79,7 +79,7 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
-html, body { height: 100%; }
+html, body { height: 100%; overscroll-behavior: none; }
 body {
   margin: 0;
   background: var(--surface);
@@ -120,19 +120,21 @@ body {
   -webkit-user-select: none;
   user-select: none;
 }
-/* 달 넘기기: 손가락을 따라 .track이 움직이고, 옆 달(.peek)이 그 양옆에 붙는다 */
+/* 달 넘기기: .pager가 옆으로 구르는 스크롤 상자이고 칸(.slot)마다 쪽 하나가 들어간다.
+   손가락을 따라가고 미끄러지고 멈추는 것은 브라우저가 한다. 칸은 처음에 한 번 만들고 바꾸지 않는다. */
 .pager {
   flex: 1;
   min-height: 0;
-  position: relative;
-  overflow: hidden;
-  touch-action: pan-y;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  touch-action: pan-x;
 }
-.track { position: absolute; inset: 0; will-change: transform; }
-.track > .grid { height: 100%; }
-.grid.peek { position: absolute; top: 0; width: 100%; }
-.grid.peek[data-side="next"] { left: 100%; }
-.grid.peek[data-side="prev"] { right: 100%; }
+.pager::-webkit-scrollbar { display: none; }
+.slot { flex: 0 0 100%; min-width: 0; display: flex; scroll-snap-align: start; scroll-snap-stop: always; contain: strict; }
 .cell {
   -webkit-appearance: none;
   appearance: none;

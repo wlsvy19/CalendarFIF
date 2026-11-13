@@ -7,8 +7,8 @@ import { parseLine, splitLines } from '../../core/text';
 import type { SyncStatus } from '../../sync/engine';
 import { applyAppearance, pageOptions, WEB_APPEARANCE, type Appearance } from '../appearance';
 import type { CalendarStore } from '../state';
+import { createPager, type PagerEnv } from './pager';
 import { statusText } from './status';
-import { dragOffset, lockAxis, SWIPE, swipeOutcome, velocity, type Sample } from './swipe';
 
 const WIDE_PX = 880;
 const NUMBER_AREA_PX = 30; // 날짜 숫자와 칸 안쪽 여백이 차지하는 높이
@@ -34,7 +34,8 @@ export function displayLines(text: string, opts: { showDone: boolean; doneToBott
   return opts.doneToBottom ? [...visible.filter((l) => !l.done), ...visible.filter((l) => l.done)] : visible;
 }
 
-export type CalendarEnv = { frame?(cb: () => void): void; reducedMotion?(): boolean; now?(): number };
+/** reducedMotion은 pager가 따로 주지 않으면 달 넘기기에 넘긴다. */
+export type CalendarEnv = { reducedMotion?(): boolean; pager?: PagerEnv };
 
 export type CalendarDeps = {
   store: CalendarStore;
@@ -63,7 +64,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   // 설정이 없으면 웹앱처럼 그리고 CSS 변수를 쓰지 않는다.
   let appearance: Appearance = deps.appearance ?? WEB_APPEARANCE;
   let custom = deps.appearance !== undefined;
-  let anchor = store.current() === deps.today().slice(0, 7) ? deps.today() : `${store.current()}-01`;
+  const firstAnchor = store.current() === deps.today().slice(0, 7) ? deps.today() : `${store.current()}-01`;
   const el = document.createElement('section');
   el.className = 'app calendar';
   el.setAttribute('aria-label', '달력');
@@ -81,16 +82,12 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
         <button type="button" class="iconbtn" aria-label="${deps.desktop ? '메뉴' : '설정'}">${deps.desktop ? DOTS : GEAR}</button>
       </div>
     </div>
-    <div class="dow" aria-hidden="true"></div>
-    <div class="pager"><div class="track"><div class="grid"></div></div></div>`;
+    <div class="dow" aria-hidden="true"></div>`;
   const q = (selector: string): HTMLElement => el.querySelector<HTMLElement>(selector)!;
   const yearEl = q('.year');
   const monthEl = q('.month');
   const syncEl = q('.sync');
   const syncText = q('.sync-text');
-  const pager = q('.pager');
-  const track = q('.track');
-  const grid = q('.grid');
   const dowEl = q('.dow');
   const head = q('.app-head');
   const [todayBtn, prevBtn, nextBtn, settingsBtn] = [...el.querySelectorAll<HTMLButtonElement>('.app-nav button')];
@@ -103,11 +100,8 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     syncText.textContent = statusText(status, readProblem, online);
   }
 
-  let renderedToday = '';
-
-  // 격자 요소 하나에 한 쪽의 칸을 채운다. maxLinesHint가 있으면 칸 높이를 재지 않고 그 줄 수를 쓴다(끄는 중에 옆 쪽을 그릴 때).
-  // 쓴 줄 수를 돌려준다.
-  function fillGrid(target: HTMLElement, page: Page, today: string, maxLinesHint?: number): number {
+  // 격자 요소 하나에 한 쪽의 칸을 채운다. 칸 높이는 그 쪽이 놓인 자리에서 잰다.
+  function fillGrid(target: HTMLElement, page: Page, today: string): void {
     target.style.setProperty('--rows', String(page.rows.length));
     const a = appearance;
     const lineOpts = { showDone: a.showDone, doneToBottom: a.doneToBottom };
@@ -154,23 +148,20 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     target.replaceChildren(...children);
 
     // 칸 높이를 재서 들어가는 줄 수를 정한다. 높이가 0이면(배치가 없으면) 제한하지 않는다.
-    let maxLines = maxLinesHint;
-    if (maxLines === undefined) {
-      const first = built[0]?.button;
-      const cellHeight = first?.clientHeight ?? 0;
-      let lineHeight: number;
-      let used: number;
-      if (custom) {
-        lineHeight = Math.round(a.memoFont.size * a.lineSpacing);
-        const style = first ? getComputedStyle(first) : null;
-        const padding = style ? (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0) : 0;
-        used = (first?.querySelector<HTMLElement>('.head')?.offsetHeight ?? 0) + padding;
-      } else {
-        lineHeight = window.innerWidth >= WIDE_PX ? 17 : 13;
-        used = NUMBER_AREA_PX;
-      }
-      maxLines = cellHeight > 0 ? Math.max(1, Math.floor((cellHeight - used) / lineHeight)) : Infinity;
+    const first = built[0]?.button;
+    const cellHeight = first?.clientHeight ?? 0;
+    let lineHeight: number;
+    let used: number;
+    if (custom) {
+      lineHeight = Math.round(a.memoFont.size * a.lineSpacing);
+      const style = first ? getComputedStyle(first) : null;
+      const padding = style ? (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0) : 0;
+      used = (first?.querySelector<HTMLElement>('.head')?.offsetHeight ?? 0) + padding;
+    } else {
+      lineHeight = window.innerWidth >= WIDE_PX ? 17 : 13;
+      used = NUMBER_AREA_PX;
     }
+    const maxLines = cellHeight > 0 ? Math.max(1, Math.floor((cellHeight - used) / lineHeight)) : Infinity;
     for (const { button, lines } of built) {
       if (lines.length === 0) continue;
       const { shown, more } = visibleLines(lines, maxLines);
@@ -179,16 +170,10 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
       if (more > 0) memo.append(spanOf('ln more', `+${more}`));
       button.append(memo);
     }
-    // 잘린 줄 표시는 배치를 읽어야 해서 본 격자에서만 한다.
-    if (maxLinesHint === undefined) {
-      for (const ln of target.querySelectorAll<HTMLElement>('.ln:not(.more)')) {
-        if (ln.scrollWidth > ln.clientWidth) ln.classList.add('cut');
-      }
-    }
-    return maxLines;
+    // 잘린 줄 표시: 폭을 모두 읽은 뒤에 표시를 붙인다(줄마다 배치를 다시 계산하지 않게).
+    const cut = [...target.querySelectorAll<HTMLElement>('.ln:not(.more)')].filter((ln) => ln.scrollWidth > ln.clientWidth);
+    for (const ln of cut) ln.classList.add('cut');
   }
-
-  let lastMaxLines: number | undefined;
 
   function applyClasses(): void {
     const a = appearance;
@@ -203,204 +188,81 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     if (custom) applyAppearance(el, a);
   }
 
-  function render(): void {
-    // 바로가기 주소 등으로 저장소가 다른 달로 옮겨졌으면 그 달 1일부터 보여 준다.
-    if (store.current() !== anchor.slice(0, 7)) {
-      anchor = `${store.current()}-01`;
-      extraMonths = [];
-    }
-    const page = buildPage(pageOptions(appearance), anchor);
+  // 달 넘기기는 브라우저의 스크롤이 한다. 쪽이 바뀌면(스크롤이 반을 넘거나 바로 가면) 머리와 구독을 바꾼다.
+  const pager = createPager(
+    {
+      anchor: firstAnchor,
+      neighbours: deps.desktop ? 0 : 1, // PC 앱은 단추로만 넘기고 옆 쪽을 붙여 두지 않는다
+      step: (a, delta) => stepPage(pageOptions(appearance), a, delta),
+      fill: (grid, a) => fillGrid(grid, buildPage(pageOptions(appearance), a), deps.today()),
+      onCurrent: () => {
+        renderHead();
+        subscribe();
+      },
+    },
+    { ...env.pager, reducedMotion: env.pager?.reducedMotion ?? env.reducedMotion },
+  );
+  el.append(pager.el);
+
+  function renderHead(): void {
+    const page = buildPage(pageOptions(appearance), pager.anchor());
     const [year, month] = page.title.split('-');
     yearEl.textContent = `${year}년`;
     monthEl.textContent = `${Number(month)}월`;
     dowEl.innerHTML = (appearance.weekNumbers ? '<span></span>' : '') + page.weekdays.map(dowSpan).join('');
-    const today = deps.today();
-    renderedToday = today;
-    lastMaxLines = fillGrid(grid, page, today);
   }
 
-  // 구독할 달을 알리고 다시 그린다. 쪽의 달 중 앞뒤 한 달 밖의 것은 더해서 구독한다.
-  // 앞 쪽이 더한 달이 남아 있으면 더할 달이 없어도 알려서 정리한다.
-  let extraMonths: string[] = [];
-  function showAnchor(next: string, always: boolean): void {
-    anchor = next;
-    const page = buildPage(pageOptions(appearance), anchor);
-    const also = pageMonths(page).filter((m) => m < shiftMonth(page.title, -1) || m > shiftMonth(page.title, 1));
-    if (also.length > 0) store.show(page.title, also);
-    else if (always || extraMonths.length > 0) store.show(page.title);
-    extraMonths = also;
-    render();
+  // 구독할 달을 알린다. 붙어 있는 쪽들이 보여 주는 달 중 지금 달과 그 앞뒤 한 달 밖의 것은 더해서 구독한다.
+  // 그래야 미끄러져 들어오거나 나가는 쪽도 메모를 잃지 않는다.
+  function subscribe(): void {
+    const opts = pageOptions(appearance);
+    const title = buildPage(opts, pager.anchor()).title;
+    const near = [shiftMonth(title, -1), title, shiftMonth(title, 1)];
+    const months = new Set(pager.anchors().flatMap((a) => pageMonths(buildPage(opts, a))));
+    store.show(title, [...months].filter((m) => !near.includes(m)).sort());
   }
 
-  const step = (delta: number): string => stepPage(pageOptions(appearance), anchor, delta);
-  const goToday = (): void => {
-    settle?.finish();
-    showAnchor(deps.today(), true);
-  };
+  // 쪽은 그대로 두고 머리와 붙어 있는 쪽을 모두 다시 그린다.
+  let renderedToday = deps.today();
+  function redraw(): void {
+    renderedToday = deps.today();
+    renderHead();
+    pager.refresh();
+  }
 
-  pager.addEventListener('click', (event) => {
-    if (swiped || deps.desktop) return; // PC 앱은 한 번 눌러서는 열지 않는다
+  pager.el.addEventListener('click', (event) => {
+    if (deps.desktop) return; // PC 앱은 한 번 눌러서는 열지 않는다
     // 누르는 사이에 칸이 다시 그려지면 target이 격자가 된다. 누른 자리의 칸을 찾아 쓴다.
     let cell = (event.target as Element).closest<HTMLElement>('.cell');
     if (!cell) cell = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('.cell') ?? null;
-    if (cell?.dataset.key) deps.onOpenDay(cell.dataset.key);
+    // 옆 쪽은 inert라 눌리지 않는다. inert를 모르는 환경도 있어 지금 쪽의 칸만 연다.
+    if (cell?.dataset.key && cell.closest('.grid.current')) deps.onOpenDay(cell.dataset.key);
   });
   if (deps.desktop) {
     const desktop = deps.desktop;
     const cellKey = (event: MouseEvent): string | undefined => (event.target as Element).closest<HTMLElement>('.cell')?.dataset.key;
-    pager.addEventListener('dblclick', (event) => {
+    pager.el.addEventListener('dblclick', (event) => {
       const key = cellKey(event);
       if (key) deps.onOpenDay(key);
     });
-    pager.addEventListener('contextmenu', (event) => {
+    pager.el.addEventListener('contextmenu', (event) => {
       event.preventDefault();
       const key = cellKey(event);
       if (key) desktop.onDayMenu(key, { x: event.clientX, y: event.clientY });
     });
   }
-  // 미끄러지는 중에 버튼을 누르면 그 미끄러짐을 먼저 끝내고 그 달에서 이어 간다.
-  prevBtn.addEventListener('click', () => { settle?.finish(); showAnchor(step(-1), true); });
-  nextBtn.addEventListener('click', () => { settle?.finish(); showAnchor(step(1), true); });
+  const goToday = (): void => pager.jump(deps.today());
+  prevBtn.addEventListener('click', () => pager.go(-1));
+  nextBtn.addEventListener('click', () => pager.go(1));
   todayBtn.addEventListener('click', goToday);
   settingsBtn.addEventListener('click', (event) => {
     if (deps.desktop) deps.desktop.onOpenMenu({ x: event.clientX, y: event.clientY });
     else deps.onOpenSettings();
   });
 
-  const frame = env.frame ?? ((cb: () => void) => void requestAnimationFrame(cb));
-  const reducedMotion = env.reducedMotion ?? (() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  const now = env.now ?? (() => performance.now());
-
-  type Drag = { id: number; x0: number; y0: number; width: number; axis: 'x' | 'y' | null; samples: Sample[]; x: number; queued: boolean };
-  let drag: Drag | null = null;
-  let swiped = false;
-  let destroyed = false;
-  const MAX_SAMPLES = 16;
-  let swipedTimer: ReturnType<typeof setTimeout> | undefined;
-  let settle: { finish(): void; timer: ReturnType<typeof setTimeout> } | null = null;
-
-  const setTransform = (x: number): void => {
-    track.style.transform = `translate3d(${x}px, 0px, 0px)`;
-  };
-
-  // 끌기가 x로 정해진 뒤 300ms 동안은 click이 날짜 칸을 열지 않게 한다.
-  function holdClicks(): void {
-    clearTimeout(swipedTimer);
-    swipedTimer = setTimeout(() => {
-      swiped = false;
-    }, 300);
-  }
-
-  function ensurePeek(side: 'next' | 'prev'): void {
-    const current = track.querySelector<HTMLElement>('.grid.peek');
-    if (current?.dataset.side === side) return;
-    const peek = current ?? document.createElement('div');
-    peek.className = 'grid peek';
-    peek.dataset.side = side;
-    fillGrid(peek, buildPage(pageOptions(appearance), step(side === 'next' ? 1 : -1)), deps.today(), lastMaxLines);
-    if (!current) track.append(peek);
-  }
-
-  function release(width: number, outcome: -1 | 0 | 1): void {
-    if (reducedMotion()) {
-      if (outcome !== 0) showAnchor(step(outcome), true);
-      return;
-    }
-    if (outcome !== 0) ensurePeek(outcome === 1 ? 'next' : 'prev');
-    const target = step(outcome);
-    track.style.transition = `transform ${SWIPE.durationMs}ms ease-out`;
-    setTransform(-outcome * width);
-    let done = false;
-    const finish = (): void => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      track.removeEventListener('transitionend', onEnd);
-      settle = null;
-      track.style.transition = '';
-      track.style.transform = '';
-      track.querySelector('.peek')?.remove();
-      if (outcome !== 0 && !destroyed) showAnchor(target, true);
-    };
-    const timer = setTimeout(finish, SWIPE.durationMs + 60);
-    const onEnd = (e: TransitionEvent): void => {
-      if (e.target === track && e.propertyName === 'transform') finish();
-    };
-    track.addEventListener('transitionend', onEnd);
-    settle = { finish, timer };
-  }
-
-  pager.addEventListener('pointerdown', (e) => {
-    settle?.finish();
-    if (deps.desktop && e.pointerType === 'mouse') return; // 마우스 끌기가 달을 넘기지 않게 한다
-    if (drag) {
-      // 놓은 신호를 못 받은 낡은 끌기는 버리고 새로 시작한다.
-      drag = null;
-      swiped = false;
-      clearTimeout(swipedTimer);
-      track.style.transform = '';
-      track.querySelector('.peek')?.remove();
-    }
-    // 레이아웃은 여기서 한 번만 읽는다.
-    drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, width: pager.clientWidth || window.innerWidth, axis: null, samples: [{ x: e.clientX, t: now() }], x: 0, queued: false };
-  });
-  pager.addEventListener('pointermove', (e) => {
-    const d = drag;
-    if (!d || e.pointerId !== d.id || d.axis === 'y') return;
-    const dx = e.clientX - d.x0;
-    if (d.axis === null) {
-      d.axis = lockAxis(dx, e.clientY - d.y0);
-      if (d.axis === 'x') {
-        swiped = true;
-        try {
-          pager.setPointerCapture(e.pointerId);
-        } catch {
-          /* 없거나 실패해도 계속한다 */
-        }
-      }
-    }
-    if (d.axis !== 'x') return;
-    d.samples.push({ x: e.clientX, t: now() });
-    if (d.samples.length > MAX_SAMPLES) d.samples.shift();
-    if (reducedMotion() || dx === 0) return;
-    ensurePeek(dx < 0 ? 'next' : 'prev');
-    d.x = dragOffset(dx, d.width);
-    if (!d.queued) {
-      d.queued = true;
-      frame(() => {
-        d.queued = false;
-        if (drag === d) setTransform(d.x);
-      });
-    }
-  });
-  pager.addEventListener('pointerup', (e) => {
-    const d = drag;
-    if (!d || e.pointerId !== d.id) return;
-    drag = null;
-    if (d.axis !== 'x') return;
-    d.samples.push({ x: e.clientX, t: now() });
-    if (d.samples.length > MAX_SAMPLES) d.samples.shift();
-    holdClicks();
-    release(d.width, swipeOutcome(e.clientX - d.x0, d.width, velocity(d.samples)));
-  });
-  const onCancel = (e: PointerEvent): void => {
-    const d = drag;
-    if (!d || e.pointerId !== d.id) return;
-    drag = null;
-    if (d.axis !== 'x') return;
-    holdClicks();
-    release(d.width, 0);
-  };
-  pager.addEventListener('pointercancel', onCancel);
-  // 터치는 처음 닿은 칸이 포인터를 붙잡는다. 달력이 넘겨받을 때 그 칸이 내는 lostpointercapture가
-  // 여기까지 올라오므로, 달력 자신이 잃었을 때만 끌기를 그만둔다.
-  pager.addEventListener('lostpointercapture', (e) => {
-    if (e.target === pager) onCancel(e);
-  });
-
   // 읽기 문제는 store가 바뀔 때, 연결 상태는 창의 online/offline 이벤트로 알 수 있다.
   const offChange = store.onChange(() => {
-    render();
+    redraw();
     renderStatus();
   });
   renderStatus();
@@ -408,7 +270,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   const onConnection = (): void => renderStatus();
   window.addEventListener('online', onConnection);
   window.addEventListener('offline', onConnection);
-  const onResize = (): void => render();
+  const onResize = (): void => redraw();
   window.addEventListener('resize', onResize);
 
   // 창을 켜 둔 채 날짜가 바뀌어도 오늘 표시가 따라가게 한다. 자정 직후의 타이머는 숨은 탭에서 늦어질 수 있어
@@ -418,8 +280,10 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     const today = deps.today();
     if (today !== renderedToday) {
       // 어제를 보고 있었으면 오늘로 따라간다.
-      if (anchor === renderedToday) showAnchor(today, true);
-      else render();
+      const follow = pager.anchor() === renderedToday;
+      renderedToday = today;
+      if (follow) pager.jump(today);
+      else redraw();
     }
     armMidnight();
   };
@@ -437,29 +301,27 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
 
   root.appendChild(el);
   applyClasses();
-  showAnchor(anchor, false); // 붙인 뒤에 그려야 칸 높이를 잴 수 있다
+  pager.place();
+  // 붙인 뒤에 그려야 칸 높이를 잴 수 있다
+  renderHead();
+  subscribe();
+  pager.refresh();
 
   return {
     setAppearance(next) {
       appearance = next;
       custom = true;
       applyClasses();
-      showAnchor(anchor, false);
+      pager.jump(pager.anchor()); // 넘기는 폭과 배치가 바뀌었을 수 있다
     },
     goToday,
-    // 열려는 날짜의 달로 간다. 전체 월은 늘 그 달로 넘어가고, 다른 배치는 이미 구독 중이면(보이는 쪽에 있으면) 그대로 둔다.
-    // 넘어갈 때는 탐색과 같은 길(showAnchor)로 가야 쪽이 걸친 달도 구독한다.
+    // 열려는 날짜의 달로 간다. 전체 월은 보이는 달이 아니면 그 달로 넘어가고, 다른 배치는 이미 구독 중이면(보이는 쪽에 있으면) 그대로 둔다.
+    // 그대로 둘 때 다시 그리지 않는다: 여는 쪽(main.ts)이 이어서 store.refresh()로 다시 그린다.
     showMonth(monthId) {
-      if (appearance.layout === 'month') {
-        store.show(monthId);
-        extraMonths = [];
-        render();
-        return;
-      }
-      if (store.covers(monthId)) return;
-      settle?.finish();
+      const shown = appearance.layout === 'month' ? pager.anchor().slice(0, 7) === monthId : store.covers(monthId);
+      if (shown) return;
       const today = deps.today();
-      showAnchor(monthId === today.slice(0, 7) ? today : `${monthId}-01`, true);
+      pager.jump(monthId === today.slice(0, 7) ? today : `${monthId}-01`);
     },
     destroy() {
       offChange();
@@ -469,10 +331,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
       window.removeEventListener('resize', onResize);
       document.removeEventListener('visibilitychange', onVisibility);
       if (midnightTimer !== undefined) clearTimeout(midnightTimer);
-      destroyed = true;
-      drag = null;
-      clearTimeout(swipedTimer);
-      if (settle) clearTimeout(settle.timer);
+      pager.destroy();
       el.remove();
     },
   };

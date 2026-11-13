@@ -23,7 +23,9 @@ function mount(days: Record<string, DayValue> = {}, status: SyncStatus = { state
   mountCalendar(root, { store, status: { status: () => status, subscribe: () => () => {} }, today: () => '2026-11-13', onOpenDay, onOpenSettings: vi.fn() });
   return { root, store, onOpenDay };
 }
-const cell = (root: HTMLElement, key: string) => root.querySelector<HTMLElement>(`.cell[data-key="${key}"]`)!;
+// 달력의 칸은 지금 쪽(.grid.current)의 칸이다. 웹 달력은 양옆 쪽도 붙여 둔다.
+const cell = (root: HTMLElement, key: string) => root.querySelector<HTMLElement>(`.grid.current .cell[data-key="${key}"]`)!;
+const cells = (root: HTMLElement) => [...root.querySelectorAll<HTMLElement>('.grid.current .cell')];
 
 it('칸에 들어가는 만큼만 줄을 보여 준다', () => {
   expect(visibleLines(['a', 'b'], 3)).toEqual({ shown: ['a', 'b'], more: 0 });
@@ -32,7 +34,7 @@ it('칸에 들어가는 만큼만 줄을 보여 준다', () => {
 });
 it('한 달을 그린다', () => {
   const { root } = mount({ '13': { text: '회의\n[+]장보기', color: 'F12424' } });
-  expect(root.querySelectorAll('.cell')).toHaveLength(35);
+  expect(cells(root)).toHaveLength(35);
   expect(root.textContent).toContain('2026년');
   expect(root.textContent).toContain('11월');
   expect(root.textContent).toContain('동기화됨');
@@ -48,15 +50,20 @@ it('한 달을 그린다', () => {
   expect(cell(root, '2026-12-05').classList.contains('other')).toBe(true);
 });
 it('달을 넘기고, 날짜를 누르면 알린다', () => {
+  // 쪽은 지금 달과 양옆 달이고, 그 쪽들이 걸친 달 중 지금 달의 앞뒤 한 달 밖의 것을 더해서 구독한다.
+  // 11월: 10월(9/27~10/31), 11월(11/1~12/5), 12월(11/29~1/2) 쪽
   const { root, store, onOpenDay } = mount();
+  expect(store.show).toHaveBeenLastCalledWith('2026-11', ['2026-09', '2027-01']);
+  // 폭이 없으면(happy-dom) 단추는 바로 넘긴다. 12월: 11월, 12월, 2027년 1월(12/27~2/6) 쪽
   root.querySelector<HTMLElement>('[aria-label="다음 달"]')!.click();
-  expect(store.show).toHaveBeenLastCalledWith('2026-12');
+  expect(store.show).toHaveBeenLastCalledWith('2026-12', ['2027-02']);
+  // 2027년 1월: 12월, 1월, 2월(1/31~3/6) 쪽
   root.querySelector<HTMLElement>('[aria-label="다음 달"]')!.click();
-  expect(store.show).toHaveBeenLastCalledWith('2027-01');
+  expect(store.show).toHaveBeenLastCalledWith('2027-01', ['2026-11', '2027-03']);
   root.querySelector<HTMLElement>('[aria-label="이전 달"]')!.click();
-  expect(store.show).toHaveBeenLastCalledWith('2026-12');
+  expect(store.show).toHaveBeenLastCalledWith('2026-12', ['2027-02']);
   [...root.querySelectorAll('button')].find((b) => b.textContent === '오늘')!.click();
-  expect(store.show).toHaveBeenLastCalledWith('2026-11');
+  expect(store.show).toHaveBeenLastCalledWith('2026-11', ['2026-09', '2027-01']);
   cell(root, '2026-11-20').click();
   expect(onOpenDay).toHaveBeenCalledWith('2026-11-20');
 });
@@ -121,112 +128,63 @@ describe('날짜가 바뀌면', () => {
   });
 });
 describe('달 넘기기', () => {
-  afterEach(() => { vi.useRealTimers(); });
-  function swipeMount(reduced = false) {
-    let t = 0;
+  function scrollMount(desktop = false) {
     const root = document.createElement('div');
     const store = fakeStore({});
     const onOpenDay = vi.fn();
-    mountCalendar(root, { store, status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} }, today: () => '2026-11-13', onOpenDay, onOpenSettings: vi.fn() },
-      { frame: (cb) => cb(), reducedMotion: () => reduced, now: () => t });
+    mountCalendar(
+      root,
+      {
+        store,
+        status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} },
+        today: () => '2026-11-13',
+        onOpenDay,
+        onOpenSettings: vi.fn(),
+        ...(desktop ? { appearance: { ...DEFAULT_APPEARANCE, layout: 'month' as const }, desktop: { onDayMenu: vi.fn(), onOpenMenu: vi.fn() } } : {}),
+      },
+      { reducedMotion: () => false, pager: { width: () => 400 } },
+    );
     const pager = root.querySelector<HTMLElement>('.pager')!;
-    const fire = (type: string, x: number, y: number, at: number) => {
-      t = at;
-      pager.dispatchEvent(new PointerEvent(type, { clientX: x, clientY: y, pointerId: 1, bubbles: true }));
+    const scroll = (left: number) => {
+      pager.scrollLeft = left;
+      pager.dispatchEvent(new Event('scroll'));
     };
-    return { root, store, onOpenDay, fire, track: root.querySelector<HTMLElement>('.track')! };
+    const title = () => root.querySelector('.month')!.textContent;
+    return { root, store, onOpenDay, pager, scroll, title };
   }
-  it('끄는 동안 손가락을 따라 움직이고, 20%를 넘게 끌고 놓으면 200ms 미끄러진 뒤 넘어간다', () => {
-    vi.useFakeTimers();
-    const { root, store, track, fire } = swipeMount(); // 폭은 window.innerWidth = 1024
-    fire('pointerdown', 600, 300, 0);
-    fire('pointermove', 550, 302, 30);
-    expect(track.style.transform).toBe('translate3d(-50px, 0px, 0px)');
-    const peek = root.querySelector<HTMLElement>('.grid.peek')!;
-    expect([peek.dataset.side, peek.querySelector('.cell[data-key="2026-12-01"]') !== null]).toEqual(['next', true]);
-    fire('pointermove', 390, 300, 800);
-    fire('pointerup', 390, 300, 1000);
-    expect([track.style.transform, track.style.transition.includes('200ms')]).toEqual(['translate3d(-1024px, 0px, 0px)', true]);
-    expect(store.show).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(300);
-    expect(store.show).toHaveBeenLastCalledWith('2026-12');
-    expect([track.style.transform, root.querySelector('.grid.peek')]).toEqual(['', null]);
+  it('반을 넘게 스크롤하면 제목이 다음 달이 되고 그 쪽들의 달을 구독한다', () => {
+    const { pager, store, scroll, title } = scrollMount();
+    expect(pager.scrollLeft).toBe(1200 * 400);
+    scroll(1200 * 400 + 150);
+    expect([title(), store.show.mock.lastCall]).toEqual(['11월', ['2026-11', ['2026-09', '2027-01']]]);
+    scroll(1200 * 400 + 201);
+    expect([title(), store.show.mock.lastCall]).toEqual(['12월', ['2026-12', ['2027-02']]]);
   });
-  it('터치를 처음 잡은 칸이 붙잡기를 넘겨주며 내는 신호는 끌기를 끊지 않는다', () => {
-    vi.useFakeTimers();
-    const { root, store, track, fire } = swipeMount();
-    const cell = root.querySelector<HTMLElement>('.pager .cell')!;
-    fire('pointerdown', 300, 300, 0);
-    fire('pointermove', 340, 302, 30); // 가로로 정해지고 달력이 포인터를 넘겨받는다
-    // 실제 터치에서는 처음 닿은 칸이 포인터를 잃었다는 신호가 달력까지 올라온다.
-    cell.dispatchEvent(new PointerEvent('lostpointercapture', { pointerId: 1, bubbles: true }));
-    fire('pointermove', 600, 300, 100);
-    expect(track.style.transform).toBe('translate3d(300px, 0px, 0px)');
-    fire('pointerup', 600, 300, 200);
-    vi.advanceTimersByTime(300);
-    expect(store.show).toHaveBeenLastCalledWith('2026-10');
+  it('지금 쪽의 칸을 누르면 그 날을 열고, 옆 쪽의 칸은 열지 않는다', () => {
+    const { root, onOpenDay } = scrollMount();
+    cell(root, '2026-11-20').click();
+    // happy-dom은 inert를 눌린 자리 찾기에 쓰지 않으므로 옆 쪽의 칸에 바로 click을 보낸다.
+    root.querySelector<HTMLElement>('.grid[inert] .cell[data-key="2026-10-15"]')!.click();
+    expect(onOpenDay.mock.calls).toEqual([['2026-11-20']]);
   });
-  it('살짝만 밀어도 넘어간다', () => {
-    vi.useFakeTimers();
-    const { store, fire } = swipeMount();
-    fire('pointerdown', 300, 300, 0);
-    fire('pointermove', 315, 301, 200);
-    fire('pointermove', 330, 301, 400);
-    fire('pointerup', 330, 301, 600); // 30px을 천천히 밀었다
-    vi.advanceTimersByTime(300);
-    expect(store.show).toHaveBeenLastCalledWith('2026-10');
+  it('웹 달력은 세 쪽을, PC 달력은 한 쪽을 붙인다', () => {
+    const web = scrollMount().root;
+    expect([web.querySelectorAll('.grid').length, web.querySelectorAll('.grid.current').length, web.querySelectorAll('.grid[inert]').length]).toEqual([3, 1, 2]);
+    const pc = scrollMount(true).root;
+    expect([pc.querySelectorAll('.grid').length, pc.querySelectorAll('.grid.current').length]).toEqual([1, 1]);
   });
-  it('달력이 포인터를 잃으면 끌기를 그만두고 제자리로 돌아간다', () => {
-    vi.useFakeTimers();
-    const { store, track, fire } = swipeMount();
-    fire('pointerdown', 300, 300, 0);
-    fire('pointermove', 600, 302, 30);
-    fire('lostpointercapture', 600, 302, 60); // 달력 자신이 잃었다
-    fire('pointermove', 900, 300, 90);
-    vi.advanceTimersByTime(300);
-    expect(store.show).not.toHaveBeenCalled();
-    expect(track.style.transform).toBe('');
-  });
-  it('세로로 움직이면 넘기지 않는다', () => {
-    const { root, store, track, fire } = swipeMount();
-    fire('pointerdown', 500, 300, 0);
-    fire('pointermove', 505, 380, 30);
-    fire('pointerup', 505, 420, 60);
-    expect([track.style.transform, root.querySelector('.grid.peek'), store.show.mock.calls.length]).toEqual(['', null, 0]);
-  });
-  it('동작 줄이기가 켜져 있으면 따라 움직이지 않고 손을 떼는 순간 넘기며, 그 뒤의 click은 날짜를 열지 않는다', () => {
-    const { root, store, onOpenDay, track, fire } = swipeMount(true);
-    fire('pointerdown', 600, 300, 0);
-    fire('pointermove', 300, 300, 100);
-    expect(track.style.transform).toBe('');
-    fire('pointerup', 300, 300, 200);
-    expect(store.show).toHaveBeenLastCalledWith('2026-12');
-    cell(root, '2026-12-10').click();
-    expect(onOpenDay).not.toHaveBeenCalled();
-  });
-  it('놓은 신호 없이 끝난 세로 끌기가 남아 있어도 다음 가로 끌기는 달을 넘긴다', () => {
-    vi.useFakeTimers();
-    const { store, fire } = swipeMount();
-    fire('pointerdown', 500, 300, 0);
-    fire('pointermove', 505, 380, 30); // 세로로 정해지고 pointerup은 오지 않는다
-    fire('pointerdown', 600, 300, 100);
-    fire('pointermove', 500, 302, 130);
-    fire('pointermove', 300, 300, 200);
-    fire('pointerup', 300, 300, 230);
-    vi.advanceTimersByTime(300);
-    expect(store.show).toHaveBeenLastCalledWith('2026-12');
-  });
-  it('미끄러지는 중에 다음 달 버튼을 누르면 두 달 뒤에서 멈추고, 오늘 버튼이면 오늘의 달이다', () => {
-    vi.useFakeTimers();
-    for (const label of ['다음 달', '오늘']) {
-      const { root, store, fire } = swipeMount();
-      fire('pointerdown', 600, 300, 0);
-      fire('pointermove', 300, 300, 100);
-      fire('pointerup', 300, 300, 200);
-      [...root.querySelectorAll<HTMLElement>('.app-nav button')].find((b) => b.getAttribute('aria-label') === label || b.textContent === label)!.click();
-      vi.advanceTimersByTime(300);
-      expect(store.current()).toBe(label === '오늘' ? '2026-11' : '2027-01');
-    }
+  it('다음 달 단추는 부드럽게 스크롤하고, 스크롤이 반을 넘어야 제목이 바뀐다', () => {
+    const { root, pager, store, scroll, title } = scrollMount();
+    const scrollTo = vi.spyOn(pager, 'scrollTo').mockImplementation(() => {});
+    store.show.mockClear();
+    root.querySelector<HTMLElement>('[aria-label="다음 달"]')!.click();
+    expect(scrollTo.mock.calls).toEqual([[{ left: 1201 * 400, behavior: 'smooth' }]]);
+    expect([title(), store.show.mock.calls.length]).toEqual(['11월', 0]);
+    scroll(1200 * 400 + 120);
+    expect(title()).toBe('11월');
+    scroll(1200 * 400 + 260);
+    scroll(1201 * 400);
+    expect([title(), store.show.mock.calls]).toEqual(['12월', [['2026-12', ['2027-02']]]]);
   });
 });
 
@@ -241,15 +199,15 @@ const has = (el: Element, c: string) => el.classList.contains(c);
 describe('화면 설정', () => {
   it('변동 월은 지난 주 한 줄과 앞으로 네 줄이고 흐린 칸이 없다. 단일 행과 시작 요일', () => {
     const root = mountA({});
-    const cells = [...root.querySelectorAll<HTMLElement>('.cell')];
-    expect([cells.length, cells[0].dataset.key, root.querySelector('.cell.other'), root.querySelector('[aria-label="다음"]') !== null]).toEqual([35, '2026-11-01', null, true]);
-    expect(mountA({ layout: 'week' }).querySelectorAll('.cell')).toHaveLength(7);
+    const shown = cells(root);
+    expect([shown.length, shown[0].dataset.key, root.querySelector('.cell.other'), root.querySelector('[aria-label="다음"]') !== null]).toEqual([35, '2026-11-01', null, true]);
+    expect(cells(mountA({ layout: 'week' }))).toHaveLength(7);
     expect([...mountA({ layout: 'days' }).querySelectorAll('.dow span')].map((s) => s.textContent)).toEqual(['금', '토', '일', '월', '화', '수', '목']);
     const mon = mountA({ layout: 'month', weekStart: 1 });
-    expect([mon.querySelectorAll('.cell').length, mon.querySelector('.dow span')!.textContent]).toEqual([42, '월']);
+    expect([cells(mon).length, mon.querySelector('.dow span')!.textContent]).toEqual([42, '월']);
   });
   it('주 번호, 공휴일, 음력, 쉬는날', () => {
-    expect([...mountA({ weekNumbers: true }).querySelectorAll('.wk')].map((w) => w.textContent)).toEqual(['45', '46', '47', '48', '49']);
+    expect([...mountA({ weekNumbers: true }).querySelectorAll('.grid.current .wk')].map((w) => w.textContent)).toEqual(['45', '46', '47', '48', '49']);
     const root = mountA({ layout: 'month', lunar: true }, '2026-12-10');
     const xmas = cell(root, '2026-12-25');
     expect([has(xmas, 'holiday'), has(xmas, 'rest'), xmas.querySelector('.hname')!.textContent, xmas.querySelector('.lunar')!.textContent]).toEqual([true, true, '성탄절', '음 11.17']);
@@ -292,21 +250,31 @@ describe('구독과 날짜 열기', () => {
     return { root, store, handle, subscribed };
   }
   const title = (root: HTMLElement) => root.querySelector('.month')!.textContent;
+  // 8주 쪽: 지금 쪽 11/8~1/2, 앞 쪽 9/13~11/7, 뒤 쪽 1/3~2/27
   it('여러 달에 걸친 쪽은 앞뒤 한 달 밖의 달을 더해서 구독한다', () => {
     const { store } = mountS({ layout: 'floating', maxRows: 8, pastWeeks: 0 });
-    expect(store.show).toHaveBeenLastCalledWith('2026-11', ['2027-01']);
+    expect(store.show).toHaveBeenLastCalledWith('2026-11', ['2026-09', '2027-01', '2027-02']);
   });
   it('쪽이 바뀌면 앞 쪽이 더한 달을 정리한다', () => {
     const { handle, subscribed } = mountS({ layout: 'floating', maxRows: 8, pastWeeks: 0 });
-    expect(subscribed.has('2027-01')).toBe(true);
+    expect(subscribed.has('2027-02')).toBe(true);
+    // 전체 월: 10월(9/27~10/31), 11월(11/1~12/5), 12월(11/29~1/2) 쪽. 2027-02는 어느 쪽에도 없다.
     handle.setAppearance({ ...DEFAULT_APPEARANCE, layout: 'month' });
-    expect([...subscribed].sort()).toEqual(['2026-10', '2026-11', '2026-12']);
+    expect([...subscribed].sort()).toEqual(['2026-09', '2026-10', '2026-11', '2026-12', '2027-01']);
   });
   it('전체 월은 다른 달의 날짜를 열면 그 달로 넘어간다', () => {
     const { root, store, handle } = mountS(undefined);
+    store.show.mockClear();
     handle.showMonth('2026-12');
     expect([store.current(), title(root)]).toEqual(['2026-12', '12월']);
-    expect(store.show.mock.calls).toEqual([['2026-12']]); // 22f46ba와 같은 호출
+    expect(store.show.mock.calls).toEqual([['2026-12', ['2027-02']]]); // 한 번, 옆 쪽(2027년 1월, 12/27~2/6)이 걸친 2월과 함께
+  });
+  it('전체 월에서 보이는 달의 날짜를 열면 쪽을 다시 그리지 않는다', () => {
+    const { root, store, handle } = mountS(undefined);
+    const day = cell(root, '2026-11-20');
+    store.show.mockClear();
+    handle.showMonth('2026-11'); // 여는 쪽(main.ts)이 이어서 store.refresh()로 다시 그린다
+    expect([cell(root, '2026-11-20'), store.show.mock.calls.length, title(root)]).toEqual([day, 0, '11월']);
   });
   it('다른 배치는 보이는 쪽에 있는 날짜를 열어도 쪽을 바꾸지 않는다', () => {
     const { root, store, handle } = mountS({ layout: 'floating' });
@@ -331,16 +299,6 @@ it('PC 앱에서는 두 번 눌러야 열고, 오른쪽 클릭은 칸 메뉴, �
   root.querySelector('[aria-label="메뉴"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 600, clientY: 20 }));
   expect(onOpenMenu).toHaveBeenCalledWith({ x: 600, y: 20 });
 });
-it('PC 앱에서 마우스 끌기는 달을 넘기지 않는다', () => {
-  const root = document.createElement('div');
-  const store = fakeStore({});
-  const onOpenDay = vi.fn();
-  mountCalendar(root, { store, status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} }, today: () => '2026-11-13', onOpenDay, onOpenSettings: vi.fn(), appearance: { ...DEFAULT_APPEARANCE, layout: 'month' }, desktop: { onDayMenu: vi.fn(), onOpenMenu: vi.fn() } }, { reducedMotion: () => true });
-  const pager = root.querySelector<HTMLElement>('.pager')!;
-  const at = (type: string, x: number) => pager.dispatchEvent(Object.assign(new MouseEvent(type, { bubbles: true, clientX: x, clientY: 100 }), { pointerId: 1, pointerType: 'mouse' }));
-  at('pointerdown', 300); at('pointermove', 100); at('pointerup', 100);
-  expect([store.current(), root.querySelector('.month')!.textContent]).toEqual(['2026-11', '11월']);
-});
 it('덮여 있지 않은 달을 열면 쪽의 여분 달도 구독한다', () => {
   const root = document.createElement('div');
   let month = '2026-11';
@@ -359,6 +317,7 @@ it('덮여 있지 않은 달을 열면 쪽의 여분 달도 구독한다', () =>
   } as unknown as CalendarStore & { show: ReturnType<typeof vi.fn> };
   const handle = mountCalendar(root, { store, status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} }, today: () => '2026-11-13', onOpenDay: vi.fn(), onOpenSettings: vi.fn(), appearance: { ...DEFAULT_APPEARANCE, layout: 'floating', maxRows: 8, pastWeeks: 0 } });
   handle.showMonth('2027-06');
-  handle.showMonth('2026-11'); // 오늘의 달: 쪽은 오늘 주부터 시작해 2027-01까지 간다
-  expect([store.show.mock.lastCall, subscribed.has('2027-01')]).toEqual([['2026-11', ['2027-01']], true]);
+  // 오늘의 달: 쪽은 오늘 주부터 시작해 2027-01까지 가고, 옆 쪽은 9/13~11/7과 1/3~2/27이다.
+  handle.showMonth('2026-11');
+  expect([store.show.mock.lastCall, subscribed.has('2027-01')]).toEqual([['2026-11', ['2026-09', '2027-01', '2027-02']], true]);
 });
