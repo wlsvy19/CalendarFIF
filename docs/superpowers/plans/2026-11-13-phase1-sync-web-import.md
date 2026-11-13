@@ -84,7 +84,7 @@
 export type DayValue = { text: string; color: string };
 export type DayRecord = { text: string; color: string; editedAt: number; editedBy: string };
 export type MonthDoc = { days: Record<string, DayRecord> };
-export type PendingEdit = { monthId: string; day: string; base: DayValue; next: DayValue; editedAt: number };
+export type PendingEdit = { monthId: string; day: string; base: DayValue; next: DayValue; editedAt: number; sent?: true };   // sent: 올리기가 이 편집을 읽었다(Task 3 검토 반영)
 export type DayChange = DayRecord | 'delete';
 export const EMPTY_DAY: DayValue = { text: '', color: '' };
 
@@ -402,10 +402,11 @@ export interface KeyValueStore { getItem(key: string): string | null; setItem(ke
 export class Outbox {
   constructor(storage: KeyValueStore, uid: string);      // 저장 키: `calfif.outbox.${uid}`
   readonly persistent: boolean;                           // 저장소에 쓸 수 없으면 false
-  readonly corruptDetected: boolean;
+  readonly corruptDetected: boolean;                      // 생성자가 저장소를 한 번 읽으므로 만들자마자 알 수 있다
   list(): PendingEdit[];                                  // 매번 저장소에서 새로 읽는다
   put(edit: PendingEdit): PendingEdit[];                  // 새 목록을 돌려준다
-  remove(sent: PendingEdit[]): PendingEdit[];             // monthId, day, editedAt이 같은 것만 지운다
+  markSent(monthId: string): PendingEdit[];               // 그 달의 편집에 sent 표시를 하고, 그 달의 편집을 대기열 순서로 돌려준다
+  remove(sent: PendingEdit[]): PendingEdit[];             // sent 표시가 있고 monthId, day, editedAt이 같은 것만 지운다
 }
 
 // src/sync/engine.ts
@@ -442,12 +443,12 @@ export const edit: (monthId: string, day: string, baseText: string, nextText: st
 엔진의 동작:
 
 - `saveEdit`는 `next`를 `normalizeText`, `normalizeColor`로 다듬는다. `base`와 같으면 아무것도 하지 않는다. 다르면 대기열에 넣고 `flush`를 시작한다.
-- `put`의 합치기: 같은 `monthId`와 `day`가 이미 있으면 그 항목의 `base`는 두고 `next`와 `editedAt`만 바꾼다. 바꾼 뒤 `next`가 `base`와 같으면 항목을 뺀다.
-- `flush`는 대기열이 빌 때까지 달 단위로 올린다. 달마다 `transactMonth`를 한 번 부른다. `decide`는 불릴 때마다 그 달의 대기 편집을 대기열에서 새로 읽어 `resolveEdit`로 바꿀 값을 만든다. 성공하면 마지막 `decide`에서 읽은 편집을 `remove`한다. 어떤 달이 실패하면 그 달은 두고 다른 달을 계속한다. 한 바퀴를 돌아도 더 보낸 것이 없으면 끝낸다.
+- `put`의 합치기: 같은 `monthId`와 `day`의 마지막 항목이 아직 `sent`가 아니면 그 항목의 `base`는 두고 `next`와 `editedAt`만 바꾼다. 바꾼 뒤 `next`가 `base`와 같으면 항목을 뺀다. 그런 항목이 없거나 마지막 항목이 `sent`이면 새 편집을 자기 `base` 그대로 뒤에 붙인다. 올리기가 이미 읽은 편집은 서버에 들어갔을 수 있어서, 그 `base`로 합치면 되돌린 편집이 사라진다(Task 3 검토 반영).
+- `flush`는 대기열이 빌 때까지 달 단위로 올린다. 달마다 `transactMonth`를 한 번 부른다. `decide`는 불릴 때마다 `markSent`로 그 달의 대기 편집을 새로 읽고, `src/core/merge.ts`의 `resolveEdits(edits, days, editedBy)`로 바꿀 값을 만든다. `resolveEdits`는 같은 날짜의 편집을 대기열 순서대로 이어서 적용한다(앞 편집의 결과가 다음 편집의 서버 값이 된다). `applyPending`도 같은 함수를 쓴다. 성공하면 마지막 `decide`에서 읽은 편집을 `remove`한다. 어떤 달이 실패하면 그 달은 두고 다른 달을 계속한다. 한 바퀴를 돌아도 더 보낸 것이 없으면 끝낸다.
 - 동시에 불린 `flush`는 같은 실행을 함께 기다린다.
 - `flush`는 마이크로태스크 한 번 뒤에 대기열을 읽기 시작한다. 같은 틱에 이어진 `saveEdit`들을 한 번에 묶기 위해서다.
 - 상태: 올리는 동안 `sending`. 끝났을 때 대기열이 비었으면 `synced`, 남았으면 `waiting`.
-- `Outbox`는 내용을 메모리에 캐시하지 않는다. 읽기와 쓰기 때마다 저장소를 본다. JSON이 깨져 있으면 원문을 `${키}.corrupt.${시각}`에 옮기고 빈 목록으로 시작한다. 저장소 쓰기가 실패하면 그때부터 메모리 목록을 쓰고 `persistent`를 `false`로 둔다.
+- `Outbox`는 내용을 메모리에 캐시하지 않는다. 읽기와 쓰기 때마다 저장소를 본다. JSON이 깨져 있거나 배열의 항목 형식이 맞지 않으면 원문을 `${키}.corrupt.${시각}`에 옮기고 빈 목록으로 시작한다. 저장소 쓰기가 실패하면 그때부터 메모리 목록을 쓰고 `persistent`를 `false`로 둔다.
 
 - [ ] **Step 1: `src/sync/testing.ts`를 Interfaces대로 쓴다**
 
@@ -642,7 +643,7 @@ git commit -m "feat: 대기열과 동기화 엔진"
 
 ```ts
 // scripts/build-rules.ts
-export function buildRules(template: string, ownerUid: string): string;    // uid는 /^[A-Za-z0-9]{1,128}$/ 여야 한다. 아니면 throw
+export function buildRules(template: string, ownerUid: string): string;    // uid는 /^[A-Za-z0-9_-]{1,128}$/ 여야 한다(시험용 uid `owner-test-uid`에 `-`가 있다). 아니면 throw
 // 명령줄: tsx scripts/build-rules.ts [--uid <uid>]  → build/firestore.rules. --uid가 없으면 .env.local의 OWNER_UID
 //   --uid 없이 실행했는데 OWNER_UID가 비었거나 'owner-test-uid'이면 파일을 만들지 않고 이유를 알린 뒤 종료 코드 1로 끝난다(배포용 보호)
 
