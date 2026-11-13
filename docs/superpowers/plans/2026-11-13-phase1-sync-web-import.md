@@ -1813,7 +1813,7 @@ export class LiteMonthStore implements MonthStore {
 
 규칙:
 
-- `planEdits`: 지금 값이 상태 파일의 값과 같으면 편집을 만들지 않는다. 다르면 `base`는 상태 파일의 값(없으면 빈 값), `next`는 지금 값, `editedAt`은 DesktopCal의 수정 시각, `hasBase`는 상태 파일에 그 날짜가 있었는지다. 상태 파일에는 있는데 지금은 없는 날짜는 `next`가 빈 값이고 `editedAt`은 `now`인 편집으로 만든다.
+- `planEdits`: 지금 값이 상태 파일의 값과 같으면 편집을 만들지 않는다. 다르면 `base`는 상태 파일의 값(없으면 빈 값), `next`는 지금 값, `editedAt`은 DesktopCal의 수정 시각, `hasBase`는 상태 파일이 있는지다. 상태 파일은 있는데 그 날짜만 없으면 빈 값이 `base`이고 `hasBase`는 `true`다(휴대폰에서만 적은 날짜에 DesktopCal 글이 생겨도 덮어쓰지 않고 합치기 위해서다. 2026-11-13 최종 검토에서 고침). 상태 파일에는 있는데 지금은 없는 날짜는 `next`가 빈 값이고 `editedAt`은 `now`인 편집으로 만든다.
 - `decideImport`: `hasBase`가 `true`면 `resolveEdit(edit, 서버 값, 'import')`. `false`면 이렇게 한다. 서버에 그 날짜가 없으면 `next`를 쓴다(`next`가 빈 값이면 쓰지 않는다). 서버 값이 `next`와 같으면 쓰지 않는다. 다르면 서버의 `editedAt`이 `edit.editedAt`보다 이를 때만 `next`로 덮어쓴다.
 - `uploadEdits`: 편집 목록에 처음 나온 순서대로 달마다 `transactMonth`를 한 번 부르고, 성공한 달마다 `onMonthDone`을 부른다. 실패하면 그 자리에서 오류를 던진다. 돌려주는 `months`는 성공한 달 수, `days`는 그 달들에 넘긴 편집 수다(실제로 쓴 수가 아니다).
 - `verifyAgainstCloud`: 원본의 각 날짜에 대해 클라우드 값이 같으면 `same`, 다르면 `different`, 없으면 `missing`.
@@ -2218,6 +2218,15 @@ git commit -m "feat: 가져오기 명령줄과 따라가기"
 ---
 
 ### Task 13: 실제 프로젝트 연결, 배포, 완료 기준 확인
+
+> **최종 검토에서 바뀐 실행 순서와 주의 (2026-11-13)**
+>
+> - 가져오기(Step 5, Step 6)를 실시간 확인(Step 4)보다 먼저 한다. 가져오기 전에 실제 프로젝트에 시험 메모를 쓰면 그 날짜가 처음 가져올 때 건너뛰어질 수 있다. 실시간 확인에 쓰는 시험 메모는 가져온 뒤에 먼 미래의 빈 날짜에 적고 지운다.
+> - 가져오기 명령(`npm run import -- ...`)은 사용자가 자기 PowerShell 창에서 직접 실행한다. 비밀번호 입력에 터미널이 필요하고, `--show`가 실제 메모를 화면에 찍기 때문이다.
+> - 배포는 `npm run deploy`로만 한다. `dist/`와 `build/firestore.rules`에는 에뮬레이터용 빌드와 시험용 uid가 남아 있을 수 있다.
+> - 미리보기 보고서의 "수정 시각 범위"가 실제 사용 기간(2023년~현재)과 맞는지 본다.
+> - 아이폰 확인(Step 8)에서는 편집 화면에서 키보드가 올라왔을 때 `취소`와 `저장`이 화면 안에 남는지를 먼저 본다.
+> - `README.md`에 두 가지를 적는다. 상태 파일을 지우면 합치기가 "시각이 늦은 쪽으로 덮어쓰기"로 바뀐다. 홈 화면에 추가한 앱은 Safari와 로그인이 따로다.
 
 **Files:**
 - Create: `README.md`
