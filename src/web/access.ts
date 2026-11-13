@@ -32,7 +32,8 @@ export function watchAccess(
   let state: AccessState = 'checking';
   let attempts = 0;
   let claiming = false;
-  let settled = false; // 만들기가 성공했거나 거부됐다. 더 시도하지 않는다.
+  let denied = false; // 만들기가 거부됐다. 이 계정은 관리자가 아니다.
+  let claimed = false; // 만들기가 성공했다. 문서가 보일 때까지 다시 시도하지 않는다.
 
   const set = (next: AccessState): void => {
     if (stopped || next === state) return;
@@ -46,13 +47,13 @@ export function watchAccess(
     source.claimAdmin(session.uid, session.email).then(
       () => {
         claiming = false;
-        settled = true;
+        claimed = true;
       },
       (e: unknown) => {
         claiming = false;
         if (stopped) return;
         if ((e as { code?: string } | null)?.code === 'permission-denied') {
-          settled = true;
+          denied = true;
           set('none');
         }
       },
@@ -65,11 +66,20 @@ export function watchAccess(
     (s) => {
       if (stopped || s.hasPendingWrites) return;
       if (s.doc) {
+        if (claimed) {
+          // 관리자 문서가 나중에 사라지면 한 번 더 만들어 볼 수 있게 한다.
+          claimed = false;
+          attempts = 0;
+        }
         set(s.doc.disabled ? 'blocked' : s.doc.role);
         return;
       }
       if (s.fromCache) return;
-      if (!claiming && !settled && attempts < MAX_CLAIM_ATTEMPTS) claim();
+      if (denied) {
+        set('none');
+        return;
+      }
+      if (!claiming && !claimed && attempts < MAX_CLAIM_ATTEMPTS) claim();
     },
     (code) => {
       if (code === 'permission-denied') set('none');

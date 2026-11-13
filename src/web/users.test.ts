@@ -70,10 +70,16 @@ describe('addUser', () => {
     const t = setup({ create: () => Promise.reject(new Error('x')) });
     expect(await t.run('a@b.c', 'password1')).toEqual({ ok: false, reason: 'unknown', code: 'unknown' });
   });
-  it('put이 실패하면 그 실패를 돌려주고 계정을 지우려 하지 않는다', async () => {
+  it('put이 실패하면 그 실패를 돌려주고 그 밖의 호출은 하지 않는다', async () => {
     const t = setup({ put: rej('permission-denied') });
     expect(await t.run('a@b.c', 'password1')).toEqual({ ok: false, reason: 'denied', code: 'permission-denied' });
     expect(t.calls).toEqual(['create:a@b.c:password1', 'put']);
+  });
+  it('비밀번호는 8자부터 받고 7자는 거부한다', async () => {
+    const t = setup();
+    expect(await t.run('a@b.c', '1234567')).toMatchObject({ ok: false, reason: 'weak-password' });
+    expect(t.calls).toEqual([]);
+    expect(await t.run('a@b.c', '12345678')).toMatchObject({ ok: true });
   });
   it('lookup 뒤 put이 실패해도 매핑한다', async () => {
     const t = setup({ create: rej('auth/email-already-in-use'), put: rej('unavailable') });

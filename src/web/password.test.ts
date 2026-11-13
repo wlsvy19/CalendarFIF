@@ -23,6 +23,12 @@ describe('changePassword', () => {
     expect(await changePassword(t.deps, 'samepassword', 'samepassword')).toMatchObject({ ok: false, reason: 'same' });
     expect(t.calls).toEqual([]);
   });
+  it('새 비밀번호는 8자부터 받고 7자는 거부한다', async () => {
+    const t = setup();
+    expect(await changePassword(t.deps, 'oldpassword', '1234567')).toMatchObject({ ok: false, reason: 'weak' });
+    expect(t.calls).toEqual([]);
+    expect(await changePassword(t.deps, 'oldpassword', '12345678')).toEqual({ ok: true });
+  });
   it.each([
     ['auth/invalid-credential', 'wrong-current'],
     ['auth/wrong-password', 'wrong-current'],

@@ -1,4 +1,4 @@
-import { deleteApp, initializeApp, type FirebaseOptions } from 'firebase/app';
+import { deleteApp, initializeApp, type FirebaseApp, type FirebaseOptions } from 'firebase/app';
 import {
   connectAuthEmulator,
   createUserWithEmailAndPassword,
@@ -19,16 +19,18 @@ let counter = 0;
 export function firebaseAccountMaker(options: FirebaseOptions, env: { emulatorAuthUrl?: string }): AccountMaker {
   async function withSecondAuth(run: (auth: Auth) => Promise<string>): Promise<string> {
     counter += 1;
-    const app = initializeApp(options, `account-maker-${Date.now()}-${counter}`);
-    const auth = initializeAuth(app, { persistence: inMemoryPersistence });
+    let app: FirebaseApp | undefined;
+    let auth: Auth | undefined;
     try {
+      app = initializeApp(options, `account-maker-${Date.now()}-${counter}`);
+      auth = initializeAuth(app, { persistence: inMemoryPersistence });
       if (env.emulatorAuthUrl) connectAuthEmulator(auth, env.emulatorAuthUrl, { disableWarnings: true });
       return await run(auth);
     } catch (e) {
       throw { code: codeOf(e) };
     } finally {
-      await signOut(auth).catch(() => undefined);
-      await deleteApp(app).catch(() => undefined);
+      if (auth) await signOut(auth).catch(() => undefined);
+      if (app) await deleteApp(app).catch(() => undefined);
     }
   }
   return {

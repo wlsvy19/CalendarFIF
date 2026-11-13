@@ -96,8 +96,6 @@ describe('watchAccess', () => {
     expect(t.states).toEqual(['checking']);
     t.emit(server(doc({ role: 'admin' })));
     expect(t.states).toEqual(['checking', 'admin']);
-    t.emit(server(null));
-    expect(t.claims).toHaveLength(1);
   });
   it('만들기가 진행 중이면 다시 시도하지 않는다', () => {
     const t = setup(() => new Promise(() => {}));
@@ -142,5 +140,39 @@ describe('watchAccess', () => {
     t.emit(server(doc()));
     t.fail('permission-denied');
     expect(t.states).toEqual(['checking']);
+  });
+});
+
+describe('watchAccess: 지워진 사용자', () => {
+  it('거부된 뒤 서버에 문서가 없으면 다시 만들지 않고 바로 none이다', async () => {
+    const t = setup(() => Promise.reject({ code: 'permission-denied' }));
+    t.emit(server(doc()));
+    expect(t.states.at(-1)).toBe('user');
+    t.emit(server(null));
+    await flush();
+    expect(t.states.at(-1)).toBe('none');
+    t.emit(server(doc()));
+    expect(t.states.at(-1)).toBe('user');
+    t.emit(server(null));
+    expect(t.states.at(-1)).toBe('none');
+    expect(t.states).toEqual(['checking', 'user', 'none', 'user', 'none']);
+    expect(t.claims).toHaveLength(1);
+  });
+  it('캐시나 쓰기 대기 중의 빈 스냅샷은 none으로 보지 않는다', async () => {
+    const t = setup(() => Promise.reject({ code: 'permission-denied' }));
+    t.emit(server(null));
+    await flush();
+    t.emit(server(doc()));
+    t.emit({ doc: null, fromCache: true, hasPendingWrites: false });
+    t.emit({ doc: null, fromCache: false, hasPendingWrites: true });
+    expect(t.states.at(-1)).toBe('user');
+  });
+  it('만들기가 성공한 뒤 관리자 문서가 사라지면 한 번 더 만들어 본다', async () => {
+    const t = setup();
+    t.emit(server(null));
+    await flush();
+    t.emit(server(doc({ role: 'admin' })));
+    t.emit(server(null));
+    expect(t.claims).toHaveLength(2);
   });
 });

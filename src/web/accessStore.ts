@@ -1,5 +1,6 @@
-import { collection, deleteDoc, doc, onSnapshot, setDoc, updateDoc, type Firestore } from 'firebase/firestore';
+import { collection, doc, onSnapshot, runTransaction, setDoc, type Firestore, type Transaction } from 'firebase/firestore';
 import { parseAccess, type AccessDoc, type AccessSource } from './access';
+import { withTimeLimit } from './timeLimit';
 import { codeOf, type UserRow, type UsersSource } from './users';
 
 async function rethrow<T>(p: Promise<T>): Promise<T> {
@@ -8,6 +9,12 @@ async function rethrow<T>(p: Promise<T>): Promise<T> {
   } catch (e) {
     throw { code: codeOf(e) };
   }
+}
+
+// 관리자의 목록 쓰기는 연결이 있어야 한다. 트랜잭션은 서버가 필요하고 대기열에 쌓이지 않는다.
+const WRITE_LIMIT_MS = 10000;
+function writeNow(db: Firestore, change: (tx: Transaction) => void): Promise<void> {
+  return rethrow(withTimeLimit(runTransaction(db, async (tx) => { change(tx); }), WRITE_LIMIT_MS));
 }
 
 export function firestoreAccessSource(db: Firestore): AccessSource {
@@ -49,8 +56,8 @@ export function firestoreUsersSource(db: Firestore): UsersSource {
         (error) => onError(error.code),
       );
     },
-    put: (uid, data) => rethrow(setDoc(doc(db, 'access', uid), data)),
-    setDisabled: (uid, disabled) => rethrow(updateDoc(doc(db, 'access', uid), { disabled })),
-    remove: (uid) => rethrow(deleteDoc(doc(db, 'access', uid))),
+    put: (uid, data) => writeNow(db, (tx) => { tx.set(doc(db, 'access', uid), data); }),
+    setDisabled: (uid, disabled) => writeNow(db, (tx) => { tx.update(doc(db, 'access', uid), { disabled }); }),
+    remove: (uid) => writeNow(db, (tx) => { tx.delete(doc(db, 'access', uid)); }),
   };
 }
