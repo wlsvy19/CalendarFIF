@@ -4,12 +4,17 @@
   "type": "module",
   "scripts": {
     "test": "vitest run --project unit --project dom",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "rules:build": "tsx scripts/build-rules.ts",
+    "emu": "tsx scripts/emu.ts",
+    "test:emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"vitest run --project emulator\""
   },
   "dependencies": {
     "firebase": "^13.3.0"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
+    "firebase-tools": "^15.36.0",
     "happy-dom": "^21.0.4",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

@@ -1,0 +1,13 @@
+{
+  "firestore": {
+    "rules": "build/firestore.rules"
+  },
+  "hosting": {
+    "public": "dist"
+  },
+  "emulators": {
+    "firestore": { "port": 8085 },
+    "auth": { "port": 9095 },
+    "ui": { "enabled": false }
+  }
+}
