@@ -111,7 +111,7 @@ function mountMain(root: HTMLElement, session: Session): { destroy(): void } {
     if (editor?.dateKey === route.dateKey || waiting?.dateKey === route.dateKey) return;
     closeEditor();
     const { monthId } = splitDateKey(route.dateKey)!;
-    store.show(monthId);
+    if (!store.covers(monthId)) store.show(monthId);
     store.refresh();
     if (store.isLoaded(monthId)) {
       openEditor(route.dateKey);

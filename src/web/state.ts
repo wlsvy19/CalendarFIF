@@ -50,10 +50,15 @@ export class CalendarStore {
     return this.month;
   }
 
-  /** Subscribes to the month and its neighbours and drops every other subscription. Does not notify. */
-  show(monthId: string): void {
+  /** Subscribes to the month, its neighbours and the months in `also`, and drops every other subscription. Does not notify. */
+  show(monthId: string, also: string[] = []): void {
     this.month = monthId;
-    this.subscribeAround();
+    this.subscribeAround(also);
+  }
+
+  /** True while the month is subscribed. */
+  covers(monthId: string): boolean {
+    return this.subscriptions.has(monthId);
   }
 
   /** True once the server has answered for the month (even when the document does not exist). */
@@ -153,8 +158,8 @@ export class CalendarStore {
     if (this.readProblem() !== before) this.emit();
   }
 
-  private subscribeAround(): void {
-    const wanted = new Set([shiftMonth(this.month, -1), this.month, shiftMonth(this.month, 1)]);
+  private subscribeAround(also: string[] = []): void {
+    const wanted = new Set([shiftMonth(this.month, -1), this.month, shiftMonth(this.month, 1), ...also]);
     for (const [monthId, unsubscribe] of [...this.subscriptions]) {
       if (wanted.has(monthId)) continue;
       unsubscribe();

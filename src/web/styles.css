@@ -349,14 +349,29 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
   font-weight: 600;
   color: var(--muted);
 }
-.dow span:first-child { color: var(--sun); }
-.dow span:last-child { color: var(--sat); }
+.dow .sun { color: var(--sun); }
+.dow .sat { color: var(--sat); }
 
 .cell[data-color] { background: color-mix(in srgb, var(--day-color) 38%, var(--surface)); }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .cell[data-color] { background: color-mix(in srgb, var(--day-color) 45%, var(--surface)); }
 }
 :root[data-theme="dark"] .cell[data-color] { background: color-mix(in srgb, var(--day-color) 45%, var(--surface)); }
+
+/* 날짜 머리: 웹에서는 상자를 만들지 않고, 데스크톱 배치가 .hname과 .lunar를 .num 옆에 놓는다 */
+.head { display: contents; }
+/* 주 번호 칸: 켜면 격자와 요일 줄이 8열이 된다 */
+.wk {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  background: var(--surface);
+}
+.calendar.with-wk .grid,
+.calendar.with-wk .dow { grid-template-columns: 26px repeat(7, minmax(0, 1fr)); }
 
 .num {
   flex: none;

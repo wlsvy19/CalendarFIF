@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DayValue } from '../../core/types';
 import type { SyncStatus } from '../../sync/engine';
 import type { CalendarStore } from '../state';
-import { mountCalendar, visibleLines } from './calendar';
+import { DEFAULT_APPEARANCE, type Appearance } from '../appearance';
+import { displayLines, mountCalendar, visibleLines } from './calendar';
 
 function fakeStore(days: Record<string, DayValue>) {
   let month = '2026-11';
@@ -190,5 +191,45 @@ describe('달 넘기기', () => {
       vi.advanceTimersByTime(300);
       expect(store.current()).toBe(label === '오늘' ? '2026-11' : '2027-01');
     }
+  });
+});
+
+function mountA(a: Partial<Appearance>, today = '2026-11-13') {
+  const root = document.createElement('div');
+  const store = fakeStore({ '13': { text: '[+]끝낸 일\n회의\n[+]장보기\n운동', color: '' } });
+  store.show(today.slice(0, 7)); // main.ts처럼 저장소는 오늘의 달에서 시작한다
+  mountCalendar(root, { store, status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} }, today: () => today, onOpenDay: vi.fn(), onOpenSettings: vi.fn(), appearance: { ...DEFAULT_APPEARANCE, ...a } });
+  return root;
+}
+const has = (el: Element, c: string) => el.classList.contains(c);
+describe('화면 설정', () => {
+  it('변동 월은 지난 주 한 줄과 앞으로 네 줄이고 흐린 칸이 없다. 단일 행과 시작 요일', () => {
+    const root = mountA({});
+    const cells = [...root.querySelectorAll<HTMLElement>('.cell')];
+    expect([cells.length, cells[0].dataset.key, root.querySelector('.cell.other'), root.querySelector('[aria-label="다음"]') !== null]).toEqual([35, '2026-11-01', null, true]);
+    expect(mountA({ layout: 'week' }).querySelectorAll('.cell')).toHaveLength(7);
+    expect([...mountA({ layout: 'days' }).querySelectorAll('.dow span')].map((s) => s.textContent)).toEqual(['금', '토', '일', '월', '화', '수', '목']);
+    const mon = mountA({ layout: 'month', weekStart: 1 });
+    expect([mon.querySelectorAll('.cell').length, mon.querySelector('.dow span')!.textContent]).toEqual([42, '월']);
+  });
+  it('주 번호, 공휴일, 음력, 쉬는날', () => {
+    expect([...mountA({ weekNumbers: true }).querySelectorAll('.wk')].map((w) => w.textContent)).toEqual(['45', '46', '47', '48', '49']);
+    const root = mountA({ layout: 'month', lunar: true }, '2026-12-10');
+    const xmas = cell(root, '2026-12-25');
+    expect([has(xmas, 'holiday'), has(xmas, 'rest'), xmas.querySelector('.hname')!.textContent, xmas.querySelector('.lunar')!.textContent]).toEqual([true, true, '성탄절', '음 11.17']);
+    expect([has(cell(root, '2026-12-06'), 'rest'), has(cell(root, '2026-12-07'), 'rest')]).toEqual([true, false]);
+    const off = mountA({ layout: 'month', holidays: false, showRestDays: false }, '2026-12-10');
+    expect([off.querySelector('.hname'), off.querySelector('.cell.rest')]).toEqual([null, null]);
+  });
+  it('완료한 줄 숨기기와 맨 아래로 보내기, 줄 머리, 그림자, 월 간격, 제목 줄', () => {
+    expect(displayLines('[+]A\nB\n\n[+]C\nD', { showDone: true, doneToBottom: true })).toEqual([{ text: 'B', done: false }, { text: 'D', done: false }, { text: 'A', done: true }, { text: 'C', done: true }]);
+    expect(displayLines('[+]A\nB', { showDone: false, doneToBottom: false })).toEqual([{ text: 'B', done: false }]);
+    const root = mountA({ showDone: false, bullet: 'number' });
+    expect([...cell(root, '2026-11-13').querySelectorAll('.ln')].map((l) => l.textContent)).toEqual(['회의', '운동']);
+    const cal = root.querySelector<HTMLElement>('.calendar')!;
+    expect([cal.dataset.bullet, has(cal, 'shadow'), has(cal, 'month-gap')]).toEqual(['number', true, true]);
+    expect([[...cell(root, '2026-12-01').classList].filter((c) => c.startsWith('m-')), has(cell(root, '2026-11-01'), 'm-top')]).toEqual([['m-top', 'm-left'], false]);
+    const off = mountA({ shadow: false, titleBar: false }).querySelector<HTMLElement>('.calendar')!;
+    expect([has(off, 'shadow'), off.querySelector<HTMLElement>('.app-head')!.hidden]).toEqual([false, true]);
   });
 });

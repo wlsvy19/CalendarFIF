@@ -145,3 +145,12 @@ it('구독 오류를 달마다 모아 읽기 문제로 알린다', () => {
   store.show('2027-01');
   expect(store.readProblem()).toBeNull();
 });
+it('더 필요한 달도 구독하고, 구독 중인지 알려 준다', () => {
+  const source = fakeSource();
+  const store = new CalendarStore({ source, outbox: new Outbox(new MemoryStorage(), 'u1'), editedBy: 'pc', initialMonth: '2026-01' });
+  store.show('2026-01', ['2026-03']);
+  expect([...source.listeners.keys()].sort()).toEqual(['2025-12', '2026-01', '2026-02', '2026-03']);
+  expect(store.covers('2026-03')).toBe(true);
+  store.show('2026-01');
+  expect(store.covers('2026-03')).toBe(false);
+});

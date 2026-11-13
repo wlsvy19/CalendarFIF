@@ -1,6 +1,10 @@
-import { buildMonthGrid, shiftMonth, splitDateKey } from '../../core/dates';
+import { shiftMonth } from '../../core/dates';
+import { holidayLabel } from '../../core/holidays';
+import { buildPage, pageMonths, stepPage, type Page } from '../../core/layout';
+import { lunarLabel } from '../../core/lunar';
 import { parseLine, splitLines } from '../../core/text';
 import type { SyncStatus } from '../../sync/engine';
+import { applyAppearance, pageOptions, WEB_APPEARANCE, type Appearance } from '../appearance';
 import type { CalendarStore } from '../state';
 import { statusText } from './status';
 import { dragOffset, lockAxis, SWIPE, swipeOutcome, velocity, type Sample } from './swipe';
@@ -14,26 +18,47 @@ const chevron = (path: string): string =>
 const GEAR =
   '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg>';
 
-export function visibleLines(lines: string[], maxLines: number): { shown: string[]; more: number } {
+export function visibleLines<T>(lines: T[], maxLines: number): { shown: T[]; more: number } {
   if (lines.length <= maxLines) return { shown: lines, more: 0 };
   const shown = lines.slice(0, Math.max(0, maxLines - 1));
   return { shown, more: lines.length - shown.length };
 }
 
+/** 메모 한 줄씩. 빈 줄은 빼고, 설정에 따라 완료 줄을 숨기거나 안 끝낸 줄 뒤로 보낸다. */
+export function displayLines(text: string, opts: { showDone: boolean; doneToBottom: boolean }): { text: string; done: boolean }[] {
+  const lines = splitLines(text).filter((l) => l.trim() !== '').map(parseLine);
+  const visible = opts.showDone ? lines : lines.filter((l) => !l.done);
+  return opts.doneToBottom ? [...visible.filter((l) => !l.done), ...visible.filter((l) => l.done)] : visible;
+}
+
 export type CalendarEnv = { frame?(cb: () => void): void; reducedMotion?(): boolean; now?(): number };
 
-export function mountCalendar(
-  root: HTMLElement,
-  deps: {
-    store: CalendarStore;
-    status: { status(): SyncStatus; subscribe(listener: (s: SyncStatus) => void): () => void };
-    today(): string;
-    onOpenDay(dateKey: string): void;
-    onOpenSettings(): void;
-  },
-  env: CalendarEnv = {},
-): { destroy(): void } {
+export type CalendarDeps = {
+  store: CalendarStore;
+  status: { status(): SyncStatus; subscribe(listener: (s: SyncStatus) => void): () => void };
+  today(): string;
+  onOpenDay(dateKey: string): void;
+  onOpenSettings(): void;
+  appearance?: Appearance;
+};
+
+export type CalendarHandle = { destroy(): void; setAppearance(a: Appearance): void; goToday(): void };
+
+const dowSpan = (dow: number): string => `<span${dow === 0 ? ' class="sun"' : dow === 6 ? ' class="sat"' : ''}>${WEEKDAYS[dow]}</span>`;
+
+function spanOf(className: string, text: string): HTMLSpanElement {
+  const span = document.createElement('span');
+  span.className = className;
+  span.textContent = text;
+  return span;
+}
+
+export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: CalendarEnv = {}): CalendarHandle {
   const { store } = deps;
+  // 설정이 없으면 웹앱처럼 그리고 CSS 변수를 쓰지 않는다.
+  let appearance: Appearance = deps.appearance ?? WEB_APPEARANCE;
+  let custom = deps.appearance !== undefined;
+  let anchor = store.current() === deps.today().slice(0, 7) ? deps.today() : `${store.current()}-01`;
   const el = document.createElement('section');
   el.className = 'app calendar';
   el.setAttribute('aria-label', '달력');
@@ -51,7 +76,7 @@ export function mountCalendar(
         <button type="button" class="iconbtn" aria-label="설정">${GEAR}</button>
       </div>
     </div>
-    <div class="dow" aria-hidden="true">${WEEKDAYS.map((d) => `<span>${d}</span>`).join('')}</div>
+    <div class="dow" aria-hidden="true"></div>
     <div class="pager"><div class="track"><div class="grid"></div></div></div>`;
   const q = (selector: string): HTMLElement => el.querySelector<HTMLElement>(selector)!;
   const yearEl = q('.year');
@@ -61,6 +86,8 @@ export function mountCalendar(
   const pager = q('.pager');
   const track = q('.track');
   const grid = q('.grid');
+  const dowEl = q('.dow');
+  const head = q('.app-head');
   const [todayBtn, prevBtn, nextBtn, settingsBtn] = [...el.querySelectorAll<HTMLButtonElement>('.app-nav button')];
 
   function renderStatus(status: SyncStatus = deps.status.status()): void {
@@ -73,66 +100,78 @@ export function mountCalendar(
 
   let renderedToday = '';
 
-  // 격자 요소 하나에 한 달의 칸을 채운다. maxLinesHint가 있으면 칸 높이를 재지 않고 그 줄 수를 쓴다(끄는 중에 옆 달을 그릴 때).
+  // 격자 요소 하나에 한 쪽의 칸을 채운다. maxLinesHint가 있으면 칸 높이를 재지 않고 그 줄 수를 쓴다(끄는 중에 옆 쪽을 그릴 때).
   // 쓴 줄 수를 돌려준다.
-  function fillGrid(target: HTMLElement, monthId: string, today: string, maxLinesHint?: number): number {
-    const cells = buildMonthGrid(monthId);
-    target.style.setProperty('--rows', String(cells.length / 7));
+  function fillGrid(target: HTMLElement, page: Page, today: string, maxLinesHint?: number): number {
+    target.style.setProperty('--rows', String(page.rows.length));
+    const a = appearance;
+    const lineOpts = { showDone: a.showDone, doneToBottom: a.doneToBottom };
 
+    // 공휴일과 음력은 칸마다 한 번만 계산한다.
     const daysByMonth = new Map<string, ReturnType<CalendarStore['days']>>();
-    const built = cells.map((c) => {
-      let days = daysByMonth.get(c.monthId);
-      if (!days) {
-        days = store.days(c.monthId);
-        daysByMonth.set(c.monthId, days);
-      }
-      const value = days[c.day];
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'cell';
-      button.dataset.key = c.dateKey;
-      if (c.dow === 0) button.classList.add('sun');
-      if (c.dow === 6) button.classList.add('sat');
-      if (!c.inMonth) button.classList.add('other');
-      if (c.dateKey === today) button.classList.add('today');
-      if (value?.color) {
-        button.dataset.color = value.color;
-        button.style.setProperty('--day-color', `#${value.color}`);
-      }
-      const num = document.createElement('span');
-      num.className = 'num';
-      num.textContent = String(c.dayOfMonth);
-      button.append(num);
-      const lines = splitLines(value?.text ?? '').filter((l) => l.trim() !== '');
-      return { button, lines };
+    const built: { button: HTMLButtonElement; lines: { text: string; done: boolean }[] }[] = [];
+    const children: HTMLElement[] = [];
+    page.rows.forEach((row, rowIndex) => {
+      if (a.weekNumbers) children.push(spanOf('wk', String(row.week)));
+      row.cells.forEach((c, col) => {
+        let days = daysByMonth.get(c.monthId);
+        if (!days) {
+          days = store.days(c.monthId);
+          daysByMonth.set(c.monthId, days);
+        }
+        const value = days[c.day];
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'cell';
+        button.dataset.key = c.dateKey;
+        if (c.dow === 0) button.classList.add('sun');
+        if (c.dow === 6) button.classList.add('sat');
+        if (!c.inMonth) button.classList.add('other');
+        if (c.dateKey === today) button.classList.add('today');
+        const holiday = a.holidays ? holidayLabel(c.dateKey) : '';
+        if (holiday !== '') button.classList.add('holiday');
+        if (holiday !== '' || (a.showRestDays && a.restDays.includes(c.dow))) button.classList.add('rest');
+        if (c.dayOfMonth <= 7 && rowIndex > 0) button.classList.add('m-top');
+        if (c.dayOfMonth === 1 && col > 0) button.classList.add('m-left');
+        if (value?.color) {
+          button.dataset.color = value.color;
+          button.style.setProperty('--day-color', `#${value.color}`);
+        }
+        const header = spanOf('head', '');
+        header.append(spanOf('num', String(c.dayOfMonth)));
+        if (holiday !== '') header.append(spanOf('hname', holiday));
+        if (a.lunar) header.append(spanOf('lunar', lunarLabel(c.dateKey)));
+        button.append(header);
+        children.push(button);
+        built.push({ button, lines: displayLines(value?.text ?? '', lineOpts) });
+      });
     });
-    target.replaceChildren(...built.map((b) => b.button));
+    target.replaceChildren(...children);
 
     // 칸 높이를 재서 들어가는 줄 수를 정한다. 높이가 0이면(배치가 없으면) 제한하지 않는다.
     let maxLines = maxLinesHint;
     if (maxLines === undefined) {
-      const cellHeight = built[0]?.button.clientHeight ?? 0;
-      const lineHeight = window.innerWidth >= WIDE_PX ? 17 : 13;
-      maxLines = cellHeight > 0 ? Math.max(1, Math.floor((cellHeight - NUMBER_AREA_PX) / lineHeight)) : Infinity;
+      const first = built[0]?.button;
+      const cellHeight = first?.clientHeight ?? 0;
+      let lineHeight: number;
+      let used: number;
+      if (custom) {
+        lineHeight = Math.round(a.memoFont.size * a.lineSpacing);
+        const style = first ? getComputedStyle(first) : null;
+        const padding = style ? (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0) : 0;
+        used = (first?.querySelector<HTMLElement>('.head')?.offsetHeight ?? 0) + padding;
+      } else {
+        lineHeight = window.innerWidth >= WIDE_PX ? 17 : 13;
+        used = NUMBER_AREA_PX;
+      }
+      maxLines = cellHeight > 0 ? Math.max(1, Math.floor((cellHeight - used) / lineHeight)) : Infinity;
     }
     for (const { button, lines } of built) {
       if (lines.length === 0) continue;
       const { shown, more } = visibleLines(lines, maxLines);
-      const memo = document.createElement('span');
-      memo.className = 'memo';
-      for (const raw of shown) {
-        const { done, text } = parseLine(raw);
-        const ln = document.createElement('span');
-        ln.className = done ? 'ln done' : 'ln';
-        ln.textContent = text;
-        memo.append(ln);
-      }
-      if (more > 0) {
-        const tail = document.createElement('span');
-        tail.className = 'ln more';
-        tail.textContent = `+${more}`;
-        memo.append(tail);
-      }
+      const memo = spanOf('memo', '');
+      for (const { done, text } of shown) memo.append(spanOf(done ? 'ln done' : 'ln', text));
+      if (more > 0) memo.append(spanOf('ln more', `+${more}`));
       button.append(memo);
     }
     // 잘린 줄 표시는 배치를 읽어야 해서 본 격자에서만 한다.
@@ -146,20 +185,47 @@ export function mountCalendar(
 
   let lastMaxLines: number | undefined;
 
-  function render(): void {
-    const monthId = store.current();
-    const [year, month] = monthId.split('-');
-    yearEl.textContent = `${year}년`;
-    monthEl.textContent = `${Number(month)}월`;
-    const today = deps.today();
-    renderedToday = today;
-    lastMaxLines = fillGrid(grid, monthId, today);
+  function applyClasses(): void {
+    const a = appearance;
+    el.classList.toggle('shadow', a.shadow);
+    el.classList.toggle('month-gap', a.monthGap);
+    el.classList.toggle('with-wk', a.weekNumbers);
+    el.dataset.bullet = a.bullet;
+    head.hidden = !a.titleBar;
+    const monthLayout = a.layout === 'month';
+    prevBtn.setAttribute('aria-label', monthLayout ? '이전 달' : '이전');
+    nextBtn.setAttribute('aria-label', monthLayout ? '다음 달' : '다음');
+    if (custom) applyAppearance(el, a);
   }
 
-  function go(monthId: string): void {
-    store.show(monthId);
+  function render(): void {
+    // 바로가기 주소 등으로 저장소가 다른 달로 옮겨졌으면 그 달 1일부터 보여 준다.
+    if (store.current() !== anchor.slice(0, 7)) anchor = `${store.current()}-01`;
+    const page = buildPage(pageOptions(appearance), anchor);
+    const [year, month] = page.title.split('-');
+    yearEl.textContent = `${year}년`;
+    monthEl.textContent = `${Number(month)}월`;
+    dowEl.innerHTML = (appearance.weekNumbers ? '<span></span>' : '') + page.weekdays.map(dowSpan).join('');
+    const today = deps.today();
+    renderedToday = today;
+    lastMaxLines = fillGrid(grid, page, today);
+  }
+
+  // 구독할 달을 알리고 다시 그린다. 쪽의 달 중 앞뒤 한 달 밖의 것은 더해서 구독한다.
+  function showAnchor(next: string, always: boolean): void {
+    anchor = next;
+    const page = buildPage(pageOptions(appearance), anchor);
+    const also = pageMonths(page).filter((m) => m < shiftMonth(page.title, -1) || m > shiftMonth(page.title, 1));
+    if (also.length > 0) store.show(page.title, also);
+    else if (always) store.show(page.title);
     render();
   }
+
+  const step = (delta: number): string => stepPage(pageOptions(appearance), anchor, delta);
+  const goToday = (): void => {
+    settle?.finish();
+    showAnchor(deps.today(), true);
+  };
 
   pager.addEventListener('click', (event) => {
     if (swiped) return;
@@ -169,9 +235,9 @@ export function mountCalendar(
     if (cell?.dataset.key) deps.onOpenDay(cell.dataset.key);
   });
   // 미끄러지는 중에 버튼을 누르면 그 미끄러짐을 먼저 끝내고 그 달에서 이어 간다.
-  prevBtn.addEventListener('click', () => { settle?.finish(); go(shiftMonth(store.current(), -1)); });
-  nextBtn.addEventListener('click', () => { settle?.finish(); go(shiftMonth(store.current(), 1)); });
-  todayBtn.addEventListener('click', () => { settle?.finish(); go(splitDateKey(deps.today())!.monthId); });
+  prevBtn.addEventListener('click', () => { settle?.finish(); showAnchor(step(-1), true); });
+  nextBtn.addEventListener('click', () => { settle?.finish(); showAnchor(step(1), true); });
+  todayBtn.addEventListener('click', goToday);
   settingsBtn.addEventListener('click', () => deps.onOpenSettings());
 
   const frame = env.frame ?? ((cb: () => void) => void requestAnimationFrame(cb));
@@ -204,17 +270,17 @@ export function mountCalendar(
     const peek = current ?? document.createElement('div');
     peek.className = 'grid peek';
     peek.dataset.side = side;
-    fillGrid(peek, shiftMonth(store.current(), side === 'next' ? 1 : -1), deps.today(), lastMaxLines);
+    fillGrid(peek, buildPage(pageOptions(appearance), step(side === 'next' ? 1 : -1)), deps.today(), lastMaxLines);
     if (!current) track.append(peek);
   }
 
   function release(width: number, outcome: -1 | 0 | 1): void {
     if (reducedMotion()) {
-      if (outcome !== 0) go(shiftMonth(store.current(), outcome));
+      if (outcome !== 0) showAnchor(step(outcome), true);
       return;
     }
     if (outcome !== 0) ensurePeek(outcome === 1 ? 'next' : 'prev');
-    const target = shiftMonth(store.current(), outcome);
+    const target = step(outcome);
     track.style.transition = `transform ${SWIPE.durationMs}ms ease-out`;
     setTransform(-outcome * width);
     let done = false;
@@ -227,7 +293,7 @@ export function mountCalendar(
       track.style.transition = '';
       track.style.transform = '';
       track.querySelector('.peek')?.remove();
-      if (outcome !== 0 && !destroyed) go(target);
+      if (outcome !== 0 && !destroyed) showAnchor(target, true);
     };
     const timer = setTimeout(finish, SWIPE.durationMs + 60);
     const onEnd = (e: TransitionEvent): void => {
@@ -317,7 +383,12 @@ export function mountCalendar(
   // 다시 보이게 될 때도 확인한다.
   let midnightTimer: ReturnType<typeof setTimeout> | undefined;
   const checkToday = (): void => {
-    if (deps.today() !== renderedToday) render();
+    const today = deps.today();
+    if (today !== renderedToday) {
+      // 어제를 보고 있었으면 오늘로 따라간다.
+      if (anchor === renderedToday) showAnchor(today, true);
+      else render();
+    }
     armMidnight();
   };
   const armMidnight = (): void => {
@@ -333,9 +404,17 @@ export function mountCalendar(
   armMidnight();
 
   root.appendChild(el);
-  render(); // 붙인 뒤에 그려야 칸 높이를 잴 수 있다
+  applyClasses();
+  showAnchor(anchor, false); // 붙인 뒤에 그려야 칸 높이를 잴 수 있다
 
   return {
+    setAppearance(next) {
+      appearance = next;
+      custom = true;
+      applyClasses();
+      showAnchor(anchor, false);
+    },
+    goToday,
     destroy() {
       offChange();
       offStatus();

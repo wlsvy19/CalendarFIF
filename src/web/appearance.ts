@@ -117,3 +117,34 @@ export function saveAppearance(store: KeyValueStore, a: Appearance): void {
 export function pageOptions(a: Appearance): PageOptions {
   return { layout: a.layout, maxRows: a.maxRows, pastWeeks: a.pastWeeks, weekStart: a.weekStart, firstWeek: a.firstWeek };
 }
+
+function rgb(hex: string, alpha: number): string {
+  if (hex === '') return 'transparent';
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+const solid = (hex: string): string => (hex === '' ? 'transparent' : `#${hex}`);
+
+export function appearanceVars(a: Appearance): Record<string, string> {
+  const alpha = Math.round(100 - a.transparency) / 100;
+  return {
+    '--desk-cal-ink': solid(a.calendarFont.color),
+    '--desk-cal-size': `${a.calendarFont.size}px`,
+    '--desk-memo-ink': solid(a.memoFont.color),
+    '--desk-memo-size': `${a.memoFont.size}px`,
+    '--desk-line': String(a.lineSpacing),
+    '--desk-gap': `${a.cellGap}px`,
+    '--desk-cell-bg': rgb(a.calendarBg, alpha),
+    '--desk-rest-bg': rgb(a.restBg, alpha),
+    '--desk-today': solid(a.todayBorder),
+    '--desk-btn': solid(a.titleButton),
+    '--desk-holiday-ink': solid(a.holidayInk),
+    '--desk-lunar-ink': solid(a.lunarInk),
+    '--desk-day-pct': `${Math.round(Math.max(0.5, alpha) * 100)}%`,
+  };
+}
+
+export function applyAppearance(el: HTMLElement, a: Appearance): void {
+  for (const [name, value] of Object.entries(appearanceVars(a))) el.style.setProperty(name, value);
+}

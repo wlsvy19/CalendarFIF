@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MemoryStorage } from '../sync/testing';
-import { APPEARANCE_KEY, DEFAULT_APPEARANCE, WEB_APPEARANCE, loadAppearance, parseAppearance, saveAppearance } from './appearance';
+import { APPEARANCE_KEY, appearanceVars, DEFAULT_APPEARANCE, WEB_APPEARANCE, loadAppearance, parseAppearance, saveAppearance } from './appearance';
 
 describe('appearance', () => {
   it('기본값은 설계 8절의 표와 같다', () => {
@@ -29,4 +29,13 @@ describe('appearance', () => {
     saveAppearance(store, { ...DEFAULT_APPEARANCE, lunar: true });
     expect(loadAppearance(store).lunar).toBe(true);
   });
+});
+it('설정을 CSS 변수로 바꾼다', () => {
+  expect(appearanceVars(DEFAULT_APPEARANCE)).toEqual({
+    '--desk-cal-ink': '#FFFFFF', '--desk-cal-size': '13px', '--desk-memo-ink': '#FFFFFF', '--desk-memo-size': '14px',
+    '--desk-line': '1.35', '--desk-gap': '4px', '--desk-cell-bg': 'rgba(20, 24, 32, 0.4)', '--desk-rest-bg': 'rgba(58, 31, 36, 0.4)',
+    '--desk-today': '#6AA6FF', '--desk-btn': '#FFFFFF', '--desk-holiday-ink': '#FF6B6B', '--desk-lunar-ink': '#9FB3C8', '--desk-day-pct': '50%',
+  });
+  const v = appearanceVars({ ...DEFAULT_APPEARANCE, transparency: 30, calendarBg: '', todayBorder: '' });
+  expect([v['--desk-cell-bg'], v['--desk-rest-bg'], v['--desk-today'], v['--desk-day-pct']]).toEqual(['transparent', 'rgba(58, 31, 36, 0.7)', 'transparent', '70%']);
 });
