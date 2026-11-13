@@ -1,0 +1,11 @@
+node_modules/
+dist/
+build/
+.tools/
+.superpowers/
+.env.local
+.firebaserc
+.firebase/
+*.log
+*.db
+coverage/
