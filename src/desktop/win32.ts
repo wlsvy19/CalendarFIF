@@ -1,4 +1,3 @@
-import koffi from 'koffi';
 import type { BelowEntry } from './policy';
 
 export type Hwnd = bigint;
@@ -16,8 +15,10 @@ const SWP_FRAMECHANGED = 0x20;
 const WS_EX_TOOLWINDOW = 0x80;
 const WS_EX_APPWINDOW = 0x40000;
 
-// 처음 부를 때 user32.dll을 읽는다(테스트나 다른 OS에서 이 파일을 가져와도 바로 읽지 않는다).
+// koffi는 처음 부를 때 읽는다. 맨 위에서 읽으면 koffi.node가 없거나 막힌 PC에서 메인 프로세스가 whenReady 전에 죽는다.
+// 테스트나 다른 OS에서 이 파일을 가져와도 바로 읽지 않는다.
 function loadUser32() {
+  const koffi = require('koffi') as typeof import('koffi');
   const user32 = koffi.load('user32.dll');
   return {
     FindWindowW: user32.func('intptr_t __stdcall FindWindowW(str16 cls, str16 title)'),
@@ -29,14 +30,18 @@ function loadUser32() {
     IsChild: user32.func('int __stdcall IsChild(intptr_t parent, intptr_t hWnd)'),
   };
 }
-type Api = ReturnType<typeof loadUser32>;
+export type Api = ReturnType<typeof loadUser32>;
 
 // Win32 호출은 이 틀로만 한다. 읽기나 호출이 던지면 이유를 한 번만 적고 안전한 값을 돌려준다(창은 일반 맨 아래 창으로 남는다).
 // 읽기에 실패하면 다시 읽지 않는다. 시험에서는 load를 던지는 함수로 바꿔 끼운다.
+// 한 번에 하나의 koffi 호출만 한다. 호출이 도는 동안 같은 모듈의 호출이 들어오면(창 메시지 처리 등으로) koffi로 들어가지 않고
+// 그 함수의 안전한 값을 돌려주고 nested를 센다. koffi 호출 안에서 다시 koffi를 부르면 바깥 호출의 스택을 망가뜨릴 수 있다.
 export function createWin32(load: () => Api = loadUser32, log: (message: string) => void = console.error) {
   let api: Api | null = null;
   let loadFailed = false;
   let logged = false;
+  let busy = false;
+  let nested = 0;
   const fail = (what: string, e: unknown): void => {
     if (logged) return;
     logged = true;
@@ -56,44 +61,72 @@ export function createWin32(load: () => Api = loadUser32, log: (message: string)
   function findProgman(): Hwnd {
     const f = u();
     if (!f) return 0n;
+    if (busy) {
+      nested += 1;
+      return 0n;
+    }
+    busy = true;
     try {
       return BigInt(f.FindWindowW('Progman', null));
     } catch (e) {
       fail('FindWindowW', e);
       return 0n;
+    } finally {
+      busy = false;
     }
   }
 
   function isWindow(h: Hwnd): boolean {
     const f = u();
     if (!f || h === 0n) return false;
+    if (busy) {
+      nested += 1;
+      return false;
+    }
+    busy = true;
     try {
       return f.IsWindow(h) !== 0;
     } catch (e) {
       fail('IsWindow', e);
       return false;
+    } finally {
+      busy = false;
     }
   }
 
   function getOwner(h: Hwnd): Hwnd {
     const f = u();
     if (!f) return 0n;
+    if (busy) {
+      nested += 1;
+      return 0n;
+    }
+    busy = true;
     try {
       return BigInt(f.GetWindow(h, GW_OWNER));
     } catch (e) {
       fail('GetWindow', e);
       return 0n;
+    } finally {
+      busy = false;
     }
   }
 
   function getExStyle(h: Hwnd): number {
     const f = u();
     if (!f) return 0;
+    if (busy) {
+      nested += 1;
+      return 0;
+    }
+    busy = true;
     try {
       return Number(BigInt(f.GetWindowLongPtrW(h, GWL_EXSTYLE)) & 0xffffffffn);
     } catch (e) {
       fail('GetWindowLongPtrW', e);
       return 0;
+    } finally {
+      busy = false;
     }
   }
 
@@ -101,25 +134,40 @@ export function createWin32(load: () => Api = loadUser32, log: (message: string)
   function adopt(h: Hwnd, owner: Hwnd): boolean {
     const f = u();
     if (!f) return false;
+    if (busy) {
+      nested += 1;
+      return false;
+    }
+    busy = true;
     try {
       f.SetWindowLongPtrW(h, GWLP_HWNDPARENT, owner);
-      f.SetWindowLongPtrW(h, GWL_EXSTYLE, (getExStyle(h) | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW);
+      const style = Number(BigInt(f.GetWindowLongPtrW(h, GWL_EXSTYLE)) & 0xffffffffn);
+      f.SetWindowLongPtrW(h, GWL_EXSTYLE, (style | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW);
       f.SetWindowPos(h, 0, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
       return true;
     } catch (e) {
       fail('창 붙이기', e);
       return false;
+    } finally {
+      busy = false;
     }
   }
 
   function sendToBottom(h: Hwnd): boolean {
     const f = u();
     if (!f) return false;
+    if (busy) {
+      nested += 1;
+      return false;
+    }
+    busy = true;
     try {
       return f.SetWindowPos(h, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE) !== 0;
     } catch (e) {
       fail('SetWindowPos', e);
       return false;
+    } finally {
+      busy = false;
     }
   }
 
@@ -129,6 +177,11 @@ export function createWin32(load: () => Api = loadUser32, log: (message: string)
     const f = u();
     const out: BelowEntry[] = [];
     if (!f) return out;
+    if (busy) {
+      nested += 1;
+      return out;
+    }
+    busy = true;
     try {
       let cur = BigInt(f.GetWindow(h, GW_HWNDNEXT));
       while (cur !== 0n && out.length < limit) {
@@ -140,11 +193,13 @@ export function createWin32(load: () => Api = loadUser32, log: (message: string)
       }
     } catch (e) {
       fail('GetWindow', e);
+    } finally {
+      busy = false;
     }
     return out;
   }
 
-  return { nativeLoaded: (): boolean => u() !== null, findProgman, isWindow, getOwner, getExStyle, adopt, sendToBottom, windowsBelow };
+  return { nativeLoaded: (): boolean => u() !== null, nestedNativeCalls: (): number => nested, findProgman, isWindow, getOwner, getExStyle, adopt, sendToBottom, windowsBelow };
 }
 
-export const { nativeLoaded, findProgman, isWindow, getOwner, getExStyle, adopt: adoptWindow, sendToBottom, windowsBelow } = createWin32();
+export const { nativeLoaded, nestedNativeCalls, findProgman, isWindow, getOwner, getExStyle, adopt: adoptWindow, sendToBottom, windowsBelow } = createWin32();

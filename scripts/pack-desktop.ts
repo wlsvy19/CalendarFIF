@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { packager } from '@electron/packager';
-import { bundleProblem } from './pack-check';
+import { bundleProblem, hasTopLevelKoffiRequire } from './pack-check';
 import { stageManifest } from './pack-manifest';
 
 // 사용법: tsx scripts/pack-desktop.ts [--emu]
@@ -31,6 +31,11 @@ if (problem) {
 }
 build({ CALFIF_EMU_BUILD: emuBuild }, ['-c', 'vite.desktop.config.ts']);
 build({ CALFIF_EMU_BUILD: emuBuild, VITE_DESKTOP_ENTRY: 'preload' }, ['-c', 'vite.desktop.config.ts']);
+
+if (hasTopLevelKoffiRequire(readFileSync(resolve(root, 'build/desktop/main.cjs'), 'utf8'))) {
+  console.error('main.cjs가 맨 위에서 koffi를 읽는다. koffi.node를 못 읽는 PC에서 앱이 시작 전에 죽는다');
+  process.exit(1);
+}
 
 const stage = resolve(root, 'build/pack-stage');
 rmSync(stage, { recursive: true, force: true });

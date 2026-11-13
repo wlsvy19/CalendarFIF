@@ -122,6 +122,11 @@ export function keepBottom(): void {
   });
 }
 
+// 창 메시지 처리(Electron이 창 프로시저 안에서 동기로 부른다) 안에서는 Win32를 부르지 않는다. 확인은 다음 턴으로 미룬다.
+const scheduleKeepBottom = (): void => {
+  setImmediate(keepBottom);
+};
+
 export function setInteractive(on: boolean): void {
   const win = getWindow();
   if (!win) return;
@@ -340,8 +345,8 @@ export function createDesktopWindow(): BrowserWindow {
     finishAdjust(false, 'reload');
     sendCommand({ type: 'contentHidden', hidden: settings.contentHidden });
   });
-  win.on('focus', keepBottom);
-  win.hookWindowMessage(WM_WINDOWPOSCHANGED, keepBottom);
+  win.on('focus', scheduleKeepBottom);
+  win.hookWindowMessage(WM_WINDOWPOSCHANGED, scheduleKeepBottom);
   win.on('show', () => {
     windowState.hidden = false;
     events.onChange();

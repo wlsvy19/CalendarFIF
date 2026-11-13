@@ -9,7 +9,7 @@ import { clampBounds, defaultBounds, layoutKey, resolveBounds, type Rect } from 
 import { isAtBottom } from './policy';
 import type { Runtime, Scenario } from './runtime';
 import { loadDesktopSettings } from './settings';
-import { getExStyle, getOwner, nativeLoaded, windowsBelow } from './win32';
+import { getExStyle, getOwner, nativeLoaded, nestedNativeCalls, windowsBelow } from './win32';
 import { blocked, displayInfos, getHwnd, getMode, getProgman, getSettings, getWindow, sendCommand, signals, startAdjust, windowState, windowsCreated } from './window';
 
 // main.ts가 메뉴 항목과 단축키가 부르는 길을 시험 실행에 건넨다.
@@ -123,14 +123,14 @@ async function attach(): Promise<Result> {
   const fields = {
     ...first, rendered, bridgeKeys, rendererGlobals, navigationBlocked, popupBlocked, interactive, atBottomAfterInteractive,
     recreated, ownerIsProgmanAfterRecreate: second?.ownerIsProgman ?? false, atBottomAfterRecreate: second?.atBottom ?? false,
-    loginItemCalls, nativeLoaded: nativeLoaded(), bottomAsserts: blocked.bottomAsserts, secondInstance: instance, ...shotInfo,
+    loginItemCalls, nativeLoaded: nativeLoaded(), nestedNativeCalls: nestedNativeCalls(), bottomAsserts: blocked.bottomAsserts, secondInstance: instance, ...shotInfo,
   };
   const checks = {
     mode: first.mode === 'owned', ownerIsProgman: first.ownerIsProgman, atBottom: first.atBottom, toolWindow: first.toolWindow,
     appWindow: !first.appWindow, focusable: !first.focusable, visible: first.visible, rendered: rendered === 'calendar',
     bridgeKeys: JSON.stringify(bridgeKeys) === JSON.stringify(BRIDGE_KEYS), rendererGlobals: rendererGlobals === 'undefined,undefined',
     navigationBlocked, popupBlocked, interactive: interactive[0] === true && interactive[1] === false, atBottomAfterInteractive,
-    recreated, ownerIsProgmanAfterRecreate: fields.ownerIsProgmanAfterRecreate, loginItemCalls: loginItemCalls === 0, nativeLoaded: fields.nativeLoaded,
+    recreated, ownerIsProgmanAfterRecreate: fields.ownerIsProgmanAfterRecreate, loginItemCalls: loginItemCalls === 0, nativeLoaded: fields.nativeLoaded, nestedNativeCalls: fields.nestedNativeCalls === 0,
     secondInstance: instance.exitCode === 0 && instance.notified, bottomAsserts: blocked.bottomAsserts <= 20,
   };
   return { fields, checks };

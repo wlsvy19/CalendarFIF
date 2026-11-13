@@ -2,6 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
+import { hasTopLevelKoffiRequire } from './pack-check';
 
 // 사용법: tsx scripts/desktop-run.ts [--emu] [--smoke] [--packaged <exe>]
 const args = process.argv.slice(2);
@@ -35,6 +36,10 @@ if (packaged) {
   const stray = [...preload.matchAll(/require\(([^)]*)\)/g)].filter((m) => m[1] !== '"electron"');
   if (stray.length > 0) {
     console.error(`preload.cjs가 electron 말고 require를 한다: ${stray.map((m) => m[0]).join(', ')}`);
+    process.exit(1);
+  }
+  if (hasTopLevelKoffiRequire(readFileSync(resolve(root, 'build/desktop/main.cjs'), 'utf8'))) {
+    console.error('main.cjs가 맨 위에서 koffi를 읽는다. koffi.node를 못 읽는 PC에서 앱이 시작 전에 죽는다');
     process.exit(1);
   }
   exe = createRequire(import.meta.url)('electron') as string;
