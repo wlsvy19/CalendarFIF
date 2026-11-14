@@ -30,10 +30,11 @@ PC(Windows)와 아이폰에서 날짜별 메모를 양방향으로 동기화하�
 - 이 폴더는 사용자의 실제 Firebase 프로젝트에 연결되어 있다. 프로젝트 ID와 설정값은 `.env.local`과 `.firebaserc`에 있고 git에는 없다.
 - 관리자는 `.env.local`의 `OWNER_UID` 계정(사용자가 쓰는 계정)이고 보안 규칙에 들어 있다. 다른 사용자는 관리자가 앱의 설정 → `사용자 관리`에서 넣는다. 사용 허가는 Firestore의 `access/<계정 ID>` 문서이고, 추가한 사용자는 각자 자기 달력(`users/<계정 ID>/months/...`)만 읽고 쓴다.
 - 사용자는 PC에서 DesktopCal을 계속 쓰면서 따라가기(`npm run import -- --follow`)로 CalendarFIF에 넘긴다.
-- 꾸린 실제 앱은 `npm run desktop:pack`이 `release\<버전>\CalendarFIF-win32-x64\CalendarFIF.exe`에 만든다(git에 없다). 새 버전을 꾸리면 새 폴더에 만들어진다. 쓰던 앱을 끄고 새 폴더의 `CalendarFIF.exe`를 실행하면 설정과 로그인은 그대로 이어진다(둘 다 `%APPDATA%\CalendarFIF`에 있다). 사용자가 직접 실행한다. 세션이 이 실행 파일이나 `npm run desktop`을 띄우지 않는다. 이 둘은 사용자의 실제 프로필(`%APPDATA%\CalendarFIF`)과 실제 프로젝트를 쓰고, 꾸린 앱은 처음 실행할 때 Windows 시작 프로그램에 등록한다.
+- 사용자가 켜 둔 PC 앱은 2026-11-13에 꾸린 0.3.0(`release\CalendarFIF-win32-x64`)이다. 2026-11-14의 변경이 든 새 앱은 `release\0.4.0\CalendarFIF-win32-x64\CalendarFIF.exe`에 꾸려 두었고 아직 아무도 실행하지 않았다. 사용자가 바꿔 실행한다.
+- 꾸린 실제 앱은 `npm run desktop:pack`이 `release\<버전>\CalendarFIF-win32-x64\CalendarFIF.exe`에 만든다(git에 없다). 이 명령은 그 폴더의 앱이 실행 중이면 멈춘다. 새 버전을 꾸리면 새 폴더에 만들어진다. 쓰던 앱을 끄고 새 폴더의 `CalendarFIF.exe`를 실행하면 설정과 로그인은 그대로 이어진다(둘 다 `%APPDATA%\CalendarFIF`에 있다). 사용자가 직접 실행한다. 세션이 이 실행 파일이나 `npm run desktop`을 띄우지 않는다. 이 둘은 사용자의 실제 프로필(`%APPDATA%\CalendarFIF`)과 실제 프로젝트를 쓰고, 꾸린 앱은 처음 실행할 때 Windows 시작 프로그램에 등록한다.
 - PC 앱의 시험은 `npm run desktop:smoke`(에뮬레이터, 저장소 안의 프로필)로 한다. 그냥 돌리면 `attach` 하나만 돈다. 나머지(`bounds`, `tray`, `settings`, `e2e`)는 환경 변수 `CALFIF_SMOKE`로 고른다. `src/desktop/win32.ts`나 `window.ts`를 고친 뒤에는 여러 번 돌려 상태 파일의 `nestedNativeCalls`가 0인지 본다. 창 메시지 처리 안에서 Windows 기능을 부르면 앱이 죽는다. 사용자의 앱이 켜져 있는 동안에는 `bounds`와 `tray`의 `alwaysOnTop`이 실패한다(달력 둘을 Windows가 한 묶음으로 움직인다). 이것은 시험 환경의 한계다.
 - ③ 단계, 사용자 추가, 위젯은 화면 시안 확인 없이 설계했다. 작성자가 정한 것은 각 설계 문서의 "작성자가 정한 것"과 결과 문서의 "진행하면서 정한 것"에 있고 사용자가 바꿀 수 있다.
-- 웹앱 배포는 세션이 판단해서 한다(사용자가 2026-11-13 밤에 맡겼다: "너가 알아서 앞으로 배포해"). 조건은 아래 "사용자가 정한 것"에 있다. 배포한 시각과 내용은 결과 문서의 "지금 상태"에 있다. 마지막 배포는 2026-11-14 08:06이다(보안 규칙은 08:03).
+- 웹앱 배포는 세션이 판단해서 한다(사용자가 2026-11-13 밤에 맡겼다: "너가 알아서 앞으로 배포해"). 조건은 아래 "사용자가 정한 것"에 있다. 배포한 시각과 내용은 결과 문서의 "지금 상태"에 있다. 마지막 배포는 2026-11-14 09:06이다(설정의 위젯 칸). 보안 규칙은 08:03에 바뀐 것이 마지막이다.
 - 사용자가 자리에 없는 동안에도 가져오기는 실행하지 않고 DesktopCal은 건드리지 않는다.
 
 ## 사용자가 정한 것
@@ -74,7 +75,7 @@ PC(Windows)와 아이폰에서 날짜별 메모를 양방향으로 동기화하�
 1. 사용자에게는 한국어로 답한다.
 2. 지금 있는 폴더가 어느 워크트리이고 어느 브랜치인지 확인한다(`git worktree list`, `git branch --show-current`).
 3. `docs/superpowers/coordination.md`에서 이 폴더가 맡은 작업을 확인한다. 다른 폴더가 맡은 작업은 하지 않는다.
-4. `git log --oneline -10`, `git status --short`를 본다. 진행 중인 계획의 진행 기록(`.superpowers/sdd/<계획 이름>/progress.md`, git에 올라가지 않는다)이 이 폴더에 있으면 그 마지막 줄도 본다. ① 단계의 진행 기록은 끝나면서 지웠고, 내용은 `docs/superpowers/phase1-results.md`에 옮겨 적었다.
+4. `git log --oneline -10`, `git status --short`를 본다. 진행 중인 계획의 진행 기록(`.superpowers/sdd/<계획 이름>/progress.md`, git에 올라가지 않는다)이 이 폴더에 있으면 그 마지막 줄도 본다. 끝난 계획의 진행 기록은 지웠고 내용은 결과 문서에 옮겨 적었다(① 단계는 `phase1-results.md`, ③ 단계는 `phase3-results.md`, 2026-11-14의 작업은 `2026-11-14-results.md`).
 5. 한 폴더에서는 한 세션만 계획을 진행한다. 최근 커밋이나 커밋 안 된 변경, 진행 기록의 새 줄로 보아 다른 세션이 이 폴더에서 진행 중이면 계획을 건드리지 않고 사용자에게 알린다.
 6. 멈췄다가 다시 깨어난 세션도 2~5번을 다시 한다. 멈춘 사이에 다른 세션이 이어 갔을 수 있다.
 
