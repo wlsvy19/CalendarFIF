@@ -153,9 +153,15 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   await cdp.send('Page.enable');
   await emulatePhone(cdp);
   await cdp.send('Page.navigate', { url });
-  for (let i = 0; i < 100; i++) {
-    if (await cdp.evaluate<boolean>("!!document.querySelector('.grid.current .cell')").catch(() => false)) break;
-    await sleep(300);
+  let calendarUp = false;
+  for (let i = 0; i < 100 && !calendarUp; i++) {
+    calendarUp = await cdp.evaluate<boolean>("!!document.querySelector('.grid.current .cell')").catch(() => false);
+    if (!calendarUp) await sleep(300);
+  }
+  // 달력이 끝내 뜨지 않으면 무엇이 보였는지 적고 멈춘다(뒤의 확인이 엉뚱한 오류로 죽지 않게).
+  if (!calendarUp) {
+    const seen = await cdp.evaluate<string>('document.body.innerText').catch(() => '');
+    throw new Error(`30초 안에 달력이 뜨지 않았다. 화면의 글: ${seen.replace(/\s+/g, ' ').slice(0, 200) || '(없음)'}`);
   }
   await sleep(1500); // 첫 자리 잡기와 첫 스냅숏이 끝나게 한다
   await cdp.evaluate(RECORDER_JS);
