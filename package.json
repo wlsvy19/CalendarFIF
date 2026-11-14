@@ -27,6 +27,7 @@
     "desktop:emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && tsx scripts/desktop-run.ts --emu\"",
     "desktop:smoke": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && tsx scripts/desktop-run.ts --smoke\"",
     "desktop:pack": "tsx scripts/pack-desktop.ts",
+    "desktop:clean": "tsx scripts/pack-desktop.ts --clean",
     "desktop:pack:emu": "tsx scripts/pack-desktop.ts --emu",
     "desktop:pack:check": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && tsx scripts/desktop-run.ts --smoke --packaged build/release-emu/CalendarFIF-win32-x64/CalendarFIF.exe\""
   },

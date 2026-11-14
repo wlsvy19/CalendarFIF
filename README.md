@@ -212,6 +212,8 @@ Windows PC에서도 쓰는 사용자에게는 꾸린 폴더(`release\<버전>\Ca
 
 `npm run desktop:pack`은 `release/<버전>/CalendarFIF-win32-x64/` 폴더를 만든다(버전은 `package.json`의 `version`, 예: `release/0.5.0/`). 서명은 하지 않고 설치 프로그램도 없다. 새 버전을 꾸리면 새 폴더에 만들어진다. 쓰던 앱을 끄고 새 폴더의 `CalendarFIF.exe`를 실행하면 설정과 로그인은 그대로 이어진다(둘 다 `%APPDATA%\CalendarFIF`에 있다). 같은 버전 폴더의 앱이 실행 중이면 아무것도 지우지 않고 멈춘다.
 
+`release`에는 새 버전만 둔다. 꾸리기가 끝나면 옛 버전의 폴더를 지운다. 다만 실행 중이거나 Windows 시작 프로그램이 가리키고 있는 옛 버전은 지우지 않고 알려 준다(켜져 있는 앱의 폴더를 지우면 앱이 깨지고, 시작 프로그램이 가리키는 폴더를 지우면 다음 로그인 때 달력이 뜨지 않는다). 그때는 쓰던 앱을 끄고 새 폴더의 `CalendarFIF.exe`를 한 번 실행한 뒤 `npm run desktop:clean`을 돌린다. 이 명령은 꾸리지 않고 옛 버전만 지운다. 쓰이고 있는지 확인하지 못하면 아무것도 지우지 않는다.
+
 1. 이 폴더를 원하는 곳(예: `C:\Apps\CalendarFIF`)에 통째로 옮긴다.
 2. 그 안의 `CalendarFIF.exe`를 실행한다. 앱은 브라우저와 따로 자기 로그인 화면에서 [docs/firebase-setup.md](docs/firebase-setup.md) 3단계에서 만든 계정의 이메일과 비밀번호로 로그인한다.
 3. 첫 실행에서 Windows 시작 시 실행이 켜진다. 다음 로그인부터 저절로 뜬다.

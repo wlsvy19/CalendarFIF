@@ -18,6 +18,44 @@ export function runningInside(paths: string[], dir: string): boolean {
   return paths.some((p) => norm(p).startsWith(prefix));
 }
 
+/** 시작 프로그램에 적힌 명령에서 실행 파일의 경로만 뽑는다: `"C:\...\CalendarFIF.exe" --hidden`에서 따옴표 안의 것. 읽을 수 없으면 null. */
+export function startupTarget(command: string): string | null {
+  const m = /^\s*"([^"]+)"/.exec(command) ?? /^\s*(\S.*?\.exe)(?=\s|$)/i.exec(command);
+  return m ? m[1] : null;
+}
+
+/**
+ * 지금 쓰이고 있는 실행 파일의 경로들: 실행 중인 CalendarFIF와, Windows 시작 프로그램이 가리키는 것(PowerShell이 'RUN:'을 붙여 준 줄).
+ * 확인하지 못했으면 null이다. 위치를 읽지 못한 프로세스('?')나 읽을 수 없는 시작 프로그램 명령이 있어도 null이다.
+ */
+export function inUsePaths(ps: { error?: unknown; status: number | null; stdout: string | null }): string[] | null {
+  if (ps.error || ps.status !== 0 || ps.stdout === null) return null;
+  const paths: string[] = [];
+  for (const line of ps.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)) {
+    if (line === '?') return null;
+    if (!line.startsWith('RUN:')) {
+      paths.push(line);
+      continue;
+    }
+    const target = startupTarget(line.slice(4));
+    if (target === null) return null;
+    paths.push(target);
+  }
+  return paths;
+}
+
+/**
+ * release 폴더에 새 버전만 남기려고 지울 옛 버전 폴더를 고른다. keep은 남길 폴더의 이름, inUse는 쓰이고 있는 실행 파일의 경로들이다.
+ * 꾸린 앱이 든 폴더만 본다. 쓰이고 있는 옛 버전은 지우지 않고 busy로 돌려준다(끄지 않은 앱의 폴더를 지우면 앱이 깨지고,
+ * 시작 프로그램이 가리키는 폴더를 지우면 다음 Windows 로그인 때 달력이 뜨지 않는다).
+ */
+export function staleReleases(entries: { name: string; hasApp: boolean }[], keep: string, inUse: string[], releaseDir: string): { remove: string[]; busy: string[] } {
+  const base = releaseDir.replace(/[\\/]+$/, '');
+  const old = entries.filter((e) => e.hasApp && e.name !== keep).map((e) => e.name);
+  const busy = old.filter((name) => runningInside(inUse, `${base}\\${name}`));
+  return { remove: old.filter((name) => !busy.includes(name)), busy };
+}
+
 export type GuardDecision = { ok: true } | { ok: false; message: string };
 
 // 꾸리기 전에 실행 중인 앱을 본 결과(PowerShell 실행 결과)로 계속할지 정한다. 확인하지 못했으면 멈춘다(열린 채로 지우지 않기 위해).

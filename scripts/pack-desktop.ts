@@ -1,16 +1,57 @@
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { packager } from '@electron/packager';
-import { bundleProblem, guardDecision, hasTopLevelKoffiRequire } from './pack-check';
+import { bundleProblem, guardDecision, hasTopLevelKoffiRequire, inUsePaths, staleReleases } from './pack-check';
 import { stageManifest } from './pack-manifest';
 
-// 사용법: tsx scripts/pack-desktop.ts [--emu]
+// 사용법: tsx scripts/pack-desktop.ts [--emu | --clean]
 // 기본은 실제 프로젝트용(release/<버전>/), --emu는 에뮬레이터용(build/release-emu/)이다.
 // 실제 꾸리기는 버전별 새 폴더에 만들고, 그 폴더의 앱이 실행 중이면 아무것도 지우지 않고 멈춘다.
+// 꾸린 뒤에는 release에 새 버전만 남기고 옛 버전 폴더를 지운다(사용자가 정했다). 쓰이고 있는 옛 버전은 남긴다.
+// --clean은 꾸리지 않고 그 정리만 한다(쓰던 앱을 새 버전으로 바꾼 뒤에 돌린다).
 const emu = process.argv.includes('--emu');
+const cleanOnly = process.argv.includes('--clean');
 const root = resolve('.');
 const readJson = (path: string) => JSON.parse(readFileSync(resolve(root, path), 'utf8')) as { version: string; dependencies?: Record<string, string> };
+
+// 쓰이고 있는 실행 파일을 줄마다 하나씩 낸다: 실행 중인 앱의 경로(읽지 못하면 '?')와, Windows 시작 프로그램에 적힌 명령('RUN:'을 붙인다).
+const IN_USE_PS =
+  "Get-Process CalendarFIF -ErrorAction SilentlyContinue | ForEach-Object { if ($_.Path) { $_.Path } else { '?' } }; " +
+  "$run = Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction SilentlyContinue; " +
+  "if ($run) { $run.PSObject.Properties | Where-Object { $_.Value -is [string] -and $_.Value -like '*CalendarFIF.exe*' } | ForEach-Object { 'RUN:' + $_.Value } }; exit 0";
+const hasPackagedApp = (dir: string): boolean => existsSync(resolve(dir, 'CalendarFIF.exe')) || existsSync(resolve(dir, 'CalendarFIF-win32-x64', 'CalendarFIF.exe'));
+
+/** release에 keep 폴더만 남긴다. 실행 중이거나 Windows 시작 프로그램이 가리키는 옛 버전은 남기고 알린다. 확인하지 못하면 아무것도 지우지 않는다. */
+function removeOldReleases(keep: string): void {
+  const releaseDir = resolve(root, 'release');
+  if (!existsSync(resolve(releaseDir, keep))) {
+    console.log(`지금 버전(${keep})의 폴더가 release에 없어서 옛 버전을 지우지 않았다.`);
+    return;
+  }
+  const entries = readdirSync(releaseDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => ({ name: e.name, hasApp: hasPackagedApp(resolve(releaseDir, e.name)) }));
+  const inUse = inUsePaths(spawnSync('powershell', ['-NoProfile', '-Command', IN_USE_PS], { encoding: 'utf8', timeout: 30000 }));
+  if (inUse === null) {
+    console.log('실행 중인 앱과 Windows 시작 프로그램을 확인하지 못해서 옛 버전을 지우지 않았다.');
+    return;
+  }
+  const { remove, busy } = staleReleases(entries, keep, inUse, releaseDir);
+  for (const name of remove) {
+    rmSync(resolve(releaseDir, name), { recursive: true, force: true });
+    console.log(`옛 버전을 지웠다: release/${name}`);
+  }
+  for (const name of busy) {
+    console.log(`옛 버전 release/${name}은 실행 중이거나 Windows 시작 프로그램이 가리키고 있어서 남겨 두었다. 새 버전으로 바꿔 실행한 뒤 \`npm run desktop:clean\`을 돌리면 지워진다.`);
+  }
+  if (remove.length === 0 && busy.length === 0) console.log('지울 옛 버전이 없다.');
+}
+
+if (cleanOnly) {
+  removeOldReleases(readJson('package.json').version);
+  process.exit(0);
+}
 
 const build = (extra: NodeJS.ProcessEnv, cliArgs: string[]) => {
   const r = spawnSync('npx', ['vite', 'build', ...cliArgs], { stdio: 'inherit', shell: true, cwd: root, env: { ...process.env, ...extra } });
@@ -74,3 +115,4 @@ const made = await packager({
   asar: false,
 });
 console.log(`꾸렸다: ${made.join(', ')}`);
+if (!emu) removeOldReleases(readJson('package.json').version);
