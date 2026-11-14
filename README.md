@@ -210,7 +210,7 @@ Windows PC에서도 쓰는 사용자에게는 꾸린 폴더(`release\<버전>\Ca
 
 ### 꾸리기
 
-`npm run desktop:pack`은 `release/<버전>/CalendarFIF-win32-x64/` 폴더를 만든다(버전은 `package.json`의 `version`, 예: `release/0.4.0/`). 서명은 하지 않고 설치 프로그램도 없다. 새 버전을 꾸리면 새 폴더에 만들어진다. 쓰던 앱을 끄고 새 폴더의 `CalendarFIF.exe`를 실행하면 설정과 로그인은 그대로 이어진다(둘 다 `%APPDATA%\CalendarFIF`에 있다). 같은 버전 폴더의 앱이 실행 중이면 아무것도 지우지 않고 멈춘다.
+`npm run desktop:pack`은 `release/<버전>/CalendarFIF-win32-x64/` 폴더를 만든다(버전은 `package.json`의 `version`, 예: `release/0.5.0/`). 서명은 하지 않고 설치 프로그램도 없다. 새 버전을 꾸리면 새 폴더에 만들어진다. 쓰던 앱을 끄고 새 폴더의 `CalendarFIF.exe`를 실행하면 설정과 로그인은 그대로 이어진다(둘 다 `%APPDATA%\CalendarFIF`에 있다). 같은 버전 폴더의 앱이 실행 중이면 아무것도 지우지 않고 멈춘다.
 
 1. 이 폴더를 원하는 곳(예: `C:\Apps\CalendarFIF`)에 통째로 옮긴다.
 2. 그 안의 `CalendarFIF.exe`를 실행한다. 앱은 브라우저와 따로 자기 로그인 화면에서 [docs/firebase-setup.md](docs/firebase-setup.md) 3단계에서 만든 계정의 이메일과 비밀번호로 로그인한다.
@@ -281,3 +281,4 @@ Spark 요금제는 결제 수단이 필요 없다.
 - [관리자와 사용자 추가 설계](docs/superpowers/specs/2026-11-14-admin-users-design.md)
 - [아이폰 위젯 설계](docs/superpowers/specs/2026-11-14-widget-design.md)
 - [2026-11-14 작업 결과](docs/superpowers/2026-11-14-results.md): 확인된 것, 직접 봐야 하는 것, 진행하면서 정한 것, 미뤄 둔 것
+- [2026-11-14 저녁 작업 결과](docs/superpowers/2026-11-14-evening-results.md): 음력, 공휴일과 대체공휴일, 아래로 끌어 닫기, 웹앱 설정
