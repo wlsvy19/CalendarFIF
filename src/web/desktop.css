@@ -34,6 +34,16 @@
 :root.desk .iconbtn { width: 30px; height: 30px; }
 :root.desk .iconbtn:hover,
 :root.desk .pill:hover { background: color-mix(in srgb, var(--desk-btn) 28%, transparent); }
+/* 머리의 년도와 월(누르면 고르는 상자). 칸 글자색을 따르고 마우스를 올리면 바탕이 옅게 깔린다. */
+:root.desk .app-head .title-btn { padding: 2px 5px; margin: -2px -5px; border-radius: 6px; }
+:root.desk .app-head .title-btn .caret { width: 12px; height: 12px; margin-top: 0; }
+:root.desk .app-head .title-btn:hover { background: color-mix(in srgb, var(--desk-btn) 18%, transparent); }
+/* 고르는 상자: PC 앱은 칸이 작으므로 조금 줄인다 */
+:root.desk .datepick { width: 260px; padding: 8px; border-radius: 10px; text-shadow: none; }
+:root.desk .datepick-item { min-height: 34px; border-radius: 7px; font-size: 14px; }
+:root.desk .datepick-item:hover:not(:disabled):not([aria-current="true"]) { background: var(--hairline); }
+:root.desk .datepick-head { min-height: 32px; font-size: 14px; }
+:root.desk .datepick-step { width: 32px; height: 32px; }
 
 /* 요일 줄과 격자 */
 :root.desk .dow {

@@ -431,3 +431,87 @@ it('덮여 있지 않은 달을 열면 쪽의 여분 달도 구독한다', () =>
   handle.showMonth('2026-11');
   expect([store.show.mock.lastCall, subscribed.has('2027-01')]).toEqual([['2026-11', ['2026-09', '2027-01', '2027-02']], true]);
 });
+
+describe('년도와 월 고르기', () => {
+  function pickMount(opts: { desktop?: boolean; layout?: Appearance['layout'] } = {}) {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const store = fakeStore({});
+    const onOpenDay = vi.fn();
+    const appearance = opts.desktop || opts.layout ? { ...DEFAULT_APPEARANCE, layout: opts.layout ?? ('month' as const) } : undefined;
+    const handle = mountCalendar(
+      root,
+      {
+        store,
+        status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} },
+        today: () => '2026-11-13',
+        onOpenDay,
+        onOpenSettings: vi.fn(),
+        ...(appearance ? { appearance } : {}),
+        ...(opts.desktop ? { desktop: { onDayMenu: vi.fn(), onOpenMenu: vi.fn() } } : {}),
+      },
+      { reducedMotion: () => false, pager: { width: () => 400 } },
+    );
+    const yearBtn = root.querySelector<HTMLButtonElement>('.year')!;
+    const monthBtn = root.querySelector<HTMLButtonElement>('.month .title-btn')!;
+    const head = () => `${root.querySelector('.year')!.textContent} ${root.querySelector('.month')!.textContent}`;
+    const item = (text: string) => [...root.querySelectorAll<HTMLButtonElement>('.datepick-item')].find((b) => b.textContent === text)!;
+    return { root, store, onOpenDay, handle, yearBtn, monthBtn, head, item };
+  }
+  afterEach(() => document.body.replaceChildren());
+
+  it('년도와 월은 고르는 상자를 여는 단추이고, 글자는 그대로 2026년과 11월이다', () => {
+    const { yearBtn, monthBtn, head } = pickMount();
+    expect(head()).toBe('2026년 11월');
+    expect([yearBtn.tagName, yearBtn.getAttribute('aria-haspopup'), yearBtn.getAttribute('aria-expanded'), yearBtn.title]).toEqual(['BUTTON', 'dialog', 'false', '연도 선택']);
+    expect([monthBtn.closest('h2') !== null, monthBtn.getAttribute('aria-haspopup'), monthBtn.title]).toEqual([true, 'dialog', '월 선택']);
+  });
+  it('년도를 누르고 고르면 같은 달의 그해로 바로 가고 상자가 닫힌다', () => {
+    const { root, yearBtn, head, item, store } = pickMount();
+    yearBtn.click();
+    expect([root.querySelector('.datepick')!.getAttribute('aria-label'), yearBtn.getAttribute('aria-expanded'), item('2026').getAttribute('aria-current')]).toEqual(['연도 선택', 'true', 'true']);
+    item('2030').click();
+    expect([head(), root.querySelector('.datepick'), yearBtn.getAttribute('aria-expanded'), store.show.mock.lastCall![0]]).toEqual(['2030년 11월', null, 'false', '2030-11']);
+  });
+  it('월을 누르고 고르면 같은 해의 그달로 가고, 오늘이 든 달로 돌아오면 오늘에 선다', () => {
+    const { monthBtn, head, item, store } = pickMount();
+    monthBtn.click();
+    item('3월').click();
+    expect([head(), store.show.mock.lastCall![0]]).toEqual(['2026년 3월', '2026-03']);
+    monthBtn.click();
+    item('11월').click();
+    expect(head()).toBe('2026년 11월');
+  });
+  it('바깥을 누르면 닫히기만 하고, 다른 쪽으로 넘어가면 닫히며 초점은 누른 단추로 돌아온다', () => {
+    const { root, yearBtn, head, onOpenDay } = pickMount();
+    yearBtn.click();
+    expect(document.activeElement?.classList.contains('datepick-item')).toBe(true);
+    root.querySelector<HTMLElement>('.datepick-scrim')!.click();
+    expect([root.querySelector('.datepick'), head(), onOpenDay.mock.calls.length, document.activeElement]).toEqual([null, '2026년 11월', 0, yearBtn]);
+    yearBtn.click();
+    root.querySelector<HTMLButtonElement>('[aria-label="다음 달"]')!.click(); // 덮개가 막고 있지 않은 경로(키보드 등)로 쪽이 바뀌는 경우
+    const pager = root.querySelector<HTMLElement>('.pager')!;
+    pager.scrollLeft = 1201 * 400;
+    pager.dispatchEvent(new Event('scroll'));
+    expect(root.querySelector('.datepick')).toBeNull();
+  });
+  it('PC 앱에서도 같고, 변동 월 배치에서는 그달의 1일이 든 주부터 보인다', () => {
+    const desk = pickMount({ desktop: true });
+    desk.monthBtn.click();
+    desk.item('1월').click();
+    expect(desk.head()).toBe('2026년 1월');
+    desk.yearBtn.click();
+    desk.item('2027').click();
+    expect(desk.head()).toBe('2027년 1월');
+    const floating = pickMount({ layout: 'floating' });
+    floating.monthBtn.click();
+    floating.item('2월').click();
+    expect([floating.head(), floating.root.querySelector('.grid.current .cell')!.getAttribute('data-key')]).toEqual(['2026년 2월', '2026-01-25']);
+  });
+  it('달력을 내리면 열린 상자도 치운다', () => {
+    const { root, yearBtn, handle } = pickMount();
+    yearBtn.click();
+    handle.destroy();
+    expect([root.querySelector('.datepick'), root.querySelector('.datepick-scrim')]).toEqual([null, null]);
+  });
+});
