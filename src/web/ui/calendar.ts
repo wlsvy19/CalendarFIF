@@ -310,6 +310,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     const hadFocus = panel.contains(document.activeElement);
     picker.destroy();
     picker = null;
+    el.removeAttribute('inert');
     trigger.setAttribute('aria-expanded', 'false');
     if (hadFocus && trigger.isConnected) trigger.focus({ preventScroll: true });
   }
@@ -335,6 +336,8 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     });
     picker = { ...handle, trigger };
     trigger.setAttribute('aria-expanded', 'true');
+    // 상자가 열린 동안 뒤의 달력은 화면 읽기와 Tab이 닿지 않게 한다(덮개가 누르기를 막는 것과 같다).
+    el.setAttribute('inert', '');
   }
   yearBtn.addEventListener('click', () => openPicker('year', yearBtn));
   monthBtn.addEventListener('click', () => openPicker('month', monthBtn));
@@ -356,10 +359,8 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   const onConnection = (): void => renderStatus();
   window.addEventListener('online', onConnection);
   window.addEventListener('offline', onConnection);
-  const onResize = (): void => {
-    closePicker();
-    redraw();
-  };
+  // 고르는 상자는 폭이 바뀔 때만 스스로 닫는다(datePick.ts). 높이만 바뀌는 것은 아이폰 Safari의 주소 막대일 수 있다.
+  const onResize = (): void => redraw();
   window.addEventListener('resize', onResize);
 
   // 창을 켜 둔 채 날짜가 바뀌어도 오늘 표시가 따라가게 한다. 자정 직후의 타이머는 숨은 탭에서 늦어질 수 있어

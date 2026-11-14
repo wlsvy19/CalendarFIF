@@ -1,7 +1,8 @@
 /**
  * 달력 머리의 년도나 월을 누르면 그 아래에 뜨는 고르기 상자. 년도는 12년씩, 월은 1월~12월을 4×3 칸으로 보여 준다.
  * DesktopCal의 제목 줄 메뉴 "월분 선택"(1월~12월)을 따랐고, 년도도 같은 꼴로 고른다.
- * 바깥(투명한 덮개)을 누르거나 Esc를 누르거나 창이 바뀌면 닫힌다. 고르면 onPick을 부르고 닫는다.
+ * 바깥(투명한 덮개)을 누르거나 Esc를 누르거나 창을 떠나거나 화면 폭이 바뀌면 닫힌다. 고르면 onPick을 부르고 닫는다.
+ * 지금 보이는 해나 달을 골라도 onPick을 부른다. 주 배치처럼 그달의 가운데를 보고 있다가 그달의 처음으로 가려는 것일 수 있다.
  */
 
 export const MIN_YEAR = 1900;
@@ -79,7 +80,7 @@ export function mountDatePick(root: HTMLElement, props: DatePickProps): { el: HT
   };
   const pick = (year: number, month: number): void => {
     if (closed) return;
-    if (year !== props.year || month !== props.month) props.onPick(year, month);
+    props.onPick(year, month);
     close();
   };
 
@@ -122,6 +123,8 @@ export function mountDatePick(root: HTMLElement, props: DatePickProps): { el: HT
         if (next < MIN_YEAR || next > MAX_YEAR) return;
         pageStart = next;
         fillYears();
+        // 끝 쪽에 닿아 누른 단추가 꺼지면 초점이 상자 밖으로 빠진다(그러면 Esc와 Tab 가두기가 듣지 않는다). 칸으로 옮긴다.
+        if (b.disabled) (grid.querySelector<HTMLButtonElement>('[aria-current="true"]') ?? grid.querySelector<HTMLButtonElement>('.datepick-item:not(:disabled)'))?.focus();
       });
       return b;
     };
@@ -175,10 +178,15 @@ export function mountDatePick(root: HTMLElement, props: DatePickProps): { el: HT
       first.focus();
     }
   });
-  // 다른 프로그램으로 옮겨 가거나 화면 크기가 바뀌면(자리가 어긋나므로) 닫는다.
+  // 다른 프로그램으로 옮겨 가거나 화면 폭이 바뀌면(폰을 돌리면 자리가 어긋나므로) 닫는다. 높이만 바뀌는 것(아이폰 Safari의
+  // 주소 막대가 접히거나 펴질 때)으로는 닫지 않는다.
+  const openWidth = window.innerWidth;
   const onLeave = (): void => close();
+  const onResize = (): void => {
+    if (window.innerWidth !== openWidth) close();
+  };
   window.addEventListener('blur', onLeave);
-  window.addEventListener('resize', onLeave);
+  window.addEventListener('resize', onResize);
 
   root.append(scrim, panel);
   const rect = panel.getBoundingClientRect();
@@ -192,7 +200,7 @@ export function mountDatePick(root: HTMLElement, props: DatePickProps): { el: HT
     destroy() {
       closed = true;
       window.removeEventListener('blur', onLeave);
-      window.removeEventListener('resize', onLeave);
+      window.removeEventListener('resize', onResize);
       scrim.remove();
       panel.remove();
     },

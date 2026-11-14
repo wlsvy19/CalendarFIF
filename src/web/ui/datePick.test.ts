@@ -44,14 +44,24 @@ describe('년도', () => {
     expect([button('2029').getAttribute('aria-current'), button('2026').classList.contains('now'), button('2027').getAttribute('aria-current')]).toEqual(['true', true, null]);
     expect(document.activeElement).toBe(button('2029'));
   });
-  it('고르면 그해와 지금 달을 알리고 닫는다. 지금 해를 고르면 알리지 않고 닫기만 한다', () => {
+  it('고르면 그해와 지금 달을 알리고 닫는다. 지금 해를 골라도 알린다(그달의 처음으로 가려는 것일 수 있다)', () => {
     const a = open();
     a.button('2030').click();
     expect([a.onPick.mock.calls, a.onClose.mock.calls.length]).toEqual([[[2030, 11]], 1]);
     a.handle.destroy();
     const b = open();
     b.button('2026').click();
-    expect([b.onPick.mock.calls.length, b.onClose.mock.calls.length]).toEqual([0, 1]);
+    expect([b.onPick.mock.calls, b.onClose.mock.calls.length]).toEqual([[[2026, 11]], 1]);
+  });
+  it('끝 쪽에 닿아 누른 단추가 꺼지면 초점을 칸으로 옮긴다(상자 밖으로 빠지지 않게)', () => {
+    const { step, button } = open({ year: 1915 });
+    step('이전 12년').focus();
+    step('이전 12년').click();
+    expect([step('이전 12년').disabled, document.activeElement]).toEqual([true, button('1900')]);
+    const last = open({ year: 2085 });
+    last.step('다음 12년').focus();
+    last.step('다음 12년').click();
+    expect([last.step('다음 12년').disabled, document.activeElement]).toEqual([true, last.button('2092')]);
   });
   it('앞뒤 단추로 12년씩 넘기고, 1900년과 2100년에서 멈춘다', () => {
     const { root, texts, step } = open({ year: 1905 });
@@ -94,9 +104,19 @@ describe('닫기와 키보드', () => {
     expect(b.onClose).toHaveBeenCalledTimes(1);
     const c = open();
     window.dispatchEvent(new Event('blur'));
+    expect(c.onClose.mock.calls.length).toBe(1);
+    // 높이만 바뀌면(아이폰 Safari의 주소 막대) 닫지 않고, 폭이 바뀌면 닫는다.
     const d = open();
+    const width = window.innerWidth;
     window.dispatchEvent(new Event('resize'));
-    expect([c.onClose.mock.calls.length, d.onClose.mock.calls.length]).toEqual([1, 1]);
+    expect(d.onClose.mock.calls.length).toBe(0);
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width + 100 });
+    try {
+      window.dispatchEvent(new Event('resize'));
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    }
+    expect(d.onClose.mock.calls.length).toBe(1);
   });
   it('화살표로 칸을 옮긴다(위아래는 네 칸씩, 끝에서 멈춘다). Tab은 상자 안에서 돈다', () => {
     const { button, step } = open({ year: 2026 });

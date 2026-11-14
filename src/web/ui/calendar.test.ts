@@ -470,8 +470,10 @@ describe('년도와 월 고르기', () => {
     const { root, yearBtn, head, item, store } = pickMount();
     yearBtn.click();
     expect([root.querySelector('.datepick')!.getAttribute('aria-label'), yearBtn.getAttribute('aria-expanded'), item('2026').getAttribute('aria-current')]).toEqual(['연도 선택', 'true', 'true']);
+    // 상자가 열린 동안 뒤의 달력은 inert다
+    expect(root.querySelector('.calendar')!.hasAttribute('inert')).toBe(true);
     item('2030').click();
-    expect([head(), root.querySelector('.datepick'), yearBtn.getAttribute('aria-expanded'), store.show.mock.lastCall![0]]).toEqual(['2030년 11월', null, 'false', '2030-11']);
+    expect([head(), root.querySelector('.datepick'), yearBtn.getAttribute('aria-expanded'), store.show.mock.lastCall![0], root.querySelector('.calendar')!.hasAttribute('inert')]).toEqual(['2030년 11월', null, 'false', '2030-11', false]);
   });
   it('월을 누르고 고르면 같은 해의 그달로 가고, 오늘이 든 달로 돌아오면 오늘에 선다', () => {
     const { monthBtn, head, item, store } = pickMount();
@@ -507,6 +509,15 @@ describe('년도와 월 고르기', () => {
     floating.monthBtn.click();
     floating.item('2월').click();
     expect([floating.head(), floating.root.querySelector('.grid.current .cell')!.getAttribute('data-key')]).toEqual(['2026년 2월', '2026-01-25']);
+    // 주 배치에서 그달의 가운데를 보다가 지금 달을 다시 고르면 그달의 처음(오늘이 든 달이면 오늘)으로 간다
+    const week = pickMount({ layout: 'week' });
+    const weekPager = week.root.querySelector<HTMLElement>('.pager')!;
+    weekPager.scrollLeft = 1201 * 400; // 다음 주로 넘긴다(브라우저의 스크롤 대신 위치와 scroll 이벤트로)
+    weekPager.dispatchEvent(new Event('scroll'));
+    const firstBefore = week.root.querySelector('.grid.current .cell')!.getAttribute('data-key');
+    week.monthBtn.click();
+    week.item('11월').click();
+    expect([firstBefore, week.head(), week.root.querySelector('.grid.current .cell')!.getAttribute('data-key')]).toEqual(['2026-11-15', '2026년 11월', '2026-11-08']);
   });
   it('달력을 내리면 열린 상자도 치운다', () => {
     const { root, yearBtn, handle } = pickMount();
