@@ -1,4 +1,5 @@
-export type WidgetConfig = { projectId: string; apiKey: string; appUrl: string };
+/** holidayUrl은 공휴일 자료 파일의 주소(VITE_HOLIDAY_URL)다. 빈 글이면 위젯은 계산한 공휴일만 쓴다. */
+export type WidgetConfig = { projectId: string; apiKey: string; appUrl: string; holidayUrl: string };
 export type WidgetInstallDeps = {
   /** 스크립트 글을 읽어 온다(자리 표시가 든 채로). */
   load(): Promise<string>;
@@ -7,18 +8,19 @@ export type WidgetInstallDeps = {
   copy(text: string): Promise<void>;
 };
 
-const PLACEHOLDERS: Array<[token: string, key: keyof WidgetConfig]> = [
+const PLACEHOLDERS: Array<[token: string, key: keyof WidgetConfig, mayBeEmpty?: true]> = [
   ['__PROJECT_ID__', 'projectId'],
   ['__API_KEY__', 'apiKey'],
   ['__APP_URL__', 'appUrl'],
+  ['__HOLIDAY_URL__', 'holidayUrl', true],
 ];
 
-/** 자리 표시 셋을 공개 설정으로 바꾼다. 하나라도 없거나 둘 이상이면 오류를 던진다. */
+/** 자리 표시 넷을 공개 설정으로 바꾼다. 하나라도 없거나 둘 이상이면, 또는 공휴일 자료 주소 말고 빈 값이 있으면 오류를 던진다. */
 export function fillPlaceholders(script: string, config: WidgetConfig): string {
   let out = script;
-  for (const [token, key] of PLACEHOLDERS) {
-    const value = config[key];
-    if (!value) throw new Error(`${key} 값이 비어 있습니다.`);
+  for (const [token, key, mayBeEmpty] of PLACEHOLDERS) {
+    const value = config[key] ?? '';
+    if (!value && !mayBeEmpty) throw new Error(`${key} 값이 비어 있습니다.`);
     const parts = out.split(token);
     if (parts.length !== 2) throw new Error(`${token}이(가) ${parts.length - 1}번 나옵니다.`);
     // 큰따옴표 글자열 안에 들어가므로 따옴표와 역슬래시를 막는다.

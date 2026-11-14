@@ -161,6 +161,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
       apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
       appUrl: location.origin,
+      holidayUrl: import.meta.env.VITE_HOLIDAY_URL ?? '',
     },
     copy: (text) => (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error('클립보드를 쓸 수 없습니다.'))),
   };
