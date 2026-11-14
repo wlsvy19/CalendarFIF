@@ -187,7 +187,7 @@ describe('buildOutput: 올릴 파일', () => {
 
   it('받은 해를 날짜와 이름 순으로, 같은 것은 한 번만', () => {
     const mixed = [{ date: '2026-02-17', name: '설날' }, { date: '2026-01-01', name: '1월1일' }, { date: '2026-06-03', name: '임시공휴일' }, { date: '2026-06-03', name: '대통령선거일' }, { date: '2026-01-01', name: '1월1일' }];
-    const { file } = buildOutput({ fetched: { 2026: { ok: true, days: mixed }, 2027: { ok: true, days: days('2027') } }, previous: null, currentYear: 2026, now });
+    const { file } = buildOutput({ fetched: { 2026: { ok: true, days: mixed }, 2027: { ok: true, days: days('2027') } }, previous: null, now });
     expect(file).toEqual({
       version: 1,
       updatedAt: '2026-11-14T18:23:05.000Z',
@@ -198,35 +198,39 @@ describe('buildOutput: 올릴 파일', () => {
     });
   });
 
-  it('받지 못한 해와 공휴일이 하나도 없는 해는 지난 자료를 그대로 두고, 지난해의 것은 뺀다', () => {
-    const { file, lines } = buildOutput({ fetched: { 2026: { ok: true, days: [] }, 2027: { ok: false, reason: '5월: HTTP 500' } }, previous, currentYear: 2026, now });
+  it('받지 못한 해와 공휴일이 하나도 없는 해는 지난 자료를 그대로 두고, 지난 해의 것도 그대로 둔다', () => {
+    const { file, lines } = buildOutput({ fetched: { 2026: { ok: true, days: [] }, 2027: { ok: false, reason: '5월: HTTP 500' } }, previous, now });
     expect(file).toBeNull(); // 둘 다 쓸 수 없으면 쓰지 않는다
     expect(lines.join('\n')).toContain('HTTP 500');
-    const next = buildOutput({ fetched: { 2026: { ok: true, days: days('2026').slice(0, 3) }, 2027: { ok: false, reason: '5월: HTTP 500' } }, previous, currentYear: 2026, now });
-    expect(Object.keys(next.file!.years)).toEqual(['2026', '2027']);
+    const next = buildOutput({ fetched: { 2026: { ok: true, days: days('2026').slice(0, 3) }, 2027: { ok: false, reason: '5월: HTTP 500' } }, previous, now });
+    // 2025년은 더 받지 않는 해다. 빼면 그해에 이 자료로만 알던 임시공휴일이 앱의 지난 달력에서 사라진다.
+    expect(Object.keys(next.file!.years)).toEqual(['2025', '2026', '2027']);
+    expect(next.file!.years[2025]).toEqual(previous.years[2025]);
     expect(next.file!.years[2027]).toEqual(previous.years[2027]);
     expect(next.file!.years[2026].days).toHaveLength(3);
     expect(next.lines.join('\n')).toMatch(/2027년.*지난 자료/);
   });
 
   it('지난 자료도 없으면 그해를 뺀다', () => {
-    const { file, lines } = buildOutput({ fetched: { 2026: { ok: true, days: days('2026') }, 2027: { ok: true, days: [] } }, previous: null, currentYear: 2026, now });
+    const { file, lines } = buildOutput({ fetched: { 2026: { ok: true, days: days('2026') }, 2027: { ok: true, days: [] } }, previous: null, now });
     expect(Object.keys(file!.years)).toEqual(['2026']);
     expect(lines.join('\n')).toMatch(/2027년.*뺀다/);
   });
 
   it('내용이 같으면 updatedAt을 그대로 두어 같은 파일이 된다', () => {
-    const same = { ...previous, years: { 2026: previous.years[2026], 2027: previous.years[2027] } };
-    const { file, changed } = buildOutput({ fetched: { 2026: { ok: true, days: days('2026') }, 2027: { ok: true, days: [{ date: '2027-01-01', name: '1월1일' }] } }, previous: same, currentYear: 2026, now });
+    const same = previous;
+    const { file, changed } = buildOutput({ fetched: { 2026: { ok: true, days: days('2026') }, 2027: { ok: true, days: [{ date: '2027-01-01', name: '1월1일' }] } }, previous: same, now });
     expect(changed).toBe(false);
     expect(serialize(file!)).toBe(serialize(same));
   });
 
-  it('내용이 바뀌면 updatedAt을 새로 적는다(지난해를 뺀 것도 바뀐 것이다)', () => {
-    const { file, changed } = buildOutput({ fetched: { 2026: { ok: true, days: days('2026') }, 2027: { ok: true, days: [{ date: '2027-01-01', name: '1월1일' }] } }, previous, currentYear: 2026, now });
+  it('내용이 바뀌면 updatedAt을 새로 적는다', () => {
+    const added = [{ date: '2027-01-01', name: '1월1일' }, { date: '2027-03-03', name: '임시공휴일' }];
+    const { file, changed } = buildOutput({ fetched: { 2026: { ok: true, days: days('2026') }, 2027: { ok: true, days: added } }, previous, now });
     expect(changed).toBe(true);
     expect(file!.updatedAt).toBe('2026-11-14T18:23:05.000Z');
-    expect(Object.keys(file!.years)).toEqual(['2026', '2027']);
+    expect(Object.keys(file!.years)).toEqual(['2025', '2026', '2027']);
+    expect(file!.years[2027].days).toEqual(added);
   });
 });
 
@@ -352,5 +356,22 @@ describe('main: 명령줄', () => {
     expect(await main(h.deps)).toBe(2);
     expect(h.calls).toEqual([]);
     expect(h.logs.join('\n')).toContain('--out');
+  });
+});
+
+describe('모르는 꼴의 답', () => {
+  const reasonOf = (r: ReturnType<typeof parseMonthResponse>): string => (r.ok ? '' : r.reason);
+  it('앞부분을 까닭에 붙이고, 인증키 오류의 이름이 들어 있으면 인증키 문제로 본다', () => {
+    const flat = parseMonthResponse(200, '{"resultCode":"30","resultMsg":"SERVICE_KEY_IS_NOT_REGISTERED_ERROR"}', 2026, 1);
+    expect(flat).toMatchObject({ ok: false, keyProblem: true });
+    expect(reasonOf(flat)).toContain('SERVICE_KEY_IS_NOT_REGISTERED_ERROR');
+    const gateway = parseMonthResponse(502, '<html>  <body>Bad Gateway</body>  </html>', 2026, 1);
+    expect(gateway).toMatchObject({ ok: false, keyProblem: false });
+    expect(reasonOf(gateway)).toBe('HTTP 502: <html> <body>Bad Gateway</body> </html>');
+    expect(reasonOf(parseMonthResponse(500, '', 2026, 1))).toBe('HTTP 500');
+  });
+  it('긴 답은 160자까지만 붙인다', () => {
+    const long = parseMonthResponse(200, 'x'.repeat(1000), 2026, 1);
+    expect(reasonOf(long)).toBe(`JSON이 아닌 답이 왔다: ${'x'.repeat(160)}`);
   });
 });

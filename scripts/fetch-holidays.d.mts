@@ -33,7 +33,6 @@ export function parsePrevious(raw: string): PreviousFile | null;
 export function buildOutput(input: {
   fetched: Record<string, YearResult>;
   previous: PreviousFile | HolidayFile | null;
-  currentYear: number;
   now: Date;
 }): { file: HolidayFile | null; lines: string[]; changed: boolean };
 export function serialize(file: HolidayFile): string;

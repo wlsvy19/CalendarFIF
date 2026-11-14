@@ -97,6 +97,14 @@ function xmlResult(raw) {
 
 const fail = (reason, keyProblem = false) => ({ ok: false, reason, keyProblem });
 
+/** 모르는 꼴의 답에서 까닭을 찾을 수 있게 앞부분만 한 줄로 줄여 붙인다(인증키 가리기는 부른 쪽이 한다). */
+const excerpt = (raw) => {
+  const short = String(raw ?? '').replace(/\s+/g, ' ').trim().slice(0, 160);
+  return short === '' ? '' : `: ${short}`;
+};
+/** 모르는 꼴의 답이라도 인증키 쪽 오류의 이름이 들어 있으면 인증키 문제로 본다. */
+const mentionsKeyProblem = (raw) => KEY_PROBLEMS.some((name) => String(raw ?? '').includes(name));
+
 /**
  * 한 달의 답을 읽는다. 공휴일(isHoliday Y)만 { date, name }으로 돌려준다. 그 달이 아니거나 없는 날짜, 빈 이름은 버린다.
  * 공휴일이 없는 달은 items가 빈 글이고 성공이다. 오류 답, HTTP 오류, 00이 아닌 resultCode는 실패이고,
@@ -114,15 +122,15 @@ export function parseMonthResponse(status, raw, year, month) {
     const keyProblem = KEY_PROBLEMS.includes(error.name) || KEY_REASON_CODES.includes(error.code);
     return fail(error.code ? `${error.name} (코드 ${error.code})` : error.name, keyProblem);
   }
-  if (status < 200 || status >= 300) return fail(`HTTP ${status}`, status === 401 || status === 403);
+  if (status < 200 || status >= 300) return fail(`HTTP ${status}${excerpt(raw)}`, status === 401 || status === 403 || mentionsKeyProblem(raw));
   if (json === undefined) {
     const result = xmlResult(raw);
     if (result && result.code !== '00') return fail(`resultCode ${result.code}${result.msg ? ` ${result.msg}` : ''}`, KEY_REASON_CODES.includes(result.code));
-    return fail('JSON이 아닌 답이 왔다');
+    return fail(`JSON이 아닌 답이 왔다${excerpt(raw)}`, mentionsKeyProblem(raw));
   }
   const response = isObject(json) ? json.response : undefined;
   const header = isObject(response) && isObject(response.header) ? response.header : null;
-  if (!header) return fail('답에 response.header가 없다');
+  if (!header) return fail(`답에 response.header가 없다${excerpt(raw)}`, mentionsKeyProblem(raw));
   const code = text(header.resultCode);
   if (code !== '00') {
     const msg = text(header.resultMsg);
@@ -228,15 +236,16 @@ export function parsePrevious(raw) {
 
 /**
  * 올릴 파일을 만든다. 받은 해는 받은 것으로, 받지 못했거나 공휴일이 하나도 없는 해는 지난 파일의 그해로(없으면 뺀다).
- * 지난 파일의 지난해(올해보다 앞)는 뺀다. 받은 해가 하나도 없으면 file은 null이다.
+ * 지난 파일에 있던 지난 해들은 그대로 둔다. 앱들은 받은 파일로 가진 것을 통째로 바꾸므로, 지난 해를 빼면 그해에
+ * 이 자료로만 알던 임시공휴일이 해가 바뀐 뒤 지난 달력에서 사라진다. 받은 해가 하나도 없으면 file은 null이다.
  * years가 지난 파일과 같으면 updatedAt도 그대로 두어 파일이 바이트까지 같게 한다.
  */
-export function buildOutput({ fetched, previous, currentYear, now }) {
+export function buildOutput({ fetched, previous, now }) {
   const years = {};
   const lines = [];
   let usable = false;
   for (const [year, value] of Object.entries(previous?.years ?? {})) {
-    if (Number(year) >= currentYear && !(year in fetched)) years[year] = value;
+    if (!(year in fetched)) years[year] = value;
   }
   for (const year of Object.keys(fetched).sort()) {
     const result = fetched[year];
@@ -325,7 +334,7 @@ export async function main({
       error('공공데이터포털의 마이페이지에서 인증키와 활용 기간을 확인한다. 새로 받은 키는 쓸 수 있기까지 한 시간쯤 걸릴 수 있다.');
       return 1;
     }
-    const { file, lines, changed } = buildOutput({ fetched, previous, currentYear, now: at });
+    const { file, lines, changed } = buildOutput({ fetched, previous, now: at });
     for (const line of lines) log(line);
     if (file === null) {
       error('받은 해가 없어 파일을 쓰지 않는다.');
