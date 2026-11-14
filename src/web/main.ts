@@ -70,6 +70,7 @@ startHolidayFeed({
     return () => clearInterval(id);
   },
 });
+
 // 로그인 뒤 화면이 열려 있는 동안 메인 프로세스의 명령을 받는 동작들. 로그인 전에는 null이라 명령을 무시한다.
 // 저장되지 않아 이 페이지의 메모리에만 있는 편집이 있는가. mountMain이 로그인 중에만 채운다(새 버전으로 다시 읽기를 미룰지 정한다).
 let unsavedOnlyInMemory: () => boolean = () => false;
