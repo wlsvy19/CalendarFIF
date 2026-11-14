@@ -59,6 +59,27 @@ export type CalendarHandle = { destroy(): void; setAppearance(a: Appearance, web
 
 const dowSpan = (dow: number): string => `<span${dow === 0 ? ' class="sun"' : dow === 6 ? ' class="sat"' : ''}>${WEEKDAYS[dow]}</span>`;
 
+/** 글이 상자보다 넓은가. 음력은 넘치면 앞쪽이 잘려서 scrollWidth로는 알 수 없다. 글의 폭을 직접 잰다. */
+function textOverflows(el: HTMLElement): boolean {
+  if (typeof document.createRange !== 'function') return false;
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const text = range.getBoundingClientRect?.();
+  return !!text && text.width > el.getBoundingClientRect().width + 0.5;
+}
+
+/**
+ * 음력이 칸보다 넓으면 앞쪽(달)이 잘려 다른 날짜로 읽힌다("11.15"가 "1.15"로). 넘치는 칸이 하나라도 있으면 그 쪽의 음력을
+ * 모두 좁은 꼴로 바꾸고(크기가 섞이지 않게), 그래도 넘치는 칸은 숨긴다. 웹 모양에서만 쓴다(PC 앱은 칸이 넓다).
+ */
+function fitLunar(grid: HTMLElement): void {
+  grid.classList.remove('lunar-tight');
+  const labels = [...grid.querySelectorAll<HTMLElement>('.lunar')];
+  if (!labels.some(textOverflows)) return;
+  grid.classList.add('lunar-tight');
+  for (const label of labels.filter(textOverflows)) label.classList.add('hidden');
+}
+
 function spanOf(className: string, text: string): HTMLSpanElement {
   const span = document.createElement('span');
   span.className = className;
@@ -188,6 +209,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
       if (more > 0) memo.append(spanOf('ln more', `+${more}`));
       button.append(memo);
     }
+    if (!custom && a.lunar) fitLunar(target);
     // 잘린 줄 표시: 폭을 모두 읽은 뒤에 표시를 붙인다(줄마다 배치를 다시 계산하지 않게).
     const cut = [...target.querySelectorAll<HTMLElement>('.ln:not(.more)')].filter((ln) => ln.scrollWidth > ln.clientWidth);
     for (const ln of cut) ln.classList.add('cut');

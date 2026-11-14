@@ -79,7 +79,7 @@ describe('buildTree large', () => {
   it('머리 줄의 뒤쪽 끝에 음력을 적는다(이번 달의 칸에만). lunar가 false면 적지 않는다', () => {
     const head = (tree: Tree, day: number): Node[] => (cellOf(tree, day).children[0] as StackNode).children;
     expect(head(t, 14)).toHaveLength(3);
-    expect(head(t, 14)[2]).toMatchObject({ kind: 'text', text: '10.6', size: 7.5, color: pair('muted'), lines: 1, minScale: 0.8 });
+    expect(head(t, 14)[2]).toMatchObject({ kind: 'text', text: '10.6', size: 7.5, color: pair('muted'), lines: 1, minScale: 0.7 });
     // 2026년 12월의 달력에는 11월 29, 30일이 앞에 붙는다. 그 칸에는 음력이 없다.
     const december = build('large', month({}, '2026-12'), '2026-12-10');
     const others = cells(december).filter((c) => ((c.children[0] as StackNode).children[0] as TextNode).opacity === 0.4);
@@ -110,7 +110,11 @@ describe('buildTree large', () => {
   it('오늘 칸: 숫자가 강조색 상자 안에 있고 다른 칸에는 없다', () => {
     const pills = stacks(t).filter((s) => s.background && s.background.light === PALETTES.light.accent);
     expect(pills).toHaveLength(1);
-    expect(pills[0]).toMatchObject({ radius: 7.5, padding: [1, 4, 1, 4], dir: 'h' });
+    // 음력을 같이 적는 두 자리 날은 옆 여백이 2.5다(음력이 들어갈 자리를 남긴다). 한 자리 날과 음력을 끈 때는 4다.
+    expect(pills[0]).toMatchObject({ radius: 7.5, padding: [1, 2.5, 1, 2.5], dir: 'h' });
+    const pillOf = (tree: Tree): StackNode => stacks(tree).find((s) => s.background && s.background.light === PALETTES.light.accent)!;
+    expect(pillOf(build('large', month({}), '2026-11-05')).padding).toEqual([1, 4, 1, 4]);
+    expect(pillOf(buildTree({ family: 'large', size: widgetSize(SCREEN, 'large'), today: TODAY, month: month({}), offline: false, lunar: false })).padding).toEqual([1, 4, 1, 4]);
     expect(pills[0].children).toHaveLength(1);
     expect(pills[0].children[0]).toMatchObject({ kind: 'text', text: '13', color: pair('onAccent') });
     expect(cellOf(t, 13).children[0]).toMatchObject({ children: [pills[0], { kind: 'spacer', length: null }, { kind: 'text', text: '10.5' }] });

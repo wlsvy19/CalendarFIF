@@ -369,7 +369,8 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
 
 /* 날짜 머리(웹): 숫자 옆에 음력, 그 아래 줄에 공휴일 이름을 놓는다. PC 앱은 desktop.css가 셋을 한 줄에 놓는다. */
 :root:not(.desk) .head { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; }
-/* 음력은 남는 폭만 쓴다. 칸이 좁아 넘치면 앞쪽(달)이 잘리고 날은 남는다. */
+/* 음력은 남는 폭만 쓴다. 넘치면 앞쪽(달)이 잘려 다른 날짜로 읽히므로, calendar.ts가 넘치는지 재서
+   그 쪽 전체를 좁은 꼴(.lunar-tight)로 바꾸고 그래도 넘치는 칸은 숨긴다(.hidden). */
 :root:not(.desk) .lunar {
   order: 1;
   flex: 1 1 0;
@@ -386,6 +387,8 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
   white-space: nowrap;
   color: var(--muted);
 }
+:root:not(.desk) .grid.lunar-tight .lunar { font-size: 8px; letter-spacing: -0.06em; }
+:root:not(.desk) .lunar.hidden { visibility: hidden; }
 /* 높이를 바꾸면 calendar.ts의 HOLIDAY_LINE_PX도 바꾼다(이름 줄 높이 + 위의 틈 2px). */
 :root:not(.desk) .hname {
   order: 2;
@@ -419,7 +422,7 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
   align-self: flex-start;
   min-width: 22px;
   height: 22px;
-  padding: 0 5px;
+  padding: 0 3px; /* 두 자리 날도 22px 동그라미에 들어가게 한다. 옆의 음력이 쓸 폭을 남긴다 */
   border-radius: 11px;
   display: grid;
   place-items: center;
@@ -479,6 +482,34 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
     height: 5px;
     margin-left: -18px;
     border-radius: 3px;
+    background: var(--hairline); /* color-mix를 모르는 브라우저(iOS 16.2 이전)에서도 보이게 */
+    background: color-mix(in srgb, var(--muted) 40%, var(--surface));
+    pointer-events: none;
+  }
+  /* 설정과 사용자 관리는 시트 전체가 스크롤된다. 제목 줄과 손잡이 막대를 위에 붙여 두어 목록을 내린 채로도
+     닫기를 누르거나 제목 줄을 잡고 끌어 닫을 수 있게 한다. 막대는 시트 대신 제목 줄에 그린다(시트의 것은 목록과 함께 올라간다). */
+  :root:not(.desk) .sheet.settings::before,
+  :root:not(.desk) .sheet.users::before { display: none; }
+  :root:not(.desk) .sheet.settings > .sheet-bar,
+  :root:not(.desk) .sheet.users > .sheet-bar {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    margin-top: -16px;
+    padding-top: 16px;
+    background: var(--surface);
+  }
+  :root:not(.desk) .sheet.settings > .sheet-bar::before,
+  :root:not(.desk) .sheet.users > .sheet-bar::before {
+    content: "";
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    width: 36px;
+    height: 5px;
+    margin-left: -18px;
+    border-radius: 3px;
+    background: var(--hairline);
     background: color-mix(in srgb, var(--muted) 40%, var(--surface));
     pointer-events: none;
   }
@@ -503,6 +534,7 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
   .calendar .cell { padding: 6px 6px 3px; }
   .calendar .ln { height: var(--memo-line, 17px); font-size: var(--memo-size, 13px); line-height: var(--memo-line, 17px); }
   :root:not(.desk) .calendar .lunar { font-size: 11px; }
+  :root:not(.desk) .calendar .grid.lunar-tight .lunar { font-size: 9px; }
   :root:not(.desk) .calendar .hname { height: 14px; font-size: 11px; line-height: 14px; }
 }
 
@@ -584,7 +616,8 @@ button { touch-action: manipulation; }
   transition: transform 0.2s ease;
 }
 .switch:checked { background: var(--accent); }
-.switch:checked::after { transform: translateX(20px); }
+/* 켠 손잡이는 강조색 위의 글자색을 쓴다. 어두운 화면의 강조색은 옅어서 흰 손잡이가 묻힌다. */
+.switch:checked::after { transform: translateX(20px); background: var(--on-accent); }
 /* 색상 여덟 가지: 밝은 화면에서는 밝은 화면용 색을, 어두운 화면에서는 어두운 화면용 색을 보여 준다 */
 .accents { justify-content: space-between; gap: 8px; }
 .accents .swatch { width: 32px; height: 32px; --sw: var(--sw-light); }

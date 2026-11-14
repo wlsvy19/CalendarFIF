@@ -257,6 +257,37 @@ describe('웹(아이폰 화면)의 음력과 공휴일', () => {
     const far = mountWeb('2060-08-15');
     expect([texts(cell(far, '2060-08-15'), '.lunar'), texts(cell(far, '2060-08-15'), '.hname')]).toEqual([[], ['광복절']]);
   });
+  it('음력이 칸보다 넓으면 그 쪽의 음력을 모두 좁은 꼴로 바꾸고, 그래도 넘치는 칸은 숨긴다(앞쪽이 잘린 채 보이지 않게)', () => {
+    // 가짜 폭: 음력 상자는 boxWidth, 글은 글자마다 5.5(좁은 꼴에서는 4.5)다.
+    const fake = (boxWidth: number): void => {
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        return { width: this.classList.contains('lunar') ? boxWidth : 0 } as DOMRect;
+      });
+      vi.spyOn(document, 'createRange').mockImplementation(() => {
+        let el: Element | null = null;
+        return {
+          selectNodeContents: (node: Element) => void (el = node),
+          getBoundingClientRect: () => ({ width: (el?.textContent?.length ?? 0) * (el?.closest('.lunar-tight') ? 4.5 : 5.5) }) as DOMRect,
+        } as unknown as Range;
+      });
+    };
+    const state = (root: HTMLElement) => {
+      const grid = root.querySelector<HTMLElement>('.grid.current')!;
+      return [has(grid, 'lunar-tight'), texts(grid, '.lunar.hidden')];
+    };
+    // 넉넉한 칸: 그대로다.
+    fake(40);
+    expect(state(mountWeb('2026-11-13'))).toEqual([false, []]);
+    vi.restoreAllMocks();
+    // 다섯 글자('10.15')가 넘치는 칸: 좁은 꼴이면 모두 들어간다.
+    fake(25);
+    expect(state(mountWeb('2026-11-13'))).toEqual([true, []]);
+    vi.restoreAllMocks();
+    // 더 좁은 칸: 좁은 꼴로도 다섯 글자는 넘쳐서 숨기고, 네 글자는 보인다. 2026년 11월의 쪽은 음력 9.22부터 10.27까지다.
+    fake(20);
+    const [tight, hidden] = state(mountWeb('2026-11-13')) as [boolean, string[]];
+    expect([tight, hidden[0], hidden.at(-1), hidden.length, hidden.every((t) => t.length === 5)]).toEqual([true, '10.10', '10.27', 18, true]);
+  });
   it('공휴일 이름이 한 줄을 쓰므로 그 칸은 메모를 한 줄 덜 보여 준다', () => {
     // 넓은 화면(happy-dom의 기본 폭): 줄 높이 17, 숫자 자리 30, 이름 줄 16. 칸 높이 115면 평일 5줄, 공휴일 4줄이다.
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(115);

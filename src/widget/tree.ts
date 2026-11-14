@@ -70,13 +70,16 @@ function dayCell(cell: GridCell, day: DayValue | undefined, today: string, lay: 
   const holiday = holidayLabel(cell.dateKey);
   const numberColor = cell.dateKey === today ? C.onAccent : hasColor ? C.ink : holiday !== '' ? C.sun : dowColor(cell.dow);
   const numberText = text(String(cell.dayOfMonth), 11, 'semibold', numberColor, 1, cell.inMonth ? {} : { opacity: 0.4 });
-  const number: Node = cell.dateKey === today
-    ? { kind: 'stack', dir: 'h', background: C.accent, radius: 7.5, padding: [1, 4, 1, 4], children: [numberText] }
-    : numberText;
   // 머리 줄: 숫자는 앞쪽, 음력은 뒤쪽 가장자리. 이번 달의 칸에만 음력과 공휴일 이름을 적는다.
-  const head: Node[] = [number, flex()];
   const lunar = lay.lunar && cell.inMonth ? lunarShort(cell.dateKey) : '';
-  if (lunar !== '') head.push(text(lunar, 7.5, 'regular', C.muted, 1, { minScale: 0.8 }));
+  // 오늘 표시: 음력을 같이 적는 두 자리 날은 옆 여백을 줄인다. 칸의 안쪽 폭이 40pt쯤이라 숫자 상자가 넓으면 음력이 잘린다.
+  const pillPad = lunar !== '' && cell.dayOfMonth >= 10 ? 2.5 : 4;
+  const number: Node = cell.dateKey === today
+    ? { kind: 'stack', dir: 'h', background: C.accent, radius: 7.5, padding: [1, pillPad, 1, pillPad], children: [numberText] }
+    : numberText;
+  const head: Node[] = [number, flex()];
+  // 폭이 모자라면 iOS가 글자를 이만큼까지 줄인다. 그래도 안 들어가면 "…"로 자른다.
+  if (lunar !== '') head.push(text(lunar, 7.5, 'regular', C.muted, 1, { minScale: 0.7 }));
   const children: Node[] = [{ kind: 'stack', dir: 'h', align: 'center', children: head }];
   // 공휴일 이름은 메모 한 줄의 자리를 쓴다.
   let capacity = lay.capacity;

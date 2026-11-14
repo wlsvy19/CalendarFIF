@@ -585,6 +585,33 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     await sleep(600);
   }
 
+  // 좁은 폰(폭 320px): 음력이 칸에 안 들어가면 그 쪽을 좁은 꼴로 바꾸고, 그래도 넘치는 칸은 숨긴다.
+  // 앞쪽이 잘린 채 보이면 다른 날짜로 읽히므로("11.15"가 "1.15"로) 잘린 채 보이는 것이 하나도 없어야 한다.
+  type LunarFit = { tight: boolean; shown: number; hidden: number; clipped: number };
+  const lunarFit = () =>
+    cdp.evaluate<LunarFit>(`(() => {
+      const grid = document.querySelector('.grid.current');
+      const labels = [...grid.querySelectorAll('.lunar')];
+      const wider = (el) => { const range = document.createRange(); range.selectNodeContents(el); return range.getBoundingClientRect().width > el.getBoundingClientRect().width + 0.5; };
+      const hidden = labels.filter((l) => getComputedStyle(l).visibility === 'hidden');
+      const shown = labels.filter((l) => !hidden.includes(l));
+      return { tight: grid.classList.contains('lunar-tight'), shown: shown.length, hidden: hidden.length, clipped: shown.filter(wider).length };
+    })()`);
+  const resizeTo = async (width: number): Promise<void> => {
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: PHONE.height, deviceScaleFactor: PHONE.deviceScaleFactor, mobile: true });
+    await sleep(500);
+    await rest();
+  };
+  await resizeTo(320);
+  const narrowFit = await lunarFit();
+  await resizeTo(PHONE.width);
+  const wideFit = await lunarFit();
+  record(
+    '폭 320px의 좁은 폰에서는 음력을 좁은 꼴로 바꾸고 안 들어가는 칸은 숨긴다. 잘린 채 보이는 음력은 없고, 폭을 되돌리면 처음과 같다',
+    narrowFit.tight && narrowFit.clipped === 0 && narrowFit.shown > 0 && !wideFit.tight && wideFit.hidden === 0 && wideFit.clipped === 0 && wideFit.shown === narrowFit.shown + narrowFit.hidden,
+    `폭 320: 좁은 꼴 ${narrowFit.tight ? '예' : '아니오'}, 보이는 음력 ${narrowFit.shown}칸, 숨긴 것 ${narrowFit.hidden}칸, 잘린 채 보이는 것 ${narrowFit.clipped}칸 / 폭 ${PHONE.width}: 좁은 꼴 ${wideFit.tight ? '예' : '아니오'}, 보이는 음력 ${wideFit.shown}칸, 숨긴 것 ${wideFit.hidden}칸, 잘린 것 ${wideFit.clipped}칸`,
+  );
+
   await emulatePhone(cdp, { reducedMotion: true });
   await sleep(500);
   g = await pressNext();
