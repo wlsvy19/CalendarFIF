@@ -32,6 +32,8 @@ export type PagerDeps = {
   step(anchor: string, delta: number): string; // 옆 쪽의 anchor
   fill(grid: HTMLElement, anchor: string): void; // 쪽 하나를 그린다
   onCurrent(anchor: string): void; // 보이는 쪽이 바뀌었다
+  /** 손가락으로 넘기는 동안 미뤄 둔 일을 해도 될 때(스크롤이 제자리에 멈췄거나, 다음 손짓이나 단추가 시작될 때) 부른다. */
+  onSettle?(): void;
 };
 
 export type Pager = {
@@ -43,6 +45,8 @@ export type Pager = {
   go(delta: -1 | 1): void; // 옆 쪽으로
   jump(anchor: string): void; // 바로 그 쪽으로
   refresh(): void; // 붙어 있는 쪽을 모두 다시 그린다
+  /** 손가락으로 넘기는 중이라 무거운 일을 미뤄야 하는가. 미뤘으면 onSettle에서 한다. */
+  busy(): boolean;
   destroy(): void;
 };
 
@@ -86,9 +90,33 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
   let placedWidth: number | null = null;
   let pending: number | null = null; // 단추나 도움으로 스크롤해 가는 칸
   let restTimer: ReturnType<typeof setTimeout> | undefined;
+  // 손가락으로 넘기는 동안(스크롤이 멈추기 전까지)은 쪽을 다시 그리지 않고 미뤄 둔다. 화면이 미끄러지는 도중에 쪽을 통째로
+  // 다시 만들면 폰에서 그만큼 멈칫한다. 미룬 쪽은 스크롤이 멈추거나 다음 손가락이 닿을 때(움직이기 전에) 그린다.
+  // 단추로 넘길 때는 미루지 않는다(가는 쪽이 바로 보여야 한다).
+  const stale = new Set<number>(); // 다시 그려야 하는데 미뤄 둔 칸
+  let moving = false; // 스크롤이 움직이는 중(마지막 scroll 뒤 REST_MS 안)
+  let byFinger = false; // 마지막 움직임을 손가락이 시작했다
+  let remount = false; // 손가락으로 넘기는 중에 지금 칸이 바뀌어, 쪽을 옮겨 붙이는 일을 미뤘다
+  let fingerDown = false; // 손가락이 화면에 닿아 있다
+  let settleFrame = 0; // 칸에 멈춘 것을 본 다음 프레임에 미룬 일을 하려고 걸어 둔 것
+  const deferring = (): boolean => moving && byFinger;
 
   const anchorAt = (i: number): string => (i === currentSlot ? currentAnchor : deps.step(currentAnchor, i - currentSlot));
   const mountedSlots = (): number[] => [...pages.keys()].sort((a, b) => a - b);
+  function fillSlot(i: number): void {
+    stale.delete(i);
+    const grid = pages.get(i);
+    if (grid) deps.fill(grid, anchorAt(i));
+  }
+  /** 미뤄 둔 쪽을 지금 그리고(지금 쪽부터), 미뤄 둔 다른 일을 하라고 알린다. */
+  function flush(): void {
+    if (remount) {
+      remount = false;
+      mount(false);
+    }
+    for (const i of [...stale].sort((a, b) => Math.abs(a - currentSlot) - Math.abs(b - currentSlot))) fillSlot(i);
+    deps.onSettle?.();
+  }
 
   // 지금 칸과 (neighbours가 1이면) 양옆 칸에 쪽을 붙인다. 빠지는 쪽의 요소는 새 칸으로 옮겨 다시 쓴다.
   // refill이 거짓이면 이미 제 칸에 있는 쪽은 다시 그리지 않는다. fill은 쪽이 칸 안에 있을 때 부른다(칸 높이를 잰다).
@@ -101,6 +129,7 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     for (const [i, grid] of [...pages]) {
       if (wanted.includes(i)) continue;
       pages.delete(i);
+      stale.delete(i);
       spare.push(grid);
     }
     for (const i of wanted) {
@@ -108,13 +137,18 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
       const arrived = grid === undefined;
       if (!grid) {
         grid = spare.pop() ?? document.createElement('div');
-        grid.className = 'grid';
+        grid.classList.add('grid'); // 다시 쓰는 쪽의 다른 클래스(음력 좁은 꼴 등)는 그대로 둔다. 그 쪽을 다시 그리지 않을 수도 있다
         slots[i].append(grid);
         pages.set(i, grid);
       }
       grid.classList.toggle('current', i === currentSlot);
       grid.toggleAttribute('inert', i !== currentSlot);
-      if (arrived || refill) deps.fill(grid, anchorAt(i));
+      // 손가락으로 넘기는 중에 새로 붙은 쪽(화면 밖, 다음 넘기기에 들어올 쪽)은 멈춘 뒤에 그린다.
+      if (refill) fillSlot(i);
+      else if (arrived) {
+        if (deferring()) stale.add(i);
+        else fillSlot(i);
+      }
     }
     for (const grid of spare) grid.remove();
   }
@@ -131,13 +165,29 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
   // 스크롤이 멈추면 단추로 가던 칸을 잊는다. 두 번 빨리 누르면 두 칸을 가고, 멈춘 뒤에는 지금 칸에서 다시 센다.
   function restLater(): void {
     clearTimeout(restTimer);
-    restTimer = setTimeout(() => {
-      pending = null;
-    }, REST_MS);
+    restTimer = setTimeout(rest, REST_MS);
   }
+  // 스크롤 위치가 칸에 맞는가. 기기 화소가 소수인 화면에서도 맞게 1px까지 봐준다.
+  const onSlot = (): boolean => {
+    const w = width();
+    return w <= 0 || Math.abs(el.scrollLeft - Math.round(el.scrollLeft / w) * w) < 1;
+  };
+  // 스크롤이 멈췄다(scrollend나 REST_MS 동안 조용함, 또는 손을 뗀 뒤 칸에 맞았다). 다만 손을 뗀 순간에도 scrollend가 오고 그 뒤에
+  // 칸에 맞추는 움직임이 이어질 수 있으므로, 칸에 맞지 않았으면 조금 더 기다린다(세 번까지). 그 사이 scroll이 오면 처음부터 다시 센다.
+  let settleWaits = 0;
   function rest(): void {
     clearTimeout(restTimer);
+    cancelAnimationFrame(settleFrame);
     pending = null;
+    if (moving && !onSlot() && settleWaits < 3) {
+      settleWaits += 1;
+      restTimer = setTimeout(rest, REST_MS);
+      return;
+    }
+    settleWaits = 0;
+    moving = false;
+    byFinger = fingerDown; // 손가락이 떠났으면 다음 움직임은 손가락이 시작한 것이 아니다(손을 뗀 채 누르는 트랙패드, 창 크기)
+    flush();
   }
 
   // 도움: 손가락이 멈춘 뒤 떼면 Chromium은 제자리로 돌아간다. 그때 끌던 쪽으로 마저 넘긴다.
@@ -161,7 +211,21 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
   }
 
   function onScroll(): void {
+    moving = true;
+    settleWaits = 0;
     restLater();
+    // 손을 뗀 뒤 칸에 맞았으면 움직임이 끝난 것이다. 0.15초를 기다리지 않고 미룬 일을 한다. 빨리 다시 넘길 때
+    // 들어오는 쪽이 이미 그려져 있게 한다. scroll 안에서 건 프레임 콜백은 같은 프레임에 돌아 위치가 늘 같으므로, 다음 프레임까지
+    // 지켜본다. 그 사이 scroll이 오면(칸 자리를 지나가는 중이었다) 위에서 이것을 지우고 다시 본다.
+    cancelAnimationFrame(settleFrame);
+    if (byFinger && !fingerDown && pending === null && onSlot()) {
+      const at = el.scrollLeft;
+      settleFrame = requestAnimationFrame(() => {
+        settleFrame = requestAnimationFrame(() => {
+          if (moving && el.scrollLeft === at && !fingerDown) rest();
+        });
+      });
+    }
     if (placedWidth === null) return;
     const w = width();
     if (w <= 0) return;
@@ -179,7 +243,11 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     if (i !== currentSlot) {
       currentAnchor = deps.step(currentAnchor, i - currentSlot);
       currentSlot = i;
-      mount(false);
+      // 손가락으로 넘기는 중이면 쪽을 옮겨 붙이고 지금 쪽 표시를 바꾸는 일은 멈춘 뒤에 한다. 화면 밖의 쪽 하나(수백 개의 요소)를
+      // 반대편 칸으로 옮기는 일이라 브라우저가 그만큼 배치를 다시 계산하고, 움직이는 도중이면 화면이 멈칫한다.
+      // 새 지금 칸에 쪽이 이미 붙어 있을 때만 미룬다(한 칸씩 넘기면 늘 그렇다).
+      if (deferring() && pages.has(i)) remount = true;
+      else mount(false);
       deps.onCurrent(currentAnchor);
     }
     if (watch) {
@@ -197,13 +265,37 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     targetListening?.abort();
     targetListening = null;
   }
+  // 손가락이 모두 떠났는지 안다(도움과 상관없이). 닿을 때 미뤄 둔 쪽을 그리면 손가락 밑의 칸이 바뀌어 위와 같은 일이 생기므로,
+  // 처음 닿은 요소에도 단다. 모든 손가락이 떠나면 뗀다.
+  let fingerListening: AbortController | null = null;
+  function onFingerUp(e: Event): void {
+    if ((e as TouchEvent).touches.length > 0) return;
+    fingerDown = false;
+    fingerListening?.abort();
+    fingerListening = null;
+  }
   function onTouchStart(e: TouchEvent): void {
+    // 움직이기 전에 미뤄 둔 쪽을 그린다. 그래야 이번 손짓에 들어오는 쪽이 옛 내용으로 보이지 않는다.
+    byFinger = true;
+    fingerDown = e.touches.length > 0;
+    const target = e.target;
+    if (e.touches.length === 1) {
+      // 새 손짓이다. 지난 손짓의 touchend를 놓쳤으면(시스템 손짓 등) 그때 단 것이 남아 있으므로 뗀다.
+      fingerListening?.abort();
+      fingerListening = null;
+    }
+    if (target && target !== el) {
+      fingerListening ??= new AbortController();
+      const fingerOpts = { passive: true, signal: fingerListening.signal };
+      target.addEventListener('touchend', onFingerUp, fingerOpts);
+      target.addEventListener('touchcancel', onFingerUp, fingerOpts);
+    }
+    flush();
     pending = null;
     if (!assist) return;
     stopWatch();
     stopTargetListening();
     touchStartLeft = e.touches.length === 1 ? el.scrollLeft : null;
-    const target = e.target;
     if (touchStartLeft === null || !target || target === el) return;
     targetListening = new AbortController();
     const opts = { passive: true, signal: targetListening.signal };
@@ -227,6 +319,9 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
   function jump(anchor: string): void {
     currentAnchor = anchor;
     pending = null;
+    byFinger = false;
+    remount = false;
+    stale.clear(); // 아래의 mount(true)가 붙어 있는 쪽을 모두 다시 그린다
     stopWatch();
     // 끝에 가까우면 가운데 칸으로 돌아온다. 폭이 없으면 스크롤 위치가 따라올 수 없으니 칸을 옮기지 않는다.
     if (count > 1 && width() > 0 && Math.min(currentSlot, count - 1 - currentSlot) <= 2) currentSlot = CENTER;
@@ -236,6 +331,8 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
   }
 
   function go(delta: -1 | 1): void {
+    byFinger = false;
+    flush();
     const w = width();
     if (deps.neighbours === 0 || reducedMotion() || w <= 0 || placedWidth === null) {
       jump(deps.step(currentAnchor, delta));
@@ -253,6 +350,12 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
   el.addEventListener('scroll', onScroll, on);
   el.addEventListener('scrollend', rest, on); // 지원하지 않는 브라우저에서는 오지 않고 restLater가 맡는다
   el.addEventListener('touchstart', onTouchStart, on);
+  el.addEventListener('touchend', onFingerUp, on);
+  el.addEventListener('touchcancel', onFingerUp, on);
+  // 손가락 말고(트랙패드, 마우스) 누를 때도 누르기 전에 미뤄 둔 것을 정리한다. 그래야 누른 칸이 지금 쪽으로 보인다.
+  el.addEventListener('pointerdown', (e: PointerEvent) => {
+    if (e.pointerType !== 'touch') flush();
+  }, on);
   if (assist) {
     el.addEventListener('touchend', onTouchEnd, on);
     el.addEventListener('touchcancel', onTouchCancel, on);
@@ -271,11 +374,19 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     place,
     go,
     jump,
+    // 붙어 있는 쪽을 모두 다시 그린다. 손가락으로 넘기는 중이면 멈춘 뒤로 미룬다.
     refresh() {
-      for (const i of mountedSlots()) deps.fill(pages.get(i)!, anchorAt(i));
+      if (deferring()) {
+        for (const i of mountedSlots()) stale.add(i);
+        return;
+      }
+      for (const i of mountedSlots()) fillSlot(i);
     },
+    busy: deferring,
     destroy() {
+      cancelAnimationFrame(settleFrame);
       listening.abort();
+      fingerListening?.abort();
       stopTargetListening();
       stopResize();
       clearTimeout(restTimer);

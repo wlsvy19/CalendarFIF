@@ -313,3 +313,161 @@ it('끄는 중에 손가락 밑의 요소가 다시 그려져 빠져도 손을 �
   vi.advanceTimersByTime(80);
   expect(scrollTo.mock.calls).toEqual([[smooth(1201)]]);
 });
+
+it('손가락으로 넘기는 중에는 쪽을 옮겨 붙이거나 그리지 않고, 칸에 맞게 멈추면 그때 하며 미룬 일을 하라고 알린다', () => {
+  vi.useFakeTimers();
+  const onSettle = vi.fn();
+  const fill = vi.fn((grid: HTMLElement, anchor: string) => {
+    grid.dataset.anchor = anchor;
+  });
+  const onCurrent = vi.fn();
+  const pager = createPager(
+    { anchor: '2026-11', neighbours: 1, step: shiftMonth, fill, onCurrent, onSettle },
+    { width: () => 400, reducedMotion: () => false, assist: false, observeResize: () => () => {} },
+  );
+  const slots = [...pager.el.children];
+  const layout = () => [...pager.el.querySelectorAll<HTMLElement>('.grid')].map((g) => `${slots.indexOf(g.parentElement!)}:${g.dataset.anchor}${g.classList.contains('current') ? '*' : ''}`);
+  const scroll = (left: number) => {
+    pager.el.scrollLeft = left;
+    pager.el.dispatchEvent(new Event('scroll'));
+  };
+  pager.place();
+  fill.mockClear();
+  pager.el.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: [{} as Touch] }));
+  expect(onSettle).toHaveBeenCalledTimes(1); // 닿을 때 미뤄 둔 것을 정리한다(없어도 알린다)
+  scroll(S + 150);
+  scroll(S + 250); // 반을 넘었다
+  expect([onCurrent.mock.lastCall, pager.anchor(), pager.busy(), fill.mock.calls.length]).toEqual([['2026-12'], '2026-12', true, 0]);
+  expect(layout()).toEqual(['1199:2026-10', '1200:2026-11*', '1201:2026-12']); // 옮겨 붙이기도 미뤘다
+  pager.el.dispatchEvent(new TouchEvent('touchend', { bubbles: true, touches: [] }));
+  scroll(S + 400); // 손을 뗀 뒤 칸에 맞았다: 0.15초를 기다리지 않고, 다음 프레임까지 그대로인 것을 본 뒤에 한다
+  expect(fill).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(40);
+  expect([layout(), fill.mock.calls.map((c) => c[1]), pager.busy(), onSettle.mock.calls.length]).toEqual([['1200:2026-11', '1201:2026-12*', '1202:2027-01'], ['2027-01'], false, 2]);
+  pager.destroy();
+});
+it('손을 뗄 때 칸 사이에서 온 scrollend는 칸에 맞추는 움직임을 기다리고, 세 번 기다려도 그대로면 그린다', () => {
+  vi.useFakeTimers();
+  const { pager, fill, scroll, touch } = setup();
+  pager.place();
+  fill.mockClear();
+  touch('touchstart', 1);
+  scroll(S + 250);
+  touch('touchend', 0);
+  pager.el.dispatchEvent(new Event('scrollend'));
+  vi.advanceTimersByTime(150);
+  expect(fill).not.toHaveBeenCalled(); // 칸 사이라 기다린다
+  scroll(S + 400); // 칸에 맞추는 움직임
+  pager.el.dispatchEvent(new Event('scrollend'));
+  expect(fill.mock.calls.map((c) => c[1])).toEqual(['2027-01']);
+  // 칸 사이에 멈춘 채로 있으면 세 번(450ms) 기다린 뒤에 그린다
+  fill.mockClear();
+  touch('touchstart', 1);
+  scroll(S + 500);
+  pager.refresh(); // 움직이는 중이라 미룬다
+  touch('touchend', 0);
+  vi.advanceTimersByTime(150 * 3);
+  expect(fill).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(150);
+  expect(fill).toHaveBeenCalledTimes(3);
+});
+it('넘기는 중에 온 다시 그리기는 멈춘 뒤에 하고, 그 전에 다음 손가락이 닿으면 움직이기 전에 한다', () => {
+  vi.useFakeTimers();
+  const { pager, fill, scroll, touch } = setup();
+  pager.place();
+  fill.mockClear();
+  touch('touchstart', 1);
+  scroll(S + 30);
+  pager.refresh();
+  expect(fill).not.toHaveBeenCalled();
+  touch('touchstart', 1);
+  expect(fill.mock.calls.map((c) => c[1])).toEqual(['2026-11', '2026-10', '2026-12']); // 지금 쪽부터
+});
+it('단추로 넘길 때는 미루지 않고, 손가락으로 넘기다 미룬 것은 단추를 누를 때 먼저 그린다', () => {
+  vi.useFakeTimers();
+  const { pager, fill, scroll, touch } = setup();
+  pager.place();
+  fill.mockClear();
+  touch('touchstart', 1);
+  scroll(S + 30);
+  pager.refresh();
+  expect(fill).not.toHaveBeenCalled();
+  pager.go(1);
+  expect(fill).toHaveBeenCalledTimes(3);
+  fill.mockClear();
+  scroll(S + 250); // 단추가 시작한 스크롤이 반을 넘는다
+  expect([fill.mock.calls.map((c) => c[1]), pager.busy()]).toEqual([['2027-01'], false]);
+});
+it('손가락이 닿아 있는 동안은 칸에 맞아도(끄는 도중 칸을 지날 때) 미룬 일을 하지 않는다', () => {
+  vi.useFakeTimers();
+  const { pager, fill, scroll, touch } = setup();
+  pager.place();
+  fill.mockClear();
+  touch('touchstart', 1);
+  scroll(S + 250);
+  scroll(S + 400); // 손가락이 닿은 채 칸을 지난다
+  vi.advanceTimersByTime(20);
+  expect([fill.mock.calls.length, pager.busy()]).toEqual([0, true]);
+  scroll(S + 450);
+  vi.advanceTimersByTime(150 * 4); // 손가락을 멈추고 있으면 조용해진 뒤에 한다
+  expect([fill.mock.calls.length, pager.busy()]).toEqual([1, false]);
+});
+it('손가락이 떠난 뒤 손가락 말고(트랙패드, 마우스) 누르면 누르기 전에 미룬 것을 정리하고, 멈춘 뒤의 움직임은 손가락의 것이 아니다', () => {
+  vi.useFakeTimers();
+  const { pager, fill, scroll, touch } = setup();
+  pager.place();
+  fill.mockClear();
+  touch('touchstart', 1);
+  scroll(S + 250);
+  touch('touchend', 0);
+  scroll(S + 300); // 칸 사이에서 움직이는 중
+  expect(fill).not.toHaveBeenCalled();
+  pager.el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse' }));
+  expect(fill.mock.calls.map((c) => c[1])).toEqual(['2027-01']);
+  scroll(S + 400);
+  vi.advanceTimersByTime(200);
+  expect(pager.busy()).toBe(false);
+  scroll(S + 410); // 손가락 없이 움직인다(창 크기 등)
+  pager.refresh(); // 손가락의 움직임이 아니므로 미루지 않는다
+  expect(fill).toHaveBeenCalledTimes(4);
+});
+it('닿을 때 미뤄 둔 쪽을 그려 손가락 밑의 요소가 빠져도(도움이 없는 아이폰) 손을 뗀 것을 알고, 칸에 맞으면 곧 미룬 일을 한다', () => {
+  vi.useFakeTimers();
+  const { pager, fill, scroll, touch } = setup();
+  pager.place();
+  const finger = pager.current().appendChild(document.createElement('button'));
+  touch('touchstart', 1, finger);
+  finger.remove(); // 나머지 터치 이벤트는 떨어져 나간 요소에만 가고 .pager로 올라오지 않는다
+  scroll(S + 250);
+  fill.mockClear();
+  touch('touchend', 0, finger);
+  scroll(S + 400);
+  vi.advanceTimersByTime(40); // 0.15초 전
+  expect([fill.mock.calls.map((c) => c[1]), pager.busy()]).toEqual([['2027-01'], false]);
+});
+it('손을 뗀 뒤 칸 자리에 왔어도 다음 프레임에 더 움직이면(칸 자리를 지나가는 중) 미룬 일을 하지 않는다', () => {
+  vi.useFakeTimers();
+  const { pager, fill, scroll, touch } = setup();
+  pager.place();
+  fill.mockClear();
+  touch('touchstart', 1);
+  scroll(S + 250);
+  touch('touchend', 0);
+  scroll(S + 400);
+  vi.advanceTimersByTime(16); // 한 프레임
+  scroll(S + 420);
+  vi.advanceTimersByTime(40);
+  expect([fill.mock.calls.length, pager.busy()]).toEqual([0, true]);
+  scroll(S + 400); // 돌아와 멈춘다
+  vi.advanceTimersByTime(40);
+  expect([fill.mock.calls.map((c) => c[1]), pager.busy()]).toEqual([['2027-01'], false]);
+});
+it('다시 쓰는 쪽의 클래스는 지우지 않는다(같은 날짜면 다시 그리지 않으므로 음력 좁은 꼴 같은 표시가 남아야 한다)', () => {
+  const { pager, scroll } = setup();
+  pager.place();
+  const far = pager.el.querySelectorAll<HTMLElement>('.grid')[0]; // 1199의 쪽
+  far.classList.add('lunar-tight');
+  scroll(S + 250); // 단추나 손가락 없이 반을 넘는다: 1199의 쪽이 1202로 옮겨 간다
+  expect([far.classList.contains('grid'), far.classList.contains('lunar-tight')]).toEqual([true, true]);
+});
+
