@@ -51,10 +51,10 @@ function segmented<T extends string | number>(labelId: string, choices: Choice<T
   return group;
 }
 
-function row(label: string, control: HTMLElement, labelId?: string): HTMLElement {
+function row(label: string, control: HTMLElement, labelId?: string, className = 'pref-row'): HTMLElement {
   // 스위치는 글자를 눌러도 바뀌게 label로 감싼다. 단추 줄은 글자에 id를 주어 이름으로 쓴다.
   const el = document.createElement(control instanceof HTMLInputElement ? 'label' : 'div');
-  el.className = 'pref-row';
+  el.className = className;
   const text = document.createElement('span');
   text.className = 'pref-name';
   text.textContent = label;
@@ -113,7 +113,7 @@ export function prefsSection(props: { prefs: Prefs; onChange(next: Prefs): void 
   el.append(
     field('화면', [
       row('밝기', segmented('prefTheme', [{ value: 'auto', label: '자동' }, { value: 'light', label: '밝게' }, { value: 'dark', label: '어둡게' }], prefs.theme, (v) => set('theme', v)), 'prefTheme'),
-      row('색상', accents, 'prefAccent'),
+      row('색상', accents, 'prefAccent', 'pref-row stack'), // 색상 여덟 개는 이름 아래 한 줄에 놓는다
     ]),
     field('달력', [
       row('음력', toggle(prefs.lunar, (on) => set('lunar', on))),

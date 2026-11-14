@@ -1,5 +1,7 @@
 import { dismiss } from './sheetMotion';
 import { attachSwipeToClose } from './sheetSwipe';
+import type { Prefs } from '../prefs';
+import { prefsSection } from './prefsSection';
 import { widgetSection, type WidgetInstallDeps } from './widgetInstall';
 
 export type AccountProps = {
@@ -219,6 +221,8 @@ export function mountSettings(
     onPasswordBusy?: AccountProps['onPasswordBusy'];
     /** 주면 "위젯" 칸(스크립트 복사와 설치 방법)을 보인다. 웹앱의 설정 화면만 준다. */
     widget?: WidgetInstallDeps;
+    /** 주면 맨 위에 화면·달력·메모 칸을 보인다. 고르면 바로 onChange에 새 설정을 준다. 웹앱의 설정 화면만 준다. */
+    prefs?: { value: Prefs; onChange(next: Prefs): void };
   },
 ): { destroy(): void; setManageUsers: AccountSection['setManageUsers'] } {
   const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -254,6 +258,7 @@ export function mountSettings(
   scrim.addEventListener('click', close);
   const cleanups: Array<() => void> = [];
   const account = accountSection({ ...props, onSignOut: signOut }, props.widget ? widgetSection(props.widget) : undefined, (fn) => cleanups.push(fn));
+  if (props.prefs) sheet.append(prefsSection({ prefs: props.prefs.value, onChange: props.prefs.onChange }));
   sheet.append(account.el);
   sheet.addEventListener('keydown', (e) => {
     if (e.isComposing) return;

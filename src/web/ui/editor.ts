@@ -27,6 +27,8 @@ export function mountEditor(
   props: {
     dateKey: string;
     value: DayValue;
+    /** 제목 아래에 적을 그날의 음력과 공휴일 이름. 빈 글은 적지 않는다. */
+    note?: { lunar: string; holiday: string };
     onSave(next: DayValue): void;
     onCancel(): void;
   },
@@ -45,7 +47,10 @@ export function mountEditor(
   sheet.innerHTML = `
     <div class="sheet-bar">
       <button type="button" class="textbtn start">취소</button>
-      <h3 id="sheetTitle"></h3>
+      <div class="sheet-title">
+        <h3 id="sheetTitle"></h3>
+        <p class="sheet-note" hidden></p>
+      </div>
       <button type="button" class="textbtn end">저장</button>
     </div>
     <div class="field">
@@ -60,6 +65,15 @@ export function mountEditor(
       <textarea class="memo-input" id="memoInput" placeholder="한 줄에 하나씩 적으세요"></textarea>
     </div>`;
   sheet.querySelector('h3')!.textContent = titleOf(props.dateKey);
+  const noteEl = sheet.querySelector<HTMLElement>('.sheet-note')!;
+  for (const [className, text] of [['note-lunar', props.note?.lunar ?? ''], ['note-holiday', props.note?.holiday ?? '']]) {
+    if (text === '') continue;
+    const span = document.createElement('span');
+    span.className = className;
+    span.textContent = text;
+    noteEl.append(span);
+    noteEl.hidden = false;
+  }
   const swatches = sheet.querySelector<HTMLElement>('.swatches')!;
   const area = sheet.querySelector<HTMLTextAreaElement>('textarea')!;
   const cancelBtn = sheet.querySelector<HTMLButtonElement>('.textbtn.start')!;
