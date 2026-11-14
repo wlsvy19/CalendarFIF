@@ -8,6 +8,7 @@ import type { SyncStatus } from '../../sync/engine';
 import { applyAppearance, pageOptions, WEB_APPEARANCE, type Appearance } from '../appearance';
 import { MEMO_METRICS, type MemoSize } from '../prefs';
 import type { CalendarStore } from '../state';
+import { mountDatePick, type DatePickKind } from './datePick';
 import { createPager, type PagerEnv } from './pager';
 import { statusText } from './status';
 
@@ -22,6 +23,11 @@ const DOTS =
   '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="19" cy="12" r="2"></circle></svg>';
 const GEAR =
   '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg>';
+
+/** 년도와 월 뒤의 작은 꺾쇠: 누르면 고르는 상자가 뜬다는 표시. */
+const CARET =
+  '<svg class="caret" viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4.5l3 3 3-3"></path></svg>';
+const pad2 = (n: number): string => String(n).padStart(2, '0');
 
 export function visibleLines<T>(lines: T[], maxLines: number): { shown: T[]; more: number } {
   if (lines.length <= maxLines) return { shown: lines, more: 0 };
@@ -100,10 +106,10 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   el.innerHTML = `
     <div class="app-head">
       <div class="app-meta">
-        <span class="year"></span>
+        <button type="button" class="year title-btn" aria-haspopup="dialog" aria-expanded="false" title="연도 선택"><span class="title-text"></span>${CARET}</button>
         <span class="sync" data-state="ok"><i></i><span class="sync-text"></span></span>
       </div>
-      <h2 class="month"></h2>
+      <h2 class="month"><button type="button" class="title-btn" aria-haspopup="dialog" aria-expanded="false" title="월 선택"><span class="title-text"></span>${CARET}</button></h2>
       <div class="app-nav">
         <button type="button" class="pill">오늘</button>
         <button type="button" class="iconbtn" aria-label="이전 달">${chevron('M15 5l-7 7 7 7')}</button>
@@ -113,8 +119,10 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     </div>
     <div class="dow" aria-hidden="true"></div>`;
   const q = (selector: string): HTMLElement => el.querySelector<HTMLElement>(selector)!;
-  const yearEl = q('.year');
-  const monthEl = q('.month');
+  const yearBtn = el.querySelector<HTMLButtonElement>('.year')!;
+  const monthBtn = el.querySelector<HTMLButtonElement>('.month .title-btn')!;
+  const yearText = q('.year .title-text');
+  const monthText = q('.month .title-text');
   const syncEl = q('.sync');
   const syncText = q('.sync-text');
   const dowEl = q('.dow');
@@ -236,6 +244,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
       step: (a, delta) => stepPage(pageOptions(appearance), a, delta),
       fill: (grid, a) => fillGrid(grid, buildPage(pageOptions(appearance), a), deps.today()),
       onCurrent: () => {
+        closePicker(); // 다른 쪽으로 넘어갔으면 고르던 해와 달이 달라졌다
         renderHead();
         subscribe();
       },
@@ -247,8 +256,8 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   function renderHead(): void {
     const page = buildPage(pageOptions(appearance), pager.anchor());
     const [year, month] = page.title.split('-');
-    yearEl.textContent = `${year}년`;
-    monthEl.textContent = `${Number(month)}월`;
+    yearText.textContent = `${year}년`;
+    monthText.textContent = `${Number(month)}월`;
     dowEl.innerHTML = (appearance.weekNumbers ? '<span></span>' : '') + page.weekdays.map(dowSpan).join('');
   }
 
@@ -292,6 +301,46 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     });
   }
   const goToday = (): void => pager.jump(deps.today());
+
+  // 년도나 월을 누르면 고르는 상자를 띄운다. 고르면 그달로 바로 간다(오늘이 든 달이면 오늘로).
+  let picker: { el: HTMLElement; destroy(): void; trigger: HTMLButtonElement } | null = null;
+  function closePicker(): void {
+    if (!picker) return;
+    const { el: panel, trigger } = picker;
+    const hadFocus = panel.contains(document.activeElement);
+    picker.destroy();
+    picker = null;
+    el.removeAttribute('inert');
+    trigger.setAttribute('aria-expanded', 'false');
+    if (hadFocus && trigger.isConnected) trigger.focus({ preventScroll: true });
+  }
+  const goToMonth = (monthId: string): void => {
+    const today = deps.today();
+    pager.jump(monthId === today.slice(0, 7) ? today : `${monthId}-01`);
+  };
+  function openPicker(kind: DatePickKind, trigger: HTMLButtonElement): void {
+    closePicker();
+    const [year, month] = buildPage(pageOptions(appearance), pager.anchor()).title.split('-').map(Number);
+    const r = trigger.getBoundingClientRect();
+    const handle = mountDatePick(root, {
+      kind,
+      year,
+      month,
+      today: deps.today(),
+      anchor: { left: r.left, top: r.top, bottom: r.bottom },
+      onPick: (y, m) => {
+        closePicker();
+        goToMonth(`${y}-${pad2(m)}`);
+      },
+      onClose: closePicker,
+    });
+    picker = { ...handle, trigger };
+    trigger.setAttribute('aria-expanded', 'true');
+    // 상자가 열린 동안 뒤의 달력은 화면 읽기와 Tab이 닿지 않게 한다(덮개가 누르기를 막는 것과 같다).
+    el.setAttribute('inert', '');
+  }
+  yearBtn.addEventListener('click', () => openPicker('year', yearBtn));
+  monthBtn.addEventListener('click', () => openPicker('month', monthBtn));
   prevBtn.addEventListener('click', () => pager.go(-1));
   nextBtn.addEventListener('click', () => pager.go(1));
   todayBtn.addEventListener('click', goToday);
@@ -310,6 +359,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   const onConnection = (): void => renderStatus();
   window.addEventListener('online', onConnection);
   window.addEventListener('offline', onConnection);
+  // 고르는 상자는 폭이 바뀔 때만 스스로 닫는다(datePick.ts). 높이만 바뀌는 것은 아이폰 Safari의 주소 막대일 수 있다.
   const onResize = (): void => redraw();
   window.addEventListener('resize', onResize);
 
@@ -365,6 +415,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
       pager.jump(monthId === today.slice(0, 7) ? today : `${monthId}-01`);
     },
     destroy() {
+      closePicker();
       offChange();
       offStatus();
       window.removeEventListener('online', onConnection);

@@ -600,6 +600,47 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   const closedByButton = (await sheetNow()) === null;
   if (!closedByButton) throw new Error('목록을 내린 채로 설정의 닫기를 눌렀는데 닫히지 않았다');
 
+  // 년도와 월 고르기: 년도를 눌러 다음 12년으로 넘기고 그 첫 해를 고르면 같은 달의 그해로 간다. 월을 눌러 3월을 고른다.
+  // 상자가 열린 채 바깥(날짜 칸 위)을 누르면 닫히기만 하고 편집 화면은 열리지 않는다. 끝나면 오늘로 돌아온다.
+  const titleNow = async (): Promise<string> => (await view()).title;
+  const pickBefore = await titleNow();
+  const [beforeYear, beforeMonth] = (/(\d+)년\s*(\d+)월/.exec(pickBefore) ?? []).slice(1).map(Number);
+  const nextPage = 1900 + Math.floor((beforeYear - 1900) / 12) * 12 + 12;
+  await tap(await center($('.year')));
+  await sleep(400);
+  const yearBox = await cdp.evaluate<{ items: number; current: string | null } | null>(
+    `(() => { const p = document.querySelector('.datepick'); if (!p) return null; return { items: p.querySelectorAll('.datepick-item').length, current: p.querySelector('[aria-current="true"]')?.textContent ?? null }; })()`,
+  );
+  await tap(await center($('.datepick-step[aria-label="다음 12년"]')));
+  await sleep(250);
+  await tap(await center($('.datepick-item')));
+  await rest();
+  const afterYear = await titleNow();
+  await tap(await center($('.month .title-btn')));
+  await sleep(400);
+  await tap(await center("[...document.querySelectorAll('.datepick-item')].find((b) => b.textContent === '3월')"));
+  await rest();
+  const afterMonth = await titleNow();
+  await tap(await center($('.year')));
+  await sleep(400);
+  await tap(await center($('.grid.current .cell:nth-child(18)')));
+  await sleep(600);
+  const outside = await cdp.evaluate<{ picker: boolean; sheet: boolean }>("({ picker: !!document.querySelector('.datepick, .datepick-scrim'), sheet: !!document.querySelector('.sheet') })");
+  const afterOutside = await titleNow();
+  if (outside.sheet) {
+    await tap(await center($('.sheet .textbtn.start')));
+    await sleep(600);
+  }
+  await tap(await center($('.pill')));
+  await rest();
+  record(
+    '년도를 누르면 12년 상자가 뜨고 고른 해의 같은 달로 가며, 월을 누르면 1월~12월에서 고른 달로 간다. 바깥을 누르면 닫히기만 한다',
+    yearBox !== null && yearBox.items === 12 && yearBox.current === String(beforeYear) &&
+      afterYear === `${nextPage}년 ${beforeMonth}월` && afterMonth === `${nextPage}년 3월` &&
+      !outside.picker && !outside.sheet && afterOutside === afterMonth,
+    `처음 ${pickBefore}, 년도 상자 ${yearBox ? `${yearBox.items}칸(골라 둔 것 ${yearBox.current})` : '없음'}, 다음 12년의 첫 해를 고른 뒤 ${afterYear}, 3월을 고른 뒤 ${afterMonth}, 바깥을 누른 뒤 상자 ${outside.picker ? '남음' : '닫힘'}·편집 화면 ${outside.sheet ? '열림' : '없음'}·${afterOutside}`,
+  );
+
   // 좁은 폰(폭 320px): 음력이 칸에 안 들어가면 그 쪽을 좁은 꼴로 바꾸고, 그래도 넘치는 칸은 숨긴다.
   // 앞쪽이 잘린 채 보이면 다른 날짜로 읽히므로("11.15"가 "1.15"로) 잘린 채 보이는 것이 하나도 없어야 한다.
   type LunarFit = { tight: boolean; shown: number; hidden: number; clipped: number };
