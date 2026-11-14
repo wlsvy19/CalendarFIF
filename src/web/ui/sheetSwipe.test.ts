@@ -1,5 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { attachSwipeToClose, canScrollUp, eventTime, mayClaim, releaseVelocity, shouldClose, type FirstMove } from './sheetSwipe';
+import { DEFAULT_PREFS } from '../prefs';
+import { mountEditor } from './editor';
+import { mountSettings } from './settings';
+import {
+  attachSwipeToClose,
+  canScrollUp,
+  decideDistance,
+  eventTime,
+  mayClaim,
+  onTitleBar,
+  releaseVelocity,
+  shouldClose,
+  type FirstMove,
+} from './sheetSwipe';
 
 afterEach(() => {
   // 끈 뒤에 남는 click 막기를 치운다(새 손가락이 닿으면 그만둔다).
@@ -108,6 +121,48 @@ describe('첫 움직임에서 시트가 가질지', () => {
     expect(mayClaim(base(q('input[type="text"]'), sheet, { elapsedMs: 400 }))).toBe(false);
     expect(mayClaim(base(q('p'), sheet, { elapsedMs: 400 }))).toBe(true);
   });
+  it('제목 줄(.sheet-bar)에서 시작했으면 시트가 스크롤되어 있어도 가진다. 그 밖은 그대로 스크롤에 맡긴다', () => {
+    const sheet = document.createElement('div');
+    sheet.innerHTML = '<div class="sheet-bar"><span></span><h3>설정</h3><button>닫기</button></div><p class="list">내용</p>';
+    document.body.append(sheet);
+    const q = (s: string) => sheet.querySelector<HTMLElement>(s)!;
+    sheet.scrollTop = 120;
+    expect(onTitleBar(q('h3'), sheet)).toBe(true);
+    expect(onTitleBar(q('.sheet-bar'), sheet)).toBe(true);
+    expect(onTitleBar(q('.list'), sheet)).toBe(false);
+    expect(mayClaim(base(q('h3'), sheet))).toBe(true);
+    expect(mayClaim(base(q('.sheet-bar span'), sheet))).toBe(true);
+    expect(mayClaim(base(q('.sheet-bar button'), sheet))).toBe(true);
+    expect(mayClaim(base(q('.list'), sheet))).toBe(false);
+    expect(mayClaim(base(q('h3'), sheet, { dy: -8 }))).toBe(false); // 방향 조건은 그대로다
+  });
+});
+
+describe('누가 가질지 정하는 거리', () => {
+  it('누르면 동작하는 것(또는 그 안) 위에서 닿았으면 8px, 아니면 3px이다', () => {
+    const sheet = document.createElement('div');
+    sheet.innerHTML = `
+      <div class="sheet-bar"><button><span class="in">취소</span></button><h3>제목</h3></div>
+      <label class="pref-row"><span class="name">음력</span><input class="switch" type="checkbox" role="switch"></label>
+      <span class="field-label">메모</span><textarea></textarea><input type="text"><select><option>a</option></select>
+      <details><summary>방법</summary><p class="para">글</p></details>
+      <a href="#x">링크</a><a class="plain">이름만</a>
+      <div role="radio" class="r"></div><div role="button" class="rb"></div><div contenteditable class="ce"></div>
+      <p class="gap">빈 곳</p>`;
+    document.body.append(sheet);
+    const at = (s: string) => decideDistance(sheet.querySelector(s)!, sheet);
+    for (const s of ['button', '.in', '.switch', '.name', 'textarea', 'input[type="text"]', 'select', 'summary', 'a[href]', '.r', '.rb', '.ce']) expect([s, at(s)]).toEqual([s, 8]);
+    for (const s of ['h3', '.sheet-bar', '.field-label', '.para', '.plain', '.gap']) expect([s, at(s)]).toEqual([s, 3]);
+    expect(decideDistance(sheet, sheet)).toBe(3);
+  });
+  it('시트 바깥의 조상은 보지 않는다', () => {
+    const outer = document.createElement('button');
+    const sheet = document.createElement('div');
+    sheet.innerHTML = '<p>글</p>';
+    outer.append(sheet);
+    document.body.append(outer);
+    expect(decideDistance(sheet.querySelector('p')!, sheet)).toBe(3);
+  });
 });
 
 /** 손가락 하나. 움직일 때마다 시계를 step만큼 보낸다. */
@@ -121,7 +176,9 @@ function finger(target: Element, clock: { t: number }, id = 1) {
     return e;
   };
   return {
-    down() {
+    down(atX = 100, atY = 100) {
+      x = atX;
+      y = atY;
       const p = point();
       return fire('touchstart', [p], [p]);
     },
@@ -318,20 +375,6 @@ describe('click 막기', () => {
     button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
     expect(clicked).toHaveBeenCalledTimes(1);
   });
-  it('살짝 떨린 누르기는 click을 막지 않는다', () => {
-    const { at, sheet } = setup();
-    const clicked = vi.fn();
-    const button = sheet.querySelector('button')!;
-    button.addEventListener('click', clicked);
-    for (const jitter of [2, 5]) {
-      const f = at('button');
-      f.down();
-      f.move(jitter);
-      expect(f.up().defaultPrevented).toBe(false);
-      button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
-    }
-    expect(clicked).toHaveBeenCalledTimes(2);
-  });
   it('새 손가락이 닿거나 400ms가 지나면 막기를 그만둔다', () => {
     vi.useFakeTimers();
     try {
@@ -356,6 +399,116 @@ describe('click 막기', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('실제 시트에서의 누르기', () => {
+  // iOS Safari는 막은(preventDefault) touchmove가 하나라도 있으면 그 손가락에 click을 주지 않는다. 그래서 click을 직접 보내 보지
+  // 않고, 손가락이 낸 touchmove와 touchend가 막히지 않았는지를 본다.
+  const phone = () => vi.stubGlobal('matchMedia', (q: string) => ({ matches: q === '(max-width: 879.98px)' }));
+  function editorSheet(): HTMLElement {
+    phone();
+    const root = document.createElement('div');
+    document.body.append(root);
+    mountEditor(root, { dateKey: '2026-11-13', value: { text: 'a', color: '' }, onSave: vi.fn(), onCancel: vi.fn() });
+    return root.querySelector<HTMLElement>('.sheet')!;
+  }
+  function settingsSheet(): HTMLElement {
+    phone();
+    const root = document.createElement('div');
+    document.body.append(root);
+    mountSettings(root, {
+      email: 'me@example.com',
+      pending: 0,
+      storageOk: true,
+      corruptFound: false,
+      onSignOut: vi.fn(),
+      onClose: vi.fn(),
+      prefs: { value: DEFAULT_PREFS, onChange: vi.fn() },
+    });
+    return root.querySelector<HTMLElement>('.sheet')!;
+  }
+  /** target에서 닿아 (dx, dy)까지 두 번에 나눠 움직이고 뗀다. 막혔는지를 [첫 움직임, 둘째 움직임, 뗌] 순서로 돌려준다. */
+  function drift(target: Element, dx: number, dy: number): boolean[] {
+    const f = finger(target, { t: 0 });
+    f.down();
+    const moves = [f.move(dy / 2, { dx: dx / 2 }), f.move(dy / 2, { dx: dx / 2 })];
+    const end = f.up();
+    return [...moves, end].map((e) => e.defaultPrevented);
+  }
+  const DRIFTS = [
+    [1, 3],
+    [0, 5],
+    [2, 7],
+  ] as const;
+  function controls(): Array<[string, Element]> {
+    const editor = editorSheet();
+    const settings = settingsSheet();
+    return [
+      ['저장', editor.querySelector('.textbtn.end')!],
+      ['색 단추', editor.querySelector('.swatch[data-color="009300"]')!],
+      ['메모 칸', editor.querySelector('textarea')!],
+      ['설정 스위치', settings.querySelector('label.pref-row input.switch')!],
+    ];
+  }
+
+  it('누르면 동작하는 것 위에서는 7px까지 굴러도 touchmove와 touchend를 막지 않는다', () => {
+    const seen: string[] = [];
+    for (const [name, el] of controls()) {
+      for (const [dx, dy] of DRIFTS) seen.push(`${name} (${dx},${dy}): ${drift(el, dx, dy).join(',')}`);
+      expect((el.closest('.sheet') as HTMLElement).style.transform).toBe('');
+    }
+    expect(seen).toEqual(controls().flatMap(([name]) => DRIFTS.map(([dx, dy]) => `${name} (${dx},${dy}): false,false,false`)));
+  });
+  it('같은 움직임도 제목 글자(누르는 것이 아닌 곳) 위에서는 3px에서 시트가 가진다', () => {
+    const titles = [editorSheet().querySelector('h3')!, settingsSheet().querySelector('h3')!];
+    for (const h3 of titles) {
+      expect(drift(h3, 1, 3)).toEqual([false, true, false]);
+      expect(drift(h3, 0, 5)).toEqual([false, true, false]);
+      expect(drift(h3, 2, 7)).toEqual([true, true, false]); // 첫 움직임(1, 3.5)에서 이미 3px을 넘는다
+    }
+  });
+  it('누르는 것 위에서도 8px을 넘게 아래로 끌면 시트가 가진다', () => {
+    for (const [name, el] of controls()) expect([name, drift(el, 0, 9)]).toEqual([name, [false, true, false]]);
+  });
+  it('시트가 스크롤되어 있으면 제목 줄에서 끈 것만 가지고 목록에서 끈 것은 스크롤에 맡긴다', () => {
+    const settings = settingsSheet();
+    settings.scrollTop = 120;
+    expect(drift(settings.querySelector('.sheet-bar h3')!, 0, 10)).toEqual([true, true, false]);
+    expect(drift(settings.querySelector('.sheet-bar .textbtn.end')!, 0, 10)).toEqual([false, true, false]); // 닫기 단추: 8px
+    expect(drift(settings.querySelector('.settings-email')!, 0, 10)).toEqual([false, false, false]);
+    expect(drift(settings.querySelector('label.pref-row input.switch')!, 0, 10)).toEqual([false, false, false]);
+  });
+});
+
+describe('끝을 듣지 못한 손가락', () => {
+  it('같은 번호로 새로 닿으면(changedTouches에 있다) 끌던 것을 제자리로 돌리고 새 손짓으로 시작한다', () => {
+    const { at, offset, onClose } = setup();
+    const f = at('h3');
+    f.down();
+    f.drag(100, 5); // 뗀 것을 듣지 못했다
+    expect(offset()).toBe('translate3d(0, 80px, 0)');
+    const g = at('h3');
+    g.down(100, 400);
+    expect(offset()).toBe('');
+    g.move(10);
+    expect(offset()).toBe('translate3d(0, 0px, 0)'); // 새로 닿은 곳(400)에서 잰다
+    g.move(10);
+    expect(offset()).toBe('translate3d(0, 10px, 0)');
+    g.up();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+  it('정말로 하나 더 닿은 손가락(touches에만 있다)이면 첫 손가락을 계속 따라간다', () => {
+    const { at, sheet, offset } = setup();
+    const f = at('h3');
+    f.down();
+    f.drag(100, 5);
+    const first = new Touch({ identifier: 1, target: sheet, clientX: 100, clientY: 200 });
+    const second = new Touch({ identifier: 2, target: sheet, clientX: 200, clientY: 300 });
+    sheet.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: [first, second], changedTouches: [second] }));
+    expect(offset()).toBe('translate3d(0, 80px, 0)');
+    f.move(10);
+    expect(offset()).toBe('translate3d(0, 90px, 0)');
   });
 });
 
