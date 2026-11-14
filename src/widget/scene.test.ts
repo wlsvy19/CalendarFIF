@@ -178,7 +178,8 @@ describe('medium scene', () => {
     // 2026-11-13 의 주: 8일(일)~14일(토)
     const nums = texts(s).filter((t) => t.weight === 'semibold' && /^\d+$/.test(t.text)).map((t) => t.text);
     expect(nums).toEqual(['8', '9', '10', '11', '12', '13', '14']);
-    const memo = texts(s).filter((t) => t.size < 10 && t.weight === 'regular');
+    // 음력(오른쪽 맞춤)은 메모가 아니다.
+    const memo = texts(s).filter((t) => t.size < 10 && t.weight === 'regular' && t.align === 'left');
     expect(memo.length).toBeLessThanOrEqual(6);
     expect(memo.length).toBe(6); // 7줄 -> 5줄 + "+2"
     expect(memo[5].text).toBe('+2');
@@ -209,11 +210,70 @@ describe('small scene', () => {
     expect(texts(s).find((x) => x.text === '14')!.color).toBe(PALETTES.light.sat);
     expect(texts(s).some((x) => x.text === '토요일')).toBe(true);
   });
-  it('caps at six lines', () => {
+  it('caps at six lines, or five under the lunar and holiday line', () => {
+    const memoOf = (s: Scene): string[] => texts(s).filter((x) => x.size === 11 && x.weight === 'regular').map((x) => x.text);
+    const plain = buildScene({ family: 'small', theme: 'light', size: sizeOf('small'), today: TODAY, month: busy, offline: false, lunar: false });
+    expect([memoOf(plain).length, memoOf(plain)[5]]).toEqual([6, '+2']);
     const s = small(busy);
-    const memo = texts(s).filter((x) => x.size === 11 && x.weight === 'regular');
-    expect(memo).toHaveLength(6);
-    expect(memo[5].text).toBe('+2');
+    expect([memoOf(s).length, memoOf(s)[4]]).toEqual([5, '+3']);
+    expect(texts(s).find((x) => x.text === '음 10.5')).toMatchObject({ size: 10, color: PALETTES.light.muted, y: 54 });
+    expect(texts(plain).some((x) => x.text.startsWith('음 '))).toBe(false);
+  });
+  it('shows a holiday in red with its name', () => {
+    // 2026-10-05는 개천절(토)의 대체공휴일인 월요일이다.
+    const s = buildScene({ family: 'small', theme: 'light', size: sizeOf('small'), today: '2026-10-05', month: { monthId: '2026-10', days: {} }, offline: false });
+    expect(texts(s).find((x) => x.text === '5')!.color).toBe(PALETTES.light.sun);
+    expect(texts(s).find((x) => x.text === '음 8.25 · 대체공휴일')).toMatchObject({ color: PALETTES.light.sun });
+  });
+});
+
+describe('holidays and lunar dates in the grid', () => {
+  // 2026년 10월: 3일 개천절(토), 5일 그 대체공휴일(월), 9일 한글날(금). 1일이 오늘이다.
+  const days: MonthData['days'] = { '05': { text: six, color: '' }, '06': { text: six, color: '' }, '09': { text: '', color: 'F12424' } };
+  const october = (over: Partial<Parameters<typeof buildScene>[0]> = {}): Scene =>
+    buildScene({ family: 'large', theme: 'light', size: sizeOf('large'), today: '2026-10-01', month: { monthId: '2026-10', days }, offline: false, ...over });
+  const s = october();
+  const p = PALETTES.light;
+  const number = (scene: Scene, day: number): Text => texts(scene).find((t) => t.weight === 'semibold' && t.text === String(day) && t.alpha === undefined)!;
+  const lunar = (scene: Scene): Text[] => texts(scene).filter((t) => t.align === 'right' && t.color === p.muted);
+
+  it('colours holidays and substitute holidays red, whatever the weekday', () => {
+    expect([number(s, 3).color, number(s, 5).color, number(s, 6).color, number(s, 4).color]).toEqual([p.sun, p.sun, p.ink, p.sun]);
+    // 색을 칠한 날은 숫자가 ink다.
+    expect(number(s, 9).color).toBe(p.ink);
+  });
+  it('writes the holiday name under the number and gives the memo one line less', () => {
+    const names = texts(s).filter((t) => t.weight === 'semibold' && t.color === p.sun && t.size < number(s, 5).size);
+    expect(names.map((t) => t.text)).toEqual(['개천절', '대체공휴일', '한글날']);
+    const memoIn = (day: number): Text[] => texts(s).filter((t) => t.x === number(s, day).x && t.weight === 'regular' && t.align === 'left');
+    expect(memoIn(6).length - memoIn(5).length).toBe(1);
+    expect(memoIn(5)[0].y).toBeGreaterThan(names[1].y);
+  });
+  it('shrinks a name that is wider than the cell instead of cutting it, down to 6.5', () => {
+    const narrow = buildScene({ family: 'large', theme: 'light', size: { width: 321, height: 324 }, today: '2026-10-01', month: { monthId: '2026-10', days }, offline: false });
+    const name = texts(narrow).find((t) => t.text.startsWith('대체'))!;
+    expect(name.text).toBe('대체공휴일');
+    expect(name.size).toBeLessThan(8);
+    expect(name.size).toBeGreaterThanOrEqual(6.5);
+    expect(estimateWidth(name.text, name.size)).toBeLessThanOrEqual(name.w + 0.05); // 소수 둘째 자리로 반올림한 만큼
+  });
+  it('writes the lunar date at the right of the number row, for days of this month only', () => {
+    expect(lunar(s).map((t) => t.text)).toEqual(expect.arrayContaining(['8.23', '8.25', '9.1']));
+    expect(lunar(s)).toHaveLength(31);
+    for (const t of lunar(s)) expect(t.size).toBeGreaterThanOrEqual(8);
+    expect(lunar(october({ lunar: false }))).toEqual([]);
+  });
+  it('shrinks the lunar date of today beside the number pill down to 6.5, and leaves it out when it still overlaps', () => {
+    // 좁은 위젯(321)에서 오늘이 23일(음력 10.15)이면 8로는 숫자 상자와 겹친다.
+    const narrow = (today: string, monthId: string): Scene => buildScene({ family: 'large', theme: 'light', size: { width: 321, height: 324 }, today, month: { monthId, days: {} }, offline: false });
+    const tight = lunar(narrow('2026-11-23', '2026-11')).find((t) => t.text === '10.15')!;
+    expect(tight.size).toBeLessThan(8);
+    expect(tight.size).toBeGreaterThanOrEqual(6.5);
+    // 그날이 오늘이 아니면 8 그대로다.
+    expect(lunar(narrow('2026-11-13', '2026-11')).find((t) => t.text === '10.15')!.size).toBe(8);
+    // 오늘이 두 자리 날이고 음력이 윤달의 두 자리 날이면 들어가지 않아 적지 않는다(2025-08-10은 음력 윤6월 17일).
+    const leap = lunar(narrow('2025-08-10', '2025-08'));
+    expect([leap.some((t) => t.text === '윤6.17'), leap.some((t) => t.text === '윤6.16')]).toEqual([false, true]);
   });
 });
 

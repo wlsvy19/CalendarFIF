@@ -16,7 +16,7 @@ const CACHE_FILE = 'calendarfif-cache.json';
 /** 위젯에 놓을 것: 기본은 기본 부품의 나무, 위젯 매개변수에 image가 있으면 그림 장면. */
 type View = { tree: Tree } | { scene: Scene };
 /** force: 매개변수로 고정한 밝기(없으면 기본 부품의 색이 화면 밝기를 스스로 따른다). pictureTheme: 그림을 그릴 밝기(그림을 그릴 때만 묻는다). */
-type Env = { family: Family; image: boolean; force: Theme | undefined; pictureTheme: () => Theme; size: Size; today: string };
+type Env = { family: Family; image: boolean; lunar: boolean; force: Theme | undefined; pictureTheme: () => Theme; size: Size; today: string };
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 const localDate = (d: Date): string => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -45,11 +45,13 @@ function makeEnv(host: Host, family: Family, now: Date): Env {
   // 매개변수의 밝기가 먼저다. 없으면 그림은 그리는 순간의 기기 밝기를 쓰고, 기본 부품의 색은 화면 밝기를 스스로 따른다.
   const force: Theme | undefined = words.includes('dark') ? 'dark' : words.includes('light') ? 'light' : undefined;
   const pictureTheme = (): Theme => force ?? (systemIsDark(host) ? 'dark' : 'light');
-  return { family, image, force, pictureTheme, size: widgetSize(host.Device.screenSize(), family), today: localDate(now) };
+  // 음력은 적는 것이 기본이고, 매개변수에 nolunar(또는 음력끔)가 있으면 적지 않는다.
+  const lunar = !(words.includes('nolunar') || words.includes('음력끔'));
+  return { family, image, lunar, force, pictureTheme, size: widgetSize(host.Device.screenSize(), family), today: localDate(now) };
 }
 
 function monthView(env: Env, month: MonthData, offline: boolean): View {
-  const input = { family: env.family, size: env.size, today: env.today, month, offline };
+  const input = { family: env.family, size: env.size, today: env.today, month, offline, lunar: env.lunar };
   return env.image ? { scene: buildScene({ ...input, theme: env.pictureTheme() }) } : { tree: buildTree(input) };
 }
 
