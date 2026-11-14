@@ -214,13 +214,16 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     moving = true;
     settleWaits = 0;
     restLater();
-    // 손을 뗀 뒤 칸에 맞았으면 움직임이 끝난 것이다. 0.15초를 기다리지 않고 다음 프레임에 미룬 일을 한다. 빨리 다시 넘길 때
-    // 들어오는 쪽이 이미 그려져 있게 한다.
+    // 손을 뗀 뒤 칸에 맞았으면 움직임이 끝난 것이다. 0.15초를 기다리지 않고 미룬 일을 한다. 빨리 다시 넘길 때
+    // 들어오는 쪽이 이미 그려져 있게 한다. scroll 안에서 건 프레임 콜백은 같은 프레임에 돌아 위치가 늘 같으므로, 다음 프레임까지
+    // 지켜본다. 그 사이 scroll이 오면(칸 자리를 지나가는 중이었다) 위에서 이것을 지우고 다시 본다.
     cancelAnimationFrame(settleFrame);
     if (byFinger && !fingerDown && pending === null && onSlot()) {
       const at = el.scrollLeft;
       settleFrame = requestAnimationFrame(() => {
-        if (moving && el.scrollLeft === at && !fingerDown) rest();
+        settleFrame = requestAnimationFrame(() => {
+          if (moving && el.scrollLeft === at && !fingerDown) rest();
+        });
       });
     }
     if (placedWidth === null) return;
@@ -262,17 +265,32 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     targetListening?.abort();
     targetListening = null;
   }
+  // 손가락이 모두 떠났는지 안다(도움과 상관없이). 닿을 때 미뤄 둔 쪽을 그리면 손가락 밑의 칸이 바뀌어 위와 같은 일이 생기므로,
+  // 처음 닿은 요소에도 단다. 모든 손가락이 떠나면 뗀다.
+  let fingerListening: AbortController | null = null;
+  function onFingerUp(e: Event): void {
+    if ((e as TouchEvent).touches.length > 0) return;
+    fingerDown = false;
+    fingerListening?.abort();
+    fingerListening = null;
+  }
   function onTouchStart(e: TouchEvent): void {
     // 움직이기 전에 미뤄 둔 쪽을 그린다. 그래야 이번 손짓에 들어오는 쪽이 옛 내용으로 보이지 않는다.
     byFinger = true;
     fingerDown = e.touches.length > 0;
+    const target = e.target;
+    if (target && target !== el) {
+      fingerListening ??= new AbortController();
+      const fingerOpts = { passive: true, signal: fingerListening.signal };
+      target.addEventListener('touchend', onFingerUp, fingerOpts);
+      target.addEventListener('touchcancel', onFingerUp, fingerOpts);
+    }
     flush();
     pending = null;
     if (!assist) return;
     stopWatch();
     stopTargetListening();
     touchStartLeft = e.touches.length === 1 ? el.scrollLeft : null;
-    const target = e.target;
     if (touchStartLeft === null || !target || target === el) return;
     targetListening = new AbortController();
     const opts = { passive: true, signal: targetListening.signal };
@@ -327,10 +345,6 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
   el.addEventListener('scroll', onScroll, on);
   el.addEventListener('scrollend', rest, on); // 지원하지 않는 브라우저에서는 오지 않고 restLater가 맡는다
   el.addEventListener('touchstart', onTouchStart, on);
-  // 손가락이 떠난 것을 안다(도움과 상관없이). 끄는 중에 손가락 밑의 쪽이 바뀌어도 이벤트는 스크롤 상자로 올라온다(쪽은 미뤄 그린다).
-  const onFingerUp = (e: TouchEvent): void => {
-    if (e.touches.length === 0) fingerDown = false;
-  };
   el.addEventListener('touchend', onFingerUp, on);
   el.addEventListener('touchcancel', onFingerUp, on);
   // 손가락 말고(트랙패드, 마우스) 누를 때도 누르기 전에 미뤄 둔 것을 정리한다. 그래야 누른 칸이 지금 쪽으로 보인다.
@@ -367,6 +381,7 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     destroy() {
       cancelAnimationFrame(settleFrame);
       listening.abort();
+      fingerListening?.abort();
       stopTargetListening();
       stopResize();
       clearTimeout(restTimer);

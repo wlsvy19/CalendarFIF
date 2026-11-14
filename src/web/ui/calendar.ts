@@ -199,7 +199,10 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
         used = (first?.querySelector<HTMLElement>('.head')?.offsetHeight ?? 0) + padding;
       }
       size = { cellHeight, used };
-      if (cellHeight > 0) measured.set(page.rows.length, size);
+      if (cellHeight > 0) {
+        measured.set(page.rows.length, size);
+        measuredHeight = target.clientHeight; // 방금 칸 높이를 읽어 배치가 새것이라 따로 계산하지 않는다
+      }
     }
     const { cellHeight, used } = size;
     let lineHeight: number;
@@ -255,9 +258,13 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   // 넓은 화면인지는 배치가 바뀔 때만 읽는다. window.innerWidth를 읽으면 브라우저가 그때까지 바뀐 것의 배치를 바로 계산하므로,
   // 쪽을 그리는 도중에 읽으면 쪽마다 배치 계산이 한 번 더 돈다(프로파일에서 그리기 시간의 반을 넘었다).
   let wide = window.innerWidth >= WIDE_PX;
+  // measured를 잴 때의 쪽 높이. 아래의 높이 알림은 이와 다른 높이일 때만 다시 재고 그린다(창 크기 알림이나 설정 바꾸기가 이미
+  // 새 높이로 다시 그렸으면 한 번 더 그리지 않는다).
+  let measuredHeight = -1;
   const relayout = (): void => {
     epoch += 1;
     measured = new Map();
+    measuredHeight = -1;
     wide = window.innerWidth >= WIDE_PX;
   };
   function drawPage(grid: HTMLElement, anchor: string): void {
@@ -323,17 +330,20 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   }
 
   let subscribeLater = false;
-  // 구독할 달을 알린다. 붙어 있는 쪽들이 보여 주는 달 중 지금 달과 그 앞뒤 한 달 밖의 것은 더해서 구독한다.
-  // 그래야 미끄러져 들어오거나 나가는 쪽도 메모를 잃지 않는다.
+  // 구독할 달을 알린다. 지금 쪽과 앞뒤 두 쪽까지가 보여 주는 달 중 지금 달과 그 앞뒤 한 달 밖의 것은 더해서 구독한다.
+  // 그래야 미끄러져 들어오거나 나가는 쪽도 메모를 잃지 않는다. 두 쪽까지 보는 것은, 손가락으로 넘기는 동안 구독 바꾸기를
+  // 미루므로 빠르게 두 번 넘기면 두 번째에 들어오는 쪽의 달(그 쪽 끝에 걸친 다음 달의 첫 날들까지)이 아직 없어 빈 채로 보였다가
+  // 멈춘 뒤에 채워지기 때문이다. PC 앱은 단추로만 넘기고 넘기면 바로 구독하므로 지금 쪽만 본다.
+  const reach = deps.desktop ? 0 : 2;
   function subscribe(): void {
     const opts = pageOptions(appearance);
-    const title = buildPage(opts, pager.anchor()).title;
+    const anchor = pager.anchor();
+    const title = buildPage(opts, anchor).title;
     const near = [shiftMonth(title, -1), title, shiftMonth(title, 1)];
-    const months = new Set(pager.anchors().flatMap((a) => pageMonths(buildPage(opts, a))));
-    // 한 번 더 넘길 달도 미리 받는다. 손가락으로 넘기는 동안은 구독 바꾸기를 미루므로, 빠르게 두 번 넘기면 두 번째에 들어오는
-    // 쪽의 달이 아직 없어 빈 채로 보였다가 멈춘 뒤에 채워진다.
-    months.add(shiftMonth(title, -2));
-    months.add(shiftMonth(title, 2));
+    const months = new Set<string>();
+    for (let d = -reach; d <= reach; d++) {
+      for (const m of pageMonths(buildPage(opts, d === 0 ? anchor : stepPage(opts, anchor, d)))) months.add(m);
+    }
     store.show(title, [...months].filter((m) => !near.includes(m)).sort());
   }
 
@@ -431,16 +441,12 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     relayout();
     redraw();
   };
-  // 창 크기 알림 없이 달력의 높이만 바뀌어도(머리 글자가 두 줄이 되는 등) 칸 크기를 다시 잰다.
-  let pagerHeight = -1;
+  // 창 크기 알림 없이 달력의 높이만 바뀌어도(머리 글자가 두 줄이 되는 등) 칸 크기를 다시 잰다. 알림은 배치가 끝난 뒤에 오므로
+  // 높이를 읽어도 배치를 새로 계산하지 않는다.
   const heightWatch =
     typeof ResizeObserver === 'function'
       ? new ResizeObserver(() => {
-          const h = pager.el.clientHeight;
-          if (h === pagerHeight) return;
-          const first = pagerHeight < 0;
-          pagerHeight = h;
-          if (first) return;
+          if (pager.current().clientHeight === measuredHeight) return;
           relayout();
           redraw();
         })

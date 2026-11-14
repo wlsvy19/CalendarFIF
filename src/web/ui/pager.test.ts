@@ -340,9 +340,9 @@ it('손가락으로 넘기는 중에는 쪽을 옮겨 붙이거나 그리지 않
   expect([onCurrent.mock.lastCall, pager.anchor(), pager.busy(), fill.mock.calls.length]).toEqual([['2026-12'], '2026-12', true, 0]);
   expect(layout()).toEqual(['1199:2026-10', '1200:2026-11*', '1201:2026-12']); // 옮겨 붙이기도 미뤘다
   pager.el.dispatchEvent(new TouchEvent('touchend', { bubbles: true, touches: [] }));
-  scroll(S + 400); // 손을 뗀 뒤 칸에 맞았다: 0.15초를 기다리지 않고 다음 프레임에 한다
+  scroll(S + 400); // 손을 뗀 뒤 칸에 맞았다: 0.15초를 기다리지 않고, 다음 프레임까지 그대로인 것을 본 뒤에 한다
   expect(fill).not.toHaveBeenCalled();
-  vi.advanceTimersByTime(20);
+  vi.advanceTimersByTime(40);
   expect([layout(), fill.mock.calls.map((c) => c[1]), pager.busy(), onSettle.mock.calls.length]).toEqual([['1200:2026-11', '1201:2026-12*', '1202:2027-01'], ['2027-01'], false, 2]);
   pager.destroy();
 });
@@ -430,6 +430,37 @@ it('손가락이 떠난 뒤 손가락 말고(트랙패드, 마우스) 누르면 
   scroll(S + 410); // 손가락 없이 움직인다(창 크기 등)
   pager.refresh(); // 손가락의 움직임이 아니므로 미루지 않는다
   expect(fill).toHaveBeenCalledTimes(4);
+});
+it('닿을 때 미뤄 둔 쪽을 그려 손가락 밑의 요소가 빠져도(도움이 없는 아이폰) 손을 뗀 것을 알고, 칸에 맞으면 곧 미룬 일을 한다', () => {
+  vi.useFakeTimers();
+  const { pager, fill, scroll, touch } = setup();
+  pager.place();
+  const finger = pager.current().appendChild(document.createElement('button'));
+  touch('touchstart', 1, finger);
+  finger.remove(); // 나머지 터치 이벤트는 떨어져 나간 요소에만 가고 .pager로 올라오지 않는다
+  scroll(S + 250);
+  fill.mockClear();
+  touch('touchend', 0, finger);
+  scroll(S + 400);
+  vi.advanceTimersByTime(40); // 0.15초 전
+  expect([fill.mock.calls.map((c) => c[1]), pager.busy()]).toEqual([['2027-01'], false]);
+});
+it('손을 뗀 뒤 칸 자리에 왔어도 다음 프레임에 더 움직이면(칸 자리를 지나가는 중) 미룬 일을 하지 않는다', () => {
+  vi.useFakeTimers();
+  const { pager, fill, scroll, touch } = setup();
+  pager.place();
+  fill.mockClear();
+  touch('touchstart', 1);
+  scroll(S + 250);
+  touch('touchend', 0);
+  scroll(S + 400);
+  vi.advanceTimersByTime(16); // 한 프레임
+  scroll(S + 420);
+  vi.advanceTimersByTime(40);
+  expect([fill.mock.calls.length, pager.busy()]).toEqual([0, true]);
+  scroll(S + 400); // 돌아와 멈춘다
+  vi.advanceTimersByTime(40);
+  expect([fill.mock.calls.map((c) => c[1]), pager.busy()]).toEqual([['2027-01'], false]);
 });
 it('다시 쓰는 쪽의 클래스는 지우지 않는다(같은 날짜면 다시 그리지 않으므로 음력 좁은 꼴 같은 표시가 남아야 한다)', () => {
   const { pager, scroll } = setup();
