@@ -498,6 +498,7 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
     position: sticky;
     top: 0;
     z-index: 2;
+    min-height: 60px; /* 위 여백 16 + 제목 줄 44. 편집 화면의 제목 줄과 같은 자리에 온다 */
     padding-top: 16px;
     background: var(--surface);
   }

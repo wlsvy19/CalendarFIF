@@ -491,10 +491,26 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     restF !== null && settingsGone && restF2 !== null && listBefore !== null && listAfter !== null && listAfter < listBefore.top - 50 && worstF <= 0.5 && afterF !== null,
     `끌어 닫은 뒤 설정 ${settingsGone ? '없음' : '있음'}, 목록 스크롤 ${listBefore ? Math.round(listBefore.top) : '없음'} -> ${listAfter === null ? '없음' : Math.round(listAfter)}px${listBefore?.padded ? '(시험용 빈 칸을 덧붙임)' : ''}, 끄는 동안 시트가 벗어난 값 ${px(worstF)}, 뗀 뒤 설정 ${afterF ? '열림' : '없음'}`,
   );
-  if (afterF) {
-    // 닫기 단추가 목록과 함께 스크롤되어 올라가 있으므로 맨 위로 되돌린 뒤 누른다.
-    await cdp.evaluate("document.querySelector('.sheet.settings').scrollTop = 0");
-    await sleep(100);
+  // 목록을 내린 채로도 제목 줄은 시트 맨 위에 붙어 있고, 제목 줄을 잡고 끌어 내리면 닫힌다.
+  const stuck = await cdp.evaluate<{ scrollTop: number; barTop: number; barBottom: number; closeVisible: boolean } | null>(`(() => {
+    const s = document.querySelector('.sheet.settings');
+    if (!s) return null;
+    s.scrollTop = 300;
+    const sheet = s.getBoundingClientRect();
+    const bar = s.querySelector('.sheet-bar').getBoundingClientRect();
+    const close = s.querySelector('.sheet-bar .textbtn.end').getBoundingClientRect();
+    return { scrollTop: s.scrollTop, barTop: bar.top - sheet.top, barBottom: bar.bottom - sheet.top, closeVisible: close.top >= sheet.top && close.bottom <= sheet.bottom };
+  })()`);
+  await sleep(200);
+  if (stuck) await pull(await titleBar(), 300, 30, { holdMs: 150 });
+  await sleep(600);
+  const goneFromBar = (await sheetNow()) === null;
+  record(
+    '설정 목록을 내린 채로도 제목 줄과 닫기는 시트 맨 위에 붙어 있고, 제목 줄을 잡고 끌어 내리면 닫힌다',
+    stuck !== null && stuck.scrollTop > 200 && Math.abs(stuck.barTop) <= 0.5 && stuck.barBottom >= 56 && stuck.closeVisible && goneFromBar,
+    stuck === null ? '설정 시트가 없다' : `목록 스크롤 ${Math.round(stuck.scrollTop)}px, 제목 줄은 시트 위에서 ${px(stuck.barTop)}~${px(stuck.barBottom)}, 닫기 ${stuck.closeVisible ? '보임' : '안 보임'}, 제목 줄을 끌어 내린 뒤 설정 ${goneFromBar ? '없음' : '있음'}`,
+  );
+  if (!goneFromBar) {
     await tap(await center($('.sheet .sheet-bar .textbtn.end')));
     await sleep(600);
   }
@@ -578,12 +594,11 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
       lookBack.theme === null && lookBack.accent === lookBefore.accent && lookBack.lunars === lookBefore.lunars && lookBack.dow === lookBefore.dow && lookBack.memoSize === '10px' && lookBack.weeks === 0,
     `바꾼 뒤: 밝기 ${lookChanged.theme}, 강조색 ${lookChanged.accent}, 음력 ${lookBefore.lunars} -> ${lookChanged.lunars}칸, 요일 줄 ${lookChanged.dow}, 메모 글자 ${lookChanged.memoSize}, 주 번호 ${lookChanged.weeks}칸, 저장 ${JSON.stringify(lookChanged.saved)} / 되돌린 뒤: 밝기 ${lookBack.theme ?? '자동'}, 강조색 ${lookBack.accent}, 음력 ${lookBack.lunars}칸, 요일 줄 ${lookBack.dow}, 메모 글자 ${lookBack.memoSize}`,
   );
-  if ((await sheetNow()) !== null) {
-    await cdp.evaluate("document.querySelector('.sheet.settings').scrollTop = 0");
-    await sleep(100);
-    await tap(await center($('.sheet .sheet-bar .textbtn.end')));
-    await sleep(600);
-  }
+  // 목록이 내려가 있어도 닫기는 위에 붙어 있으므로 그대로 누른다.
+  await tap(await center($('.sheet .sheet-bar .textbtn.end')));
+  await sleep(600);
+  const closedByButton = (await sheetNow()) === null;
+  if (!closedByButton) throw new Error('목록을 내린 채로 설정의 닫기를 눌렀는데 닫히지 않았다');
 
   // 좁은 폰(폭 320px): 음력이 칸에 안 들어가면 그 쪽을 좁은 꼴로 바꾸고, 그래도 넘치는 칸은 숨긴다.
   // 앞쪽이 잘린 채 보이면 다른 날짜로 읽히므로("11.15"가 "1.15"로) 잘린 채 보이는 것이 하나도 없어야 한다.
