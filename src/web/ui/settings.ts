@@ -1,4 +1,5 @@
 import { dismiss } from './sheetMotion';
+import { attachSwipeToClose } from './sheetSwipe';
 import { widgetSection, type WidgetInstallDeps } from './widgetInstall';
 
 export type AccountProps = {
@@ -278,6 +279,8 @@ export function mountSettings(
 
   root.append(scrim, sheet);
   document.documentElement.classList.add('sheet-open');
+  // 폰 화면에서는 아래로 끌어도 닫힌다(목록이 맨 위일 때). 닫기 단추와 같다.
+  const swipe = attachSwipeToClose(sheet, scrim, { onClose: close });
   sheet.focus();
 
   return {
@@ -285,6 +288,7 @@ export function mountSettings(
     destroy() {
       for (const fn of cleanups) fn();
       document.documentElement.classList.remove('sheet-open');
+      swipe.destroy();
       dismiss(scrim, sheet);
       if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
     },

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { swipeDown } from './fakeSwipe';
 import { mountSettings } from './settings';
 
 beforeEach(() => {
@@ -18,6 +19,17 @@ function mount(overrides: Partial<Parameters<typeof mountSettings>[1]> = {}) {
   return { root, button, onSignOut, handle };
 }
 
+it('폰 화면에서 목록이 맨 위일 때 아래로 끌면 닫고, 스크롤이 내려가 있으면 닫지 않는다', () => {
+  const onClose = vi.fn();
+  const { root } = mount({ onClose });
+  const sheet = root.querySelector<HTMLElement>('.sheet')!;
+  sheet.scrollTop = 120;
+  swipeDown(root.querySelector('.settings-email')!);
+  expect(onClose).not.toHaveBeenCalled();
+  sheet.scrollTop = 0;
+  swipeDown(root.querySelector('.sheet-bar h3')!);
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
 it('계정과 대기 건수를 보여 주고 로그아웃한다', () => {
   const { root, button, onSignOut } = mount();
   expect(root.textContent).toContain('me@example.com');

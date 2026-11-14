@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import type { DayValue } from '../../core/types';
 import { mountEditor } from './editor';
+import { swipeDown } from './fakeSwipe';
 
 function mount(value: DayValue) {
   const root = document.createElement('div');
@@ -82,6 +83,38 @@ it('바깥을 누르면 고친 것이 없을 때만 닫는다', () => {
   const untouched = mount({ text: 'a', color: 'F12424' });
   untouched.root.querySelector<HTMLElement>('.scrim')!.click();
   expect(untouched.onCancel).toHaveBeenCalledTimes(1);
+});
+it('폰 화면에서 아래로 끌어 닫으면 고친 것이 있을 때 저장하고 없으면 취소한다', () => {
+  const untouched = mount({ text: 'a', color: 'F12424' });
+  swipeDown(untouched.root.querySelector('.sheet-bar h3')!);
+  expect(untouched.onCancel).toHaveBeenCalledTimes(1);
+  expect(untouched.onSave).not.toHaveBeenCalled();
+  const typed = mount({ text: 'a', color: '' });
+  typed.area.value = 'a\nb  ';
+  swipeDown(typed.root.querySelector('.sheet-bar h3')!);
+  expect(typed.onSave).toHaveBeenCalledWith({ text: 'a\nb', color: '' });
+  expect(typed.onCancel).not.toHaveBeenCalled();
+  const recoloured = mount({ text: 'a', color: '' });
+  recoloured.root.querySelector<HTMLElement>('[role="radio"][data-color="009300"]')!.click();
+  swipeDown(recoloured.area);
+  expect(recoloured.onSave).toHaveBeenCalledWith({ text: 'a', color: '009300' });
+});
+it('끌어 닫은 뒤에 저장 단추가 눌려도 한 번만 전달된다', () => {
+  const { root, area, button, onSave, onCancel } = mount({ text: '', color: '' });
+  area.value = 'x';
+  swipeDown(root.querySelector('.sheet-bar h3')!);
+  button('저장').click();
+  button('취소').click();
+  expect(onSave).toHaveBeenCalledTimes(1);
+  expect(onCancel).not.toHaveBeenCalled();
+});
+it('PC 앱(html.desk)에서는 끌어도 닫히지 않는다', () => {
+  document.documentElement.classList.add('desk');
+  const { root, onCancel } = mount({ text: '', color: '' });
+  swipeDown(root.querySelector('.sheet-bar h3')!);
+  expect(onCancel).not.toHaveBeenCalled();
+  expect(root.querySelector<HTMLElement>('.sheet')!.style.transform).toBe('');
+  document.documentElement.classList.remove('desk');
 });
 it('보이는 영역의 높이와 위치를 편집 화면에 넘긴다', () => {
   const listeners = new Map<string, Set<() => void>>();

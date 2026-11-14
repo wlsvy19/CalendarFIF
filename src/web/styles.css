@@ -422,6 +422,21 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   .calendar .grid { border-bottom: 0; }
+  /* 폰의 시트: 위 가운데에 손잡이 막대(꾸밈)를 두고 그만큼 제목 줄을 내린다. 아래로 끌면 닫힌다(sheetSwipe.ts).
+     PC 앱(:root.desk)의 시트는 창이 좁아도 가운데 상자라서 두지 않는다. */
+  :root:not(.desk) .sheet { padding-top: 16px; }
+  :root:not(.desk) .sheet::before {
+    content: "";
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    width: 36px;
+    height: 5px;
+    margin-left: -18px;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--muted) 40%, var(--surface));
+    pointer-events: none;
+  }
 }
 @media (min-width: 880px) {
   .sheet {
