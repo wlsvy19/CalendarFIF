@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { dismiss } from './sheetMotion';
+import { dismiss, exitMotion, noteReleaseVelocity, translateYOf } from './sheetMotion';
 
 function build() {
   const scrim = document.createElement('div');
@@ -124,5 +124,42 @@ it('들어오는 중이면 지금 값에서 내려가기 시작한다', () => {
   dismiss(scrim, sheet, { animate: true });
   expect((sheet as unknown as { animate: ReturnType<typeof vi.fn> }).animate.mock.calls[0][0][0]).toEqual({ transform: 'matrix(1, 0, 0, 1, 0, 140)' });
   expect((scrim as unknown as { animate: ReturnType<typeof vi.fn> }).animate.mock.calls[0][0][0]).toEqual({ opacity: '0.4' });
+  vi.unstubAllGlobals();
+});
+
+it('계산된 transform에서 세로 이동을 읽는다', () => {
+  expect(translateYOf('matrix(1, 0, 0, 1, 0, 140)')).toBe(140);
+  expect(translateYOf('matrix(1, 0, 0, 1, 0, -12.5)')).toBe(-12.5);
+  expect(translateYOf('matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 96, 0, 1)')).toBe(96);
+  expect(translateYOf('none')).toBe(0);
+  expect(translateYOf('')).toBe(0);
+  expect(translateYOf(undefined)).toBe(0);
+});
+it('나가는 시간은 남은 거리에 비례해 짧아지되 260ms의 45%보다 짧지 않다', () => {
+  expect(exitMotion(0, 800)).toEqual({ duration: 260, easing: 'cubic-bezier(0.4, 0, 1, 1)' });
+  expect(exitMotion(400, 800).duration).toBe(130);
+  expect(exitMotion(700, 800).duration).toBe(117);
+  expect(exitMotion(900, 800).duration).toBe(117);
+  expect(exitMotion(140, 0)).toEqual({ duration: 260, easing: 'cubic-bezier(0.4, 0, 1, 1)' }); // 높이를 모르면 전과 같다
+});
+it('놓을 때의 속도가 있으면 그 속도로 내려가기 시작한다', () => {
+  // 60px 내려간 시트를 1.2px/ms로 놓았다: 남은 740px을 241ms에(평균 3.07px/ms), 처음 기울기 1.2 / 3.07
+  const flick = exitMotion(60, 800, 1.2);
+  expect(flick.duration).toBe(241);
+  expect(flick.easing).toBe('cubic-bezier(0.4, 0.156, 1, 1)');
+  // 평균보다 빠르게 놓았으면 그 속도에 맞게 더 짧아지고 곧은 선이 된다
+  expect(exitMotion(100, 800, 5)).toEqual({ duration: 140, easing: 'cubic-bezier(0.4, 0.4, 1, 1)' });
+});
+it('적어 둔 놓은 속도는 다음 dismiss가 한 번 쓴다', () => {
+  const { scrim, sheet } = build();
+  Object.defineProperty(sheet, 'offsetHeight', { value: 800 });
+  vi.stubGlobal('getComputedStyle', (el: HTMLElement) => (el === sheet ? { transform: 'matrix(1, 0, 0, 1, 0, 60)' } : { opacity: '0.8' }));
+  noteReleaseVelocity(sheet, 1.2);
+  dismiss(scrim, sheet, { animate: true });
+  const sheetAnimate = (sheet as unknown as { animate: ReturnType<typeof vi.fn> }).animate;
+  expect(sheetAnimate.mock.calls[0][1]).toMatchObject({ duration: 241, easing: 'cubic-bezier(0.4, 0.156, 1, 1)' });
+  expect((scrim as unknown as { animate: ReturnType<typeof vi.fn> }).animate.mock.calls[0][1]).toMatchObject({ duration: 241 });
+  dismiss(scrim, sheet, { animate: true });
+  expect(sheetAnimate.mock.calls[1][1]).toMatchObject({ duration: 241, easing: 'cubic-bezier(0.4, 0, 1, 1)' });
   vi.unstubAllGlobals();
 });

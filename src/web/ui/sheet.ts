@@ -1,7 +1,8 @@
 import { dismiss } from './sheetMotion';
+import { attachSwipeToClose } from './sheetSwipe';
 
 /**
- * 제목줄과 닫기 단추가 있는 시트를 root에 붙인다. 가림막과 Escape로도 닫히고, Tab은 시트 안에서만 돈다.
+ * 제목줄과 닫기 단추가 있는 시트를 root에 붙인다. 가림막과 Escape로도 닫히고, 폰 화면에서는 아래로 끌어도 닫힌다. Tab은 시트 안에서만 돈다.
  * 시트가 열릴 때 초점은 시트로 가고, destroy 때 전에 있던 곳으로 돌아간다. onClose는 한 번만 부른다.
  */
 export function openSheet(
@@ -60,12 +61,14 @@ export function openSheet(
 
   root.append(scrim, sheet);
   document.documentElement.classList.add('sheet-open');
+  const swipe = attachSwipeToClose(sheet, scrim, { onClose: close });
   sheet.focus();
 
   return {
     sheet,
     destroy() {
       document.documentElement.classList.remove('sheet-open');
+      swipe.destroy();
       dismiss(scrim, sheet);
       if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
     },
