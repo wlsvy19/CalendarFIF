@@ -279,6 +279,11 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     byFinger = true;
     fingerDown = e.touches.length > 0;
     const target = e.target;
+    if (e.touches.length === 1) {
+      // 새 손짓이다. 지난 손짓의 touchend를 놓쳤으면(시스템 손짓 등) 그때 단 것이 남아 있으므로 뗀다.
+      fingerListening?.abort();
+      fingerListening = null;
+    }
     if (target && target !== el) {
       fingerListening ??= new AbortController();
       const fingerOpts = { passive: true, signal: fingerListening.signal };
