@@ -1,7 +1,7 @@
 import { shiftMonth } from '../../core/dates';
 import { holidayLabel } from '../../core/holidays';
 import { buildPage, pageMonths, stepPage, type Page } from '../../core/layout';
-import { lunarLabel } from '../../core/lunar';
+import { lunarLabel, lunarShort } from '../../core/lunar';
 import type { Point } from '../../desktop/api';
 import { parseLine, splitLines } from '../../core/text';
 import type { SyncStatus } from '../../sync/engine';
@@ -12,6 +12,7 @@ import { statusText } from './status';
 
 const WIDE_PX = 880;
 const NUMBER_AREA_PX = 30; // 날짜 숫자와 칸 안쪽 여백이 차지하는 높이
+const HOLIDAY_LINE_PX = { narrow: 14, wide: 16 }; // 웹에서 공휴일 이름 줄과 그 위의 틈이 차지하는 높이(styles.css의 .hname)
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
 const chevron = (path: string): string =>
@@ -108,7 +109,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
 
     // 공휴일과 음력은 칸마다 한 번만 계산한다.
     const daysByMonth = new Map<string, ReturnType<CalendarStore['days']>>();
-    const built: { button: HTMLButtonElement; lines: { text: string; done: boolean }[] }[] = [];
+    const built: { button: HTMLButtonElement; lines: { text: string; done: boolean }[]; named: boolean }[] = [];
     const children: HTMLElement[] = [];
     page.rows.forEach((row, rowIndex) => {
       if (a.weekNumbers) children.push(spanOf('wk', String(row.week)));
@@ -139,10 +140,12 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
         const header = spanOf('head', '');
         header.append(spanOf('num', String(c.dayOfMonth)));
         if (holiday !== '') header.append(spanOf('hname', holiday));
-        if (a.lunar) header.append(spanOf('lunar', lunarLabel(c.dateKey)));
+        // 음력 표 밖의 날짜는 적지 않는다. 웹의 좁은 칸에는 '음'을 뺀 짧은 꼴을 쓴다.
+        const lunar = a.lunar ? (custom ? lunarLabel(c.dateKey) : lunarShort(c.dateKey)) : '';
+        if (lunar !== '') header.append(spanOf('lunar', lunar));
         button.append(header);
         children.push(button);
-        built.push({ button, lines: displayLines(value?.text ?? '', lineOpts) });
+        built.push({ button, lines: displayLines(value?.text ?? '', lineOpts), named: holiday !== '' });
       });
     });
     target.replaceChildren(...children);
@@ -161,10 +164,13 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
       lineHeight = window.innerWidth >= WIDE_PX ? 17 : 13;
       used = NUMBER_AREA_PX;
     }
-    const maxLines = cellHeight > 0 ? Math.max(1, Math.floor((cellHeight - used) / lineHeight)) : Infinity;
-    for (const { button, lines } of built) {
+    const linesIn = (taken: number): number => (cellHeight > 0 ? Math.max(1, Math.floor((cellHeight - taken) / lineHeight)) : Infinity);
+    const maxLines = linesIn(used);
+    // 웹에서는 공휴일 이름이 숫자 아래에 한 줄을 차지한다(PC 앱은 숫자 옆에 놓는다).
+    const maxNamedLines = custom ? maxLines : linesIn(used + (window.innerWidth >= WIDE_PX ? HOLIDAY_LINE_PX.wide : HOLIDAY_LINE_PX.narrow));
+    for (const { button, lines, named } of built) {
       if (lines.length === 0) continue;
-      const { shown, more } = visibleLines(lines, maxLines);
+      const { shown, more } = visibleLines(lines, named ? maxNamedLines : maxLines);
       const memo = spanOf('memo', '');
       for (const { done, text } of shown) memo.append(spanOf(done ? 'ln done' : 'ln', text));
       if (more > 0) memo.append(spanOf('ln more', `+${more}`));

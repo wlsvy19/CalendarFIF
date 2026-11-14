@@ -361,8 +361,40 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
 }
 :root[data-theme="dark"] .cell[data-color] { background: color-mix(in srgb, var(--day-color) 45%, var(--surface)); }
 
-/* 날짜 머리: 웹에서는 상자를 만들지 않고, 데스크톱 배치가 .hname과 .lunar를 .num 옆에 놓는다 */
-.head { display: contents; }
+/* 날짜 머리(웹): 숫자 옆에 음력, 그 아래 줄에 공휴일 이름을 놓는다. PC 앱은 desktop.css가 셋을 한 줄에 놓는다. */
+:root:not(.desk) .head { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; }
+/* 음력은 남는 폭만 쓴다. 칸이 좁아 넘치면 앞쪽(달)이 잘리고 날은 남는다. */
+:root:not(.desk) .lunar {
+  order: 1;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  justify-content: flex-end;
+  overflow: hidden;
+  padding-right: 1px;
+  font-size: 9px;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--muted);
+}
+/* 높이를 바꾸면 calendar.ts의 HOLIDAY_LINE_PX도 바꾼다(이름 줄 높이 + 위의 틈 2px). */
+:root:not(.desk) .hname {
+  order: 2;
+  flex: 0 0 100%;
+  min-width: 0;
+  height: 12px;
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 9px;
+  line-height: 12px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  white-space: nowrap;
+  color: var(--sun);
+}
 /* 주 번호 칸: 켜면 격자와 요일 줄이 8열이 된다 */
 .wk {
   display: grid;
@@ -392,9 +424,11 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
 }
 .cell.sun .num { color: var(--sun); }
 .cell.sat .num { color: var(--sat); }
+/* 공휴일과 대체공휴일은 토요일이어도 빨간 날이다 */
+.cell.holiday .num { color: var(--sun); }
 .cell[data-color] .num { color: var(--ink); }
 .cell.today .num { background: var(--accent); color: var(--on-accent); }
-.cell.other .num, .cell.other .memo { opacity: 0.4; }
+.cell.other .num, .cell.other .memo, .cell.other .lunar, .cell.other .hname { opacity: 0.4; }
 
 .memo { display: block; min-height: 0; overflow: hidden; }
 .ln {
@@ -442,6 +476,8 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
   .calendar { padding-bottom: 0; }
   .calendar .cell { padding: 6px 6px 3px; }
   .calendar .ln { height: 17px; font-size: 13px; line-height: 17px; }
+  :root:not(.desk) .calendar .lunar { font-size: 11px; }
+  :root:not(.desk) .calendar .hname { height: 14px; font-size: 11px; line-height: 14px; }
 }
 
 /* 손가락으로 누르는 동안 단추가 반응한다(마우스가 없는 화면에서만). */

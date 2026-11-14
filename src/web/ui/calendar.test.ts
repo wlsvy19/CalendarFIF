@@ -227,6 +227,47 @@ describe('화면 설정', () => {
     expect([has(off, 'shadow'), off.querySelector<HTMLElement>('.app-head')!.hidden]).toEqual([false, true]);
   });
 });
+describe('웹(아이폰 화면)의 음력과 공휴일', () => {
+  function mountWeb(today: string, days: Record<string, DayValue> = {}) {
+    const root = document.createElement('div');
+    const month = today.slice(0, 7);
+    const store = { current: () => month, show: vi.fn(), days: (m: string) => (m === month ? days : {}), onChange: () => () => {}, readProblem: () => null } as unknown as CalendarStore;
+    mountCalendar(root, { store, status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} }, today: () => today, onOpenDay: vi.fn(), onOpenSettings: vi.fn() });
+    return root;
+  }
+  const texts = (el: Element, selector: string) => [...el.querySelectorAll(selector)].map((x) => x.textContent);
+  afterEach(() => vi.restoreAllMocks());
+
+  it('칸마다 음력을 짧게 적고, 공휴일과 대체공휴일은 빨간 날로 표시하고 이름을 적는다', () => {
+    const root = mountWeb('2026-10-01');
+    const of = (key: string) => {
+      const c = cell(root, key);
+      return [has(c, 'holiday'), texts(c, '.hname'), texts(c, '.lunar')];
+    };
+    // 10/3 개천절(토), 10/5 그 대체공휴일(월), 10/6 평일, 10/9 한글날
+    expect([of('2026-10-03'), of('2026-10-05'), of('2026-10-06'), of('2026-10-09')]).toEqual([
+      [true, ['개천절'], ['8.23']],
+      [true, ['대체공휴일'], ['8.25']],
+      [false, [], ['8.26']],
+      [true, ['한글날'], ['8.29']],
+    ]);
+  });
+  it('윤달은 윤을 붙이고, 음력 표 밖의 해는 음력을 적지 않는다', () => {
+    expect(texts(cell(mountWeb('2025-07-25'), '2025-07-25'), '.lunar')).toEqual(['윤6.1']);
+    const far = mountWeb('2060-08-15');
+    expect([texts(cell(far, '2060-08-15'), '.lunar'), texts(cell(far, '2060-08-15'), '.hname')]).toEqual([[], ['광복절']]);
+  });
+  it('공휴일 이름이 한 줄을 쓰므로 그 칸은 메모를 한 줄 덜 보여 준다', () => {
+    // 넓은 화면(happy-dom의 기본 폭): 줄 높이 17, 숫자 자리 30, 이름 줄 16. 칸 높이 115면 평일 5줄, 공휴일 4줄이다.
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(115);
+    const six = { text: ['a', 'b', 'c', 'd', 'e', 'f'].join('\n'), color: '' };
+    const root = mountWeb('2026-10-01', { '05': six, '06': six });
+    expect([texts(cell(root, '2026-10-05'), '.ln'), texts(cell(root, '2026-10-06'), '.ln')]).toEqual([
+      ['a', 'b', 'c', '+3'],
+      ['a', 'b', 'c', 'd', '+2'],
+    ]);
+  });
+});
 describe('구독과 날짜 열기', () => {
   function mountS(a: Partial<Appearance> | undefined) {
     const root = document.createElement('div');

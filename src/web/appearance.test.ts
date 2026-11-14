@@ -11,7 +11,7 @@ describe('appearance', () => {
       calendarBg: '141820', restBg: '3A1F24', todayBorder: '6AA6FF', titleButton: 'FFFFFF', holidayInk: 'FF6B6B',
       lunarInk: '9FB3C8', transparency: 60, weekStart: 0, firstWeek: 'jan1', showRestDays: true, restDays: [0, 6],
     });
-    expect(WEB_APPEARANCE).toEqual({ ...DEFAULT_APPEARANCE, layout: 'month', holidays: false, monthGap: false, shadow: false });
+    expect(WEB_APPEARANCE).toEqual({ ...DEFAULT_APPEARANCE, layout: 'month', holidays: true, lunar: true, monthGap: false, shadow: false });
   });
   it('범위 밖은 범위 안으로, 목록 밖과 틀린 형식은 기본값으로, 색은 대문자 6자리로', () => {
     const a = parseAppearance({ version: 1, maxRows: 12, pastWeeks: -1, cellGap: 30, lineSpacing: 1.333, transparency: 101, weekStart: 7, layout: 'spiral', bullet: 'dot', calendarFont: { color: 'ff0000', size: 40 }, memoFont: 'big' });
