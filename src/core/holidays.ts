@@ -96,7 +96,6 @@ export function parseOfficialHolidays(input: unknown): Record<string, OfficialYe
   return checkYears(input.years);
 }
 
-/** 받아 둔 공휴일 자료를 쓴다. null이나 잘못된 자료를 주면 자료 없이 계산만 한다. */
 let officialVersion = 0;
 
 /** 받은 공휴일 자료를 바꾼 횟수. 화면이 쪽을 다시 그릴지 정할 때 쓴다(자료가 바뀌면 같은 날짜라도 다시 그린다). */
@@ -104,6 +103,7 @@ export function holidayDataVersion(): number {
   return officialVersion;
 }
 
+/** 받아 둔 공휴일 자료를 쓴다. null이나 잘못된 자료를 주면 자료 없이 계산만 한다. */
 export function setOfficialHolidays(years: Record<string, OfficialYear> | null): void {
   official = years === null ? null : checkYears(years);
   tables.clear();

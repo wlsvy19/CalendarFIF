@@ -97,6 +97,8 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
   let moving = false; // 스크롤이 움직이는 중(마지막 scroll 뒤 REST_MS 안)
   let byFinger = false; // 마지막 움직임을 손가락이 시작했다
   let remount = false; // 손가락으로 넘기는 중에 지금 칸이 바뀌어, 쪽을 옮겨 붙이는 일을 미뤘다
+  let fingerDown = false; // 손가락이 화면에 닿아 있다
+  let settleFrame = 0; // 칸에 멈춘 것을 본 다음 프레임에 미룬 일을 하려고 걸어 둔 것
   const deferring = (): boolean => moving && byFinger;
 
   const anchorAt = (i: number): string => (i === currentSlot ? currentAnchor : deps.step(currentAnchor, i - currentSlot));
@@ -135,7 +137,7 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
       const arrived = grid === undefined;
       if (!grid) {
         grid = spare.pop() ?? document.createElement('div');
-        grid.className = 'grid';
+        grid.classList.add('grid'); // 다시 쓰는 쪽의 다른 클래스(음력 좁은 꼴 등)는 그대로 둔다. 그 쪽을 다시 그리지 않을 수도 있다
         slots[i].append(grid);
         pages.set(i, grid);
       }
@@ -165,21 +167,26 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     clearTimeout(restTimer);
     restTimer = setTimeout(rest, REST_MS);
   }
-  // 스크롤이 멈췄다(scrollend나 REST_MS 동안 조용함). 다만 손을 뗀 순간에도 scrollend가 오고 그 뒤에 칸에 맞추는 움직임이
-  // 이어질 수 있으므로, 칸에 맞지 않았으면 조금 더 기다린다(세 번까지). 그 사이 scroll이 오면 기다림은 처음부터 다시 센다.
+  // 스크롤 위치가 칸에 맞는가. 기기 화소가 소수인 화면에서도 맞게 1px까지 봐준다.
+  const onSlot = (): boolean => {
+    const w = width();
+    return w <= 0 || Math.abs(el.scrollLeft - Math.round(el.scrollLeft / w) * w) < 1;
+  };
+  // 스크롤이 멈췄다(scrollend나 REST_MS 동안 조용함, 또는 손을 뗀 뒤 칸에 맞았다). 다만 손을 뗀 순간에도 scrollend가 오고 그 뒤에
+  // 칸에 맞추는 움직임이 이어질 수 있으므로, 칸에 맞지 않았으면 조금 더 기다린다(세 번까지). 그 사이 scroll이 오면 처음부터 다시 센다.
   let settleWaits = 0;
   function rest(): void {
     clearTimeout(restTimer);
+    cancelAnimationFrame(settleFrame);
     pending = null;
-    const w = width();
-    const onSlot = w <= 0 || Math.abs(el.scrollLeft - Math.round(el.scrollLeft / w) * w) < 0.5;
-    if (moving && !onSlot && settleWaits < 3) {
+    if (moving && !onSlot() && settleWaits < 3) {
       settleWaits += 1;
       restTimer = setTimeout(rest, REST_MS);
       return;
     }
     settleWaits = 0;
     moving = false;
+    byFinger = fingerDown; // 손가락이 떠났으면 다음 움직임은 손가락이 시작한 것이 아니다(손을 뗀 채 누르는 트랙패드, 창 크기)
     flush();
   }
 
@@ -207,6 +214,15 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     moving = true;
     settleWaits = 0;
     restLater();
+    // 손을 뗀 뒤 칸에 맞았으면 움직임이 끝난 것이다. 0.15초를 기다리지 않고 다음 프레임에 미룬 일을 한다. 빨리 다시 넘길 때
+    // 들어오는 쪽이 이미 그려져 있게 한다.
+    cancelAnimationFrame(settleFrame);
+    if (byFinger && !fingerDown && pending === null && onSlot()) {
+      const at = el.scrollLeft;
+      settleFrame = requestAnimationFrame(() => {
+        if (moving && el.scrollLeft === at && !fingerDown) rest();
+      });
+    }
     if (placedWidth === null) return;
     const w = width();
     if (w <= 0) return;
@@ -249,6 +265,7 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
   function onTouchStart(e: TouchEvent): void {
     // 움직이기 전에 미뤄 둔 쪽을 그린다. 그래야 이번 손짓에 들어오는 쪽이 옛 내용으로 보이지 않는다.
     byFinger = true;
+    fingerDown = e.touches.length > 0;
     flush();
     pending = null;
     if (!assist) return;
@@ -310,6 +327,16 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
   el.addEventListener('scroll', onScroll, on);
   el.addEventListener('scrollend', rest, on); // 지원하지 않는 브라우저에서는 오지 않고 restLater가 맡는다
   el.addEventListener('touchstart', onTouchStart, on);
+  // 손가락이 떠난 것을 안다(도움과 상관없이). 끄는 중에 손가락 밑의 쪽이 바뀌어도 이벤트는 스크롤 상자로 올라온다(쪽은 미뤄 그린다).
+  const onFingerUp = (e: TouchEvent): void => {
+    if (e.touches.length === 0) fingerDown = false;
+  };
+  el.addEventListener('touchend', onFingerUp, on);
+  el.addEventListener('touchcancel', onFingerUp, on);
+  // 손가락 말고(트랙패드, 마우스) 누를 때도 누르기 전에 미뤄 둔 것을 정리한다. 그래야 누른 칸이 지금 쪽으로 보인다.
+  el.addEventListener('pointerdown', (e: PointerEvent) => {
+    if (e.pointerType !== 'touch') flush();
+  }, on);
   if (assist) {
     el.addEventListener('touchend', onTouchEnd, on);
     el.addEventListener('touchcancel', onTouchCancel, on);
@@ -338,6 +365,7 @@ export function createPager(deps: PagerDeps, env: PagerEnv = {}): Pager {
     },
     busy: deferring,
     destroy() {
+      cancelAnimationFrame(settleFrame);
       listening.abort();
       stopTargetListening();
       stopResize();

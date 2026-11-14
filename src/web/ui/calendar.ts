@@ -330,6 +330,10 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     const title = buildPage(opts, pager.anchor()).title;
     const near = [shiftMonth(title, -1), title, shiftMonth(title, 1)];
     const months = new Set(pager.anchors().flatMap((a) => pageMonths(buildPage(opts, a))));
+    // 한 번 더 넘길 달도 미리 받는다. 손가락으로 넘기는 동안은 구독 바꾸기를 미루므로, 빠르게 두 번 넘기면 두 번째에 들어오는
+    // 쪽의 달이 아직 없어 빈 채로 보였다가 멈춘 뒤에 채워진다.
+    months.add(shiftMonth(title, -2));
+    months.add(shiftMonth(title, 2));
     store.show(title, [...months].filter((m) => !near.includes(m)).sort());
   }
 
@@ -427,6 +431,21 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     relayout();
     redraw();
   };
+  // 창 크기 알림 없이 달력의 높이만 바뀌어도(머리 글자가 두 줄이 되는 등) 칸 크기를 다시 잰다.
+  let pagerHeight = -1;
+  const heightWatch =
+    typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => {
+          const h = pager.el.clientHeight;
+          if (h === pagerHeight) return;
+          const first = pagerHeight < 0;
+          pagerHeight = h;
+          if (first) return;
+          relayout();
+          redraw();
+        })
+      : null;
+  heightWatch?.observe(pager.el);
   window.addEventListener('resize', onResize);
 
   // 창을 켜 둔 채 날짜가 바뀌어도 오늘 표시가 따라가게 한다. 자정 직후의 타이머는 숨은 탭에서 늦어질 수 있어
@@ -483,6 +502,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     },
     destroy() {
       closePicker();
+      heightWatch?.disconnect();
       offChange();
       offStatus();
       window.removeEventListener('online', onConnection);

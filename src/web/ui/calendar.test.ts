@@ -57,12 +57,12 @@ it('달을 넘기고, 날짜를 누르면 알린다', () => {
   expect(store.show).toHaveBeenLastCalledWith('2026-11', ['2026-09', '2027-01']);
   // 폭이 없으면(happy-dom) 단추는 바로 넘긴다. 12월: 11월, 12월, 2027년 1월(12/27~2/6) 쪽
   root.querySelector<HTMLElement>('[aria-label="다음 달"]')!.click();
-  expect(store.show).toHaveBeenLastCalledWith('2026-12', ['2027-02']);
+  expect(store.show).toHaveBeenLastCalledWith('2026-12', ['2026-10', '2027-02']); // 한 번 더 넘길 달(앞뒤 두 달)도 받는다
   // 2027년 1월: 12월, 1월, 2월(1/31~3/6) 쪽
   root.querySelector<HTMLElement>('[aria-label="다음 달"]')!.click();
   expect(store.show).toHaveBeenLastCalledWith('2027-01', ['2026-11', '2027-03']);
   root.querySelector<HTMLElement>('[aria-label="이전 달"]')!.click();
-  expect(store.show).toHaveBeenLastCalledWith('2026-12', ['2027-02']);
+  expect(store.show).toHaveBeenLastCalledWith('2026-12', ['2026-10', '2027-02']); // 한 번 더 넘길 달(앞뒤 두 달)도 받는다
   [...root.querySelectorAll('button')].find((b) => b.textContent === '오늘')!.click();
   expect(store.show).toHaveBeenLastCalledWith('2026-11', ['2026-09', '2027-01']);
   cell(root, '2026-11-20').click();
@@ -159,7 +159,7 @@ describe('달 넘기기', () => {
     scroll(1200 * 400 + 150);
     expect([title(), store.show.mock.lastCall]).toEqual(['11월', ['2026-11', ['2026-09', '2027-01']]]);
     scroll(1200 * 400 + 201);
-    expect([title(), store.show.mock.lastCall]).toEqual(['12월', ['2026-12', ['2027-02']]]);
+    expect([title(), store.show.mock.lastCall]).toEqual(['12월', ['2026-12', ['2026-10', '2027-02']]]);
   });
   it('지금 쪽의 칸을 누르면 그 날을 열고, 옆 쪽의 칸은 열지 않는다', () => {
     const { root, onOpenDay } = scrollMount();
@@ -185,7 +185,7 @@ describe('달 넘기기', () => {
     expect(title()).toBe('11월');
     scroll(1200 * 400 + 260);
     scroll(1201 * 400);
-    expect([title(), store.show.mock.calls]).toEqual(['12월', [['2026-12', ['2027-02']]]]);
+    expect([title(), store.show.mock.calls]).toEqual(['12월', [['2026-12', ['2026-10', '2027-02']]]]);
   });
 });
 
@@ -378,7 +378,7 @@ describe('구독과 날짜 열기', () => {
     store.show.mockClear();
     handle.showMonth('2026-12');
     expect([store.current(), title(root)]).toEqual(['2026-12', '12월']);
-    expect(store.show.mock.calls).toEqual([['2026-12', ['2027-02']]]); // 한 번, 옆 쪽(2027년 1월, 12/27~2/6)이 걸친 2월과 함께
+    expect(store.show.mock.calls).toEqual([['2026-12', ['2026-10', '2027-02']]]); // 한 번, 앞뒤 두 달과 함께
   });
   it('전체 월에서 보이는 달의 날짜를 열면 쪽을 다시 그리지 않는다', () => {
     const { root, store, handle } = mountS(undefined);
@@ -577,5 +577,39 @@ describe('다시 그리기를 줄인다', () => {
     expect(afterHolidays.some((c, i) => c === before[i])).toBe(false);
     window.dispatchEvent(new Event('resize'));
     expect(firsts().some((c, i) => c === afterHolidays[i])).toBe(false);
+  });
+  it('달력의 높이만 바뀌어도(창 크기 알림 없이) 칸 크기를 다시 재서 그린다', () => {
+    let observe: ((entries: unknown[]) => void) | null = null;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: (entries: unknown[]) => void) {
+          observe = cb;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    try {
+      let pagerHeight = 500;
+      vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains('pager') ? pagerHeight : 100;
+      });
+      const months = new Map<string, Record<string, DayValue>>();
+      const store = { current: () => '2026-11', show: vi.fn(), days: (m: string) => months.get(m) ?? {}, onChange: () => () => {}, readProblem: () => null } as unknown as CalendarStore;
+      const root = document.createElement('div');
+      document.body.append(root);
+      mountCalendar(root, { store, status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} }, today: () => '2026-11-13', onOpenDay: vi.fn(), onOpenSettings: vi.fn() }, { pager: { width: () => 400 } });
+      const firsts = () => [...root.querySelectorAll<HTMLElement>('.grid')].map((g) => g.querySelector('.cell'));
+      observe!([]); // 처음 알림은 높이를 적어 두기만 한다
+      const before = firsts();
+      observe!([]);
+      expect(firsts().every((c, i) => c === before[i])).toBe(true); // 높이가 같으면 그대로
+      pagerHeight = 460;
+      observe!([]);
+      expect(firsts().some((c, i) => c === before[i])).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
