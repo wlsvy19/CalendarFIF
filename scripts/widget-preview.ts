@@ -43,6 +43,18 @@ const january: MonthData = {
   },
 };
 
+// 공휴일이 많은 달: 3일 개천절(토), 5일 대체공휴일(월), 9일 한글날(금).
+const october: MonthData = {
+  monthId: '2026-10',
+  days: {
+    '02': { text: '연휴 준비', color: '' },
+    '05': { text: '가족 나들이', color: '' },
+    '06': { text: '회의', color: '' },
+    '09': { text: '산책', color: '2E7D32' },
+    '23': { text: '보고서', color: '' },
+  },
+};
+
 type Shot = { name: string; scene: Scene };
 const make = (family: Family, theme: Theme, month: MonthData, today: string, offline = false): Scene =>
   buildScene({ family, theme, size: widgetSize(SCREEN, family), today, month, offline });
@@ -56,6 +68,8 @@ const shots: Shot[] = [
   { name: 'widget-medium-dark', scene: make('medium', 'dark', november, '2026-11-13') },
   { name: 'widget-small-light', scene: make('small', 'light', november, '2026-11-13') },
   { name: 'widget-small-dark', scene: make('small', 'dark', november, '2026-11-13') },
+  { name: 'widget-large-holidays-light', scene: make('large', 'light', october, '2026-10-23') },
+  { name: 'widget-small-holiday-light', scene: make('small', 'light', october, '2026-10-05') },
   {
     name: 'widget-message-light',
     scene: messageScene({ theme: 'light', size: widgetSize(SCREEN, 'small'), title: 'CalendarFIF', lines: ['Scriptable 앱에서', '이 스크립트를 한 번 실행해', '로그인하세요.'] }),
@@ -70,6 +84,8 @@ const sizeOf = (family: Family) => widgetSize(SCREEN, family);
 const nativeShots: NativeShot[] = [
   { name: 'widget-native-large-light', tree: tree('large', november, '2026-11-13'), theme: 'light', ...sizeOf('large') },
   { name: 'widget-native-large-dark', tree: tree('large', november, '2026-11-13'), theme: 'dark', ...sizeOf('large') },
+  { name: 'widget-native-large-holidays-light', tree: tree('large', october, '2026-10-23'), theme: 'light', ...sizeOf('large') },
+  { name: 'widget-native-small-holiday-dark', tree: tree('small', october, '2026-10-05'), theme: 'dark', ...sizeOf('small') },
   { name: 'widget-native-large-6rows-light', tree: tree('large', january, '2027-01-09'), theme: 'light', ...sizeOf('large') },
   { name: 'widget-native-large-offline-dark', tree: tree('large', november, '2026-11-13', true), theme: 'dark', ...sizeOf('large') },
   { name: 'widget-native-medium-light', tree: tree('medium', november, '2026-11-13'), theme: 'light', ...sizeOf('medium') },

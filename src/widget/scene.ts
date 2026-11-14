@@ -1,4 +1,6 @@
+import { holidayLabel } from '../core/holidays';
 import { buildPage } from '../core/layout';
+import { lunarLabel, lunarShort } from '../core/lunar';
 import type { GridCell } from '../core/dates';
 import type { DayValue } from '../core/types';
 import type { Family, Size } from './sizes';
@@ -46,6 +48,15 @@ function pushMemoLine(draws: Draw[], x: number, y: number, w: number, h: number,
 
 const validColor = (day: DayValue | undefined): string => (day && day.color !== '' && isColor(day.color) ? day.color : '');
 
+// 머리 줄의 작은 글(오늘 칸의 음력, 공휴일 이름)은 자리가 모자라면 여기까지 줄인다. 다른 글은 8 아래로 줄이지 않는다.
+const TIGHT_MIN_FONT = 6.5;
+/** 음력 글('10.5', '윤6.15')의 폭을 글자 크기의 배수로 어림한다. 숫자는 0.6, 점은 0.3, '윤'은 1이다. */
+function lunarUnits(text: string): number {
+  let units = 0;
+  for (const ch of text) units += ch === '.' ? 0.3 : ch === '윤' ? 1 : 0.6;
+  return units;
+}
+
 function pushRect(draws: Draw[], x: number, y: number, w: number, h: number, color: string, extra: { alpha?: number; radius?: number } = {}): void {
   draws.push({ kind: 'rect', x: r2(x), y: r2(y), w: r2(w), h: r2(h), color, ...extra });
 }
@@ -53,7 +64,7 @@ function pushRect(draws: Draw[], x: number, y: number, w: number, h: number, col
 const monthTitle = (monthId: string): string => `${monthId.slice(0, 4)}년 ${Number(monthId.slice(5, 7))}월`;
 const weekdayOfKey = (key: string): number => new Date(Date.UTC(+key.slice(0, 4), +key.slice(5, 7) - 1, +key.slice(8, 10))).getUTCDay();
 
-type Ctx = { draws: Draw[]; p: Palette; theme: Theme; s: number };
+type Ctx = { draws: Draw[]; p: Palette; theme: Theme; s: number; lunar: boolean };
 
 const dowColor = (p: Palette, dow: number): string => (dow === 0 ? p.sun : dow === 6 ? p.sat : p.ink);
 
@@ -80,24 +91,52 @@ function drawCell(c: Ctx, cell: GridCell, x: number, y: number, w: number, h: nu
   const pad = 3 * s;
   const innerW = w - 2 * pad;
   const numSize = 11 * s;
-  const numberColor = hasColor ? p.ink : dowColor(p, cell.dow);
+  // 공휴일과 대체공휴일은 요일과 상관없이 빨간 날이다.
+  const holiday = holidayLabel(cell.dateKey);
+  const numberColor = hasColor ? p.ink : holiday !== '' ? p.sun : dowColor(p, cell.dow);
   const dimmed = cell.inMonth ? {} : { alpha: 0.4 };
   const num = String(cell.dayOfMonth);
 
+  let numberW = estimateWidth(num, numSize);
   if (cell.dateKey === today) {
-    const pillW = Math.min(estimateWidth(num, numSize) + 8 * s, w - 2 * s);
+    const pillW = Math.min(numberW + 8 * s, w - 2 * s);
+    numberW = pillW;
     pushRect(draws, x + 2 * s, y + 1 * s, pillW, 15 * s, p.accent, { radius: 7.5 * s });
     pushText(draws, x + 2 * s, y + 1 * s + 1.1 * s, pillW, 13.5 * s, num, { size: numSize, weight: 'semibold', color: p.onAccent, align: 'center' });
   } else {
     pushText(draws, x + pad, y + pad, innerW, 13.5 * s, num, { size: numSize, weight: 'semibold', color: numberColor, ...dimmed });
   }
+  if (!cell.inMonth) return;
 
-  if (!cell.inMonth || !day) return;
+  // 음력: 머리 줄의 오른쪽. 오늘 칸은 숫자 상자가 넓어서 자리가 모자라면 글자를 6.5까지 줄인다. 그래도 숫자와 겹치면 적지 않는다.
+  const lunar = c.lunar ? lunarShort(cell.dateKey) : '';
+  if (lunar !== '') {
+    const isToday = cell.dateKey === today;
+    // 오늘 칸의 숫자 상자는 안쪽 여백보다 1만큼 앞에서 시작하므로, 그만큼이 숫자와 음력 사이의 틈이 된다.
+    const room = innerW - numberW - (isToday ? 0 : 1 * s);
+    const units = lunarUnits(lunar);
+    let lunarSize = Math.max(MIN_FONT, 7.5 * s);
+    if (isToday && units * lunarSize > room) lunarSize = Math.max(TIGHT_MIN_FONT, room / units);
+    if (units * lunarSize <= room + 1e-9) {
+      draws.push({ kind: 'text', x: r2(x + pad), y: r2(y + pad + 2.5 * s), w: r2(innerW), h: r2(10 * s), text: lunar, size: r2(lunarSize), weight: 'regular', color: p.muted, align: 'right' });
+    }
+  }
+  // 공휴일 이름은 메모 한 줄의 자리를 쓴다.
+  let top = y + 16 * s;
+  if (holiday !== '' && h - 16 * s >= 10.5 * s) {
+    // '대체공휴일'처럼 칸보다 긴 이름은 글자를 줄여 넣고, 그래도 넘치면 뒤를 자른다.
+    const nameSize = Math.max(TIGHT_MIN_FONT, Math.min(Math.max(MIN_FONT, 8 * s), innerW / estimateWidth(holiday, 1)));
+    const fitted = fitText(holiday, nameSize, innerW);
+    if (fitted !== '') draws.push({ kind: 'text', x: r2(x + pad), y: r2(top), w: r2(innerW), h: r2(10.5 * s), text: fitted, size: r2(nameSize), weight: 'semibold', color: p.sun, align: 'left' });
+    top += 10.5 * s;
+  }
+
+  if (!day) return;
   const lineH = 11.5 * s;
   const size = 9 * s;
-  const capacity = Math.min(maxLines, Math.floor((h - 16 * s) / lineH));
+  const capacity = Math.min(maxLines, Math.floor((y + h - top) / lineH));
   const { shown, more } = capLines(memoLines(day.text), capacity);
-  let ly = y + 16 * s;
+  let ly = top;
   for (const line of shown) {
     pushMemoLine(draws, x + pad, ly, innerW, lineH, line, size, p.ink, 0.75 * s);
     ly += lineH;
@@ -109,7 +148,7 @@ function drawCell(c: Ctx, cell: GridCell, x: number, y: number, w: number, h: nu
 function buildGrid(input: Parameters<typeof buildScene>[0], p: Palette): Scene {
   const { family, theme, size, today, month, offline } = input;
   const s = size.width / 364;
-  const c: Ctx = { draws: [], p, theme, s };
+  const c: Ctx = { draws: [], p, theme, s, lunar: input.lunar !== false };
   const pad = 12 * s;
   const gap = 1 * s;
   const gridX = pad;
@@ -148,19 +187,28 @@ function buildSmall(input: Parameters<typeof buildScene>[0], p: Palette): Scene 
 
   const barColor = validColor(day);
   if (barColor !== '') pushRect(draws, 0, 0, 4 * s, size.height, `#${barColor}`);
-  pushText(draws, pad, pad, 46 * s, 41 * s, String(Number(today.slice(8, 10))), { size: 34 * s, weight: 'bold', color: dowColor(p, dow) });
+  const holiday = holidayLabel(today);
+  pushText(draws, pad, pad, 46 * s, 41 * s, String(Number(today.slice(8, 10))), { size: 34 * s, weight: 'bold', color: holiday !== '' ? p.sun : dowColor(p, dow) });
   const labelX = pad + 48 * s;
   const labelW = size.width - labelX - pad;
   pushText(draws, labelX, pad + 4 * s, labelW, 15 * s, `${Number(today.slice(5, 7))}월`, { size: 12 * s, color: p.muted });
   pushText(draws, labelX, pad + 19 * s, labelW, 15 * s, `${WEEKDAYS[dow]}요일`, { size: 12 * s, weight: 'semibold', color: p.muted });
 
+  // 날짜 아래 한 줄: 음력과 공휴일 이름. 둘 다 없으면 줄을 두지 않고 메모가 그 자리에서 시작한다.
+  const under = [input.lunar !== false ? lunarLabel(today) : '', holiday].filter((t) => t !== '').join(' · ');
+  let memoTop = 62 * s;
+  if (under !== '') {
+    pushText(draws, pad, 54 * s, size.width - 2 * pad, 13 * s, under, { size: 10 * s, color: holiday !== '' ? p.sun : p.muted });
+    memoTop = 70 * s;
+  }
   const lineH = 14.5 * s;
   const lines = day ? memoLines(day.text) : [];
   if (lines.length === 0) {
-    pushText(draws, pad, 62 * s, size.width - 2 * pad, lineH, '메모 없음', { size: 11 * s, color: p.muted });
+    pushText(draws, pad, memoTop, size.width - 2 * pad, lineH, '메모 없음', { size: 11 * s, color: p.muted });
   } else {
-    const { shown, more } = capLines(lines, 6);
-    let y = 62 * s;
+    // 아래 줄이 있으면 메모 한 줄을 덜 넣는다(넘치지 않게).
+    const { shown, more } = capLines(lines, under === '' ? 6 : 5);
+    let y = memoTop;
     for (const line of shown) {
       pushMemoLine(draws, pad, y, size.width - 2 * pad, lineH, line, 11 * s, p.ink, 0.75 * s);
       y += lineH;
@@ -178,6 +226,7 @@ export function buildScene(input: {
   today: string; // 'YYYY-MM-DD'
   month: MonthData; // 오늘이 속한 달
   offline: boolean; // 보관해 둔 자료를 그리는 중인가
+  lunar?: boolean; // 음력을 적을지(없으면 적는다). 공휴일은 늘 표시한다
 }): Scene {
   const p = PALETTES[input.theme];
   return input.family === 'small' ? buildSmall(input, p) : buildGrid(input, p);

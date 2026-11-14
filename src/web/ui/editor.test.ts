@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import type { DayValue } from '../../core/types';
 import { mountEditor } from './editor';
+import { swipeDown } from './fakeSwipe';
 
 function mount(value: DayValue) {
   const root = document.createElement('div');
@@ -83,6 +84,38 @@ it('바깥을 누르면 고친 것이 없을 때만 닫는다', () => {
   untouched.root.querySelector<HTMLElement>('.scrim')!.click();
   expect(untouched.onCancel).toHaveBeenCalledTimes(1);
 });
+it('폰 화면에서 아래로 끌어 닫으면 고친 것이 있을 때 저장하고 없으면 취소한다', () => {
+  const untouched = mount({ text: 'a', color: 'F12424' });
+  swipeDown(untouched.root.querySelector('.sheet-bar h3')!);
+  expect(untouched.onCancel).toHaveBeenCalledTimes(1);
+  expect(untouched.onSave).not.toHaveBeenCalled();
+  const typed = mount({ text: 'a', color: '' });
+  typed.area.value = 'a\nb  ';
+  swipeDown(typed.root.querySelector('.sheet-bar h3')!);
+  expect(typed.onSave).toHaveBeenCalledWith({ text: 'a\nb', color: '' });
+  expect(typed.onCancel).not.toHaveBeenCalled();
+  const recoloured = mount({ text: 'a', color: '' });
+  recoloured.root.querySelector<HTMLElement>('[role="radio"][data-color="009300"]')!.click();
+  swipeDown(recoloured.area);
+  expect(recoloured.onSave).toHaveBeenCalledWith({ text: 'a', color: '009300' });
+});
+it('끌어 닫은 뒤에 저장 단추가 눌려도 한 번만 전달된다', () => {
+  const { root, area, button, onSave, onCancel } = mount({ text: '', color: '' });
+  area.value = 'x';
+  swipeDown(root.querySelector('.sheet-bar h3')!);
+  button('저장').click();
+  button('취소').click();
+  expect(onSave).toHaveBeenCalledTimes(1);
+  expect(onCancel).not.toHaveBeenCalled();
+});
+it('PC 앱(html.desk)에서는 끌어도 닫히지 않는다', () => {
+  document.documentElement.classList.add('desk');
+  const { root, onCancel } = mount({ text: '', color: '' });
+  swipeDown(root.querySelector('.sheet-bar h3')!);
+  expect(onCancel).not.toHaveBeenCalled();
+  expect(root.querySelector<HTMLElement>('.sheet')!.style.transform).toBe('');
+  document.documentElement.classList.remove('desk');
+});
 it('보이는 영역의 높이와 위치를 편집 화면에 넘긴다', () => {
   const listeners = new Map<string, Set<() => void>>();
   const viewport = {
@@ -132,4 +165,19 @@ it('끌기 연결 함수를 받았을 때만(PC 앱) 시트와 제목 줄을 넘
   expect(attachDrag).toHaveBeenCalledWith(pc.querySelector('.sheet'), pc.querySelector('.sheet-bar'));
   handle.destroy();
   expect(end).toHaveBeenCalled();
+});
+
+it('제목 아래에 그날의 음력과 공휴일 이름을 적는다. 둘 다 없으면 줄을 숨긴다', () => {
+  const noteOf = (note?: { lunar: string; holiday: string }) => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    mountEditor(root, { dateKey: '2026-10-05', value: { text: '', color: '' }, note, onSave: vi.fn(), onCancel: vi.fn() });
+    const el = root.querySelector<HTMLElement>('.sheet-note')!;
+    return [el.hidden, [...el.children].map((c) => [c.className, c.textContent])];
+  };
+  expect(noteOf({ lunar: '음력 8월 25일', holiday: '대체공휴일' })).toEqual([false, [['note-lunar', '음력 8월 25일'], ['note-holiday', '대체공휴일']]]);
+  expect(noteOf({ lunar: '', holiday: '대체공휴일' })).toEqual([false, [['note-holiday', '대체공휴일']]]);
+  expect(noteOf({ lunar: '음력 8월 25일', holiday: '' })).toEqual([false, [['note-lunar', '음력 8월 25일']]]);
+  expect(noteOf({ lunar: '', holiday: '' })).toEqual([true, []]);
+  expect(noteOf()).toEqual([true, []]);
 });

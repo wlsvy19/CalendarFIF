@@ -88,9 +88,7 @@
   color: var(--desk-memo-ink);
 }
 :root.desk .calendar.shadow { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85); }
-:root.desk .calendar[data-bullet="number"] .memo { counter-reset: ln; }
-:root.desk .calendar[data-bullet="number"] .ln:not(.more)::before { counter-increment: ln; content: counter(ln) ". "; }
-:root.desk .calendar[data-bullet="dot"] .ln:not(.more)::before { content: "• "; }
+/* 줄 머리 기호(숫자, 점)는 styles.css에 있다(웹앱과 같이 쓴다). */
 :root.desk.content-hidden .memo { visibility: hidden; }
 
 /* 편집과 설정 시트: 창 폭과 상관없이 가운데 상자. 창이 520px보다 좁으면 가장자리에 12px씩 남긴다. */

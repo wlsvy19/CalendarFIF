@@ -1,5 +1,7 @@
 import { isColor } from '../core/color';
+import { holidayLabel } from '../core/holidays';
 import { buildPage } from '../core/layout';
+import { lunarLabel, lunarShort } from '../core/lunar';
 import type { GridCell } from '../core/dates';
 import type { DayValue } from '../core/types';
 import type { MonthData } from './scene';
@@ -59,20 +61,36 @@ function weekdayRow(): StackNode {
   };
 }
 
-type CellLayout = { innerWidth: number; capacity: number };
+type CellLayout = { innerWidth: number; capacity: number; lunar: boolean };
 
 function dayCell(cell: GridCell, day: DayValue | undefined, today: string, lay: CellLayout): StackNode {
   const color = validColor(day);
   const hasColor = color !== '';
-  const numberText = text(String(cell.dayOfMonth), 11, 'semibold', cell.dateKey === today ? C.onAccent : hasColor ? C.ink : dowColor(cell.dow), 1, cell.inMonth ? {} : { opacity: 0.4 });
+  // 공휴일과 대체공휴일은 요일과 상관없이 빨간 날이다.
+  const holiday = holidayLabel(cell.dateKey);
+  const numberColor = cell.dateKey === today ? C.onAccent : hasColor ? C.ink : holiday !== '' ? C.sun : dowColor(cell.dow);
+  const numberText = text(String(cell.dayOfMonth), 11, 'semibold', numberColor, 1, cell.inMonth ? {} : { opacity: 0.4 });
+  // 머리 줄: 숫자는 앞쪽, 음력은 뒤쪽 가장자리. 이번 달의 칸에만 음력과 공휴일 이름을 적는다.
+  const lunar = lay.lunar && cell.inMonth ? lunarShort(cell.dateKey) : '';
+  // 오늘 표시: 음력을 같이 적는 두 자리 날은 옆 여백을 줄인다. 칸의 안쪽 폭이 40pt쯤이라 숫자 상자가 넓으면 음력이 잘린다.
+  const pillPad = lunar !== '' && cell.dayOfMonth >= 10 ? 2.5 : 4;
   const number: Node = cell.dateKey === today
-    ? { kind: 'stack', dir: 'h', background: C.accent, radius: 7.5, padding: [1, 4, 1, 4], children: [numberText] }
+    ? { kind: 'stack', dir: 'h', background: C.accent, radius: 7.5, padding: [1, pillPad, 1, pillPad], children: [numberText] }
     : numberText;
-  const children: Node[] = [leading(number)];
-  if (cell.inMonth && day && lay.capacity > 0) {
+  const head: Node[] = [number, flex()];
+  // 폭이 모자라면 iOS가 글자를 이만큼까지 줄인다. 그래도 안 들어가면 "…"로 자른다.
+  if (lunar !== '') head.push(text(lunar, 7.5, 'regular', C.muted, 1, { minScale: 0.7 }));
+  const children: Node[] = [{ kind: 'stack', dir: 'h', align: 'center', children: head }];
+  // 공휴일 이름은 메모 한 줄의 자리를 쓴다.
+  let capacity = lay.capacity;
+  if (cell.inMonth && holiday !== '' && capacity > 0) {
+    children.push(leading(text(holiday, 8, 'semibold', C.sun, 1, { minScale: 0.8 })));
+    capacity -= 1;
+  }
+  if (cell.inMonth && day && capacity > 0) {
     // 줄마다 한 줄짜리 글이다. 실제 폭이 어림보다 좁으면 iOS가 조금 줄이고, 그래도 넘치면 "…"로 자른다(다음 줄로 접지 않는다).
     const memo = (t: string, extra: Partial<TextNode> = {}): Node => leading(text(t, 9, 'regular', C.ink, 1, { minScale: 0.9, ...extra }));
-    const { shown, more } = capLines(memoLines(day.text), lay.capacity);
+    const { shown, more } = capLines(memoLines(day.text), capacity);
     for (const l of shown) {
       children.push(l.done ? memo(fitText(DONE_MARK + l.text, 9, lay.innerWidth), { opacity: 0.55 }) : memo(fitText(l.text, 9, lay.innerWidth)));
     }
@@ -92,7 +110,7 @@ function weekRow(cells: GridCell[], month: MonthData, today: string, lay: CellLa
   };
 }
 
-function gridTree(input: { family: Family; size: Size; today: string; month: MonthData; offline: boolean }): Tree {
+function gridTree(input: TreeInput): Tree {
   const { family, size, today, month, offline } = input;
   const rows = family === 'medium'
     ? buildPage({ ...MONTH_OPTS, layout: 'week' }, today).rows
@@ -102,6 +120,7 @@ function gridTree(input: { family: Family; size: Size; today: string; month: Mon
   const lay: CellLayout = {
     innerWidth: (size.width - 24 - 6) / 7 - 4,
     capacity: Math.min(family === 'medium' ? 6 : Infinity, Math.max(0, Math.floor((cellHeight - 4 - 15 - 2) / 11))),
+    lunar: input.lunar !== false,
   };
   return {
     background: C.surface, padding: [12, 12, 12, 12], spacing: 0,
@@ -115,9 +134,12 @@ function gridTree(input: { family: Family; size: Size; today: string; month: Mon
   };
 }
 
-function smallTree(input: { today: string; month: MonthData; offline: boolean }): Tree {
+function smallTree(input: TreeInput): Tree {
   const { today, month, offline } = input;
   const dow = weekdayOfKey(today);
+  const holiday = holidayLabel(today);
+  // 날짜 아래 한 줄: 음력과 공휴일 이름. 둘 다 없으면 줄을 두지 않는다.
+  const under = [input.lunar !== false ? lunarLabel(today) : '', holiday].filter((t) => t !== '').join(' · ');
   const day = month.days[today.slice(8, 10)];
   const color = validColor(day);
   const lines = day ? memoLines(day.text) : [];
@@ -125,7 +147,8 @@ function smallTree(input: { today: string; month: MonthData; offline: boolean })
   if (lines.length === 0) {
     memo.push(leading(text('메모 없음', 11, 'regular', C.muted, 1)));
   } else {
-    const { shown, more } = capLines(lines, 6);
+    // 날짜 아래 줄이 있으면 메모 한 줄을 덜 넣는다(작은 위젯의 높이를 넘지 않게).
+    const { shown, more } = capLines(lines, under === '' ? 6 : 5);
     for (const l of shown) memo.push(leading(l.done ? text(DONE_MARK + l.text, 11, 'regular', C.ink, 1, { opacity: 0.55 }) : text(l.text, 11, 'regular', C.ink, 1)));
     if (more > 0) memo.push(leading(text(`+${more}`, 11, 'regular', C.muted, 1)));
   }
@@ -133,11 +156,12 @@ function smallTree(input: { today: string; month: MonthData; offline: boolean })
     {
       kind: 'stack', dir: 'h', spacing: 8, align: 'center',
       children: [
-        text(String(Number(today.slice(8, 10))), 34, 'bold', dowColor(dow), 1),
+        text(String(Number(today.slice(8, 10))), 34, 'bold', holiday !== '' ? C.sun : dowColor(dow), 1),
         { kind: 'stack', dir: 'v', children: [text(`${Number(today.slice(5, 7))}월`, 12, 'regular', C.muted, 1), text(`${WEEKDAYS[dow]}요일`, 12, 'semibold', C.muted, 1)] },
         flex(),
       ],
     },
+    ...(under === '' ? [] : [leading(text(under, 10, 'regular', holiday !== '' ? C.sun : C.muted, 1, { minScale: 0.8 }))]),
     fixed(6),
     ...memo,
     flex(),
@@ -146,8 +170,11 @@ function smallTree(input: { today: string; month: MonthData; offline: boolean })
   return { background: color !== '' ? dayPair(color) : C.surface, padding: [12, 12, 12, 12], spacing: 0, children };
 }
 
+/** lunar: 음력을 적을지(없으면 적는다). 공휴일은 늘 표시한다. */
+export type TreeInput = { family: Family; size: Size; today: string; month: MonthData; offline: boolean; lunar?: boolean };
+
 /** 위젯에 놓을 것을 정한다. size는 줄 수와 글자 수를 가늠하는 데만 쓰고, 나무의 어느 것도 고정된 크기를 갖지 않는다. */
-export function buildTree(input: { family: Family; size: Size; today: string; month: MonthData; offline: boolean }): Tree {
+export function buildTree(input: TreeInput): Tree {
   return input.family === 'small' ? smallTree(input) : gridTree(input);
 }
 

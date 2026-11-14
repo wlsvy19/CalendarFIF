@@ -83,8 +83,9 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     results.push({ name, ok, seen });
     console.log(`${ok ? '통과' : '실패'}: ${name} (${seen})`);
   };
-  const touch = (type: string, x?: number, y?: number) =>
-    cdp.send('Input.dispatchTouchEvent', { type, touchPoints: x === undefined ? [] : [{ x, y, id: 1 }] });
+  /** timestamp(초, 1970년부터)를 주면 그것이 이벤트가 일어난 시각이 된다. */
+  const touch = (type: string, x?: number, y?: number, timestamp?: number) =>
+    cdp.send('Input.dispatchTouchEvent', { type, touchPoints: x === undefined ? [] : [{ x, y, id: 1 }], ...(timestamp === undefined ? {} : { timestamp }) });
   const view = () => cdp.evaluate<View>(VIEW_JS);
   /** elementJs는 요소 하나를 돌려주는 식이다. */
   const center = (elementJs: string) =>
@@ -152,9 +153,15 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   await cdp.send('Page.enable');
   await emulatePhone(cdp);
   await cdp.send('Page.navigate', { url });
-  for (let i = 0; i < 100; i++) {
-    if (await cdp.evaluate<boolean>("!!document.querySelector('.grid.current .cell')").catch(() => false)) break;
-    await sleep(300);
+  let calendarUp = false;
+  for (let i = 0; i < 100 && !calendarUp; i++) {
+    calendarUp = await cdp.evaluate<boolean>("!!document.querySelector('.grid.current .cell')").catch(() => false);
+    if (!calendarUp) await sleep(300);
+  }
+  // 달력이 끝내 뜨지 않으면 무엇이 보였는지 적고 멈춘다(뒤의 확인이 엉뚱한 오류로 죽지 않게).
+  if (!calendarUp) {
+    const seen = await cdp.evaluate<string>('document.body.innerText').catch(() => '');
+    throw new Error(`30초 안에 달력이 뜨지 않았다. 화면의 글: ${seen.replace(/\s+/g, ' ').slice(0, 200) || '(없음)'}`);
   }
   await sleep(1500); // 첫 자리 잡기와 첫 스냅숏이 끝나게 한다
   await cdp.evaluate(RECORDER_JS);
@@ -285,6 +292,341 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     `top ${tops.map((t) => (t === null ? '없음' : Math.round(t))).join(', ')}px, 500ms 뒤 .sheet/.scrim ${goneAfter}개`,
   );
 
+  // 끌어 내려 닫기(sheetSwipe.ts): 끄는 동안 시트가 손가락을 따라오고, 놓으면 닫히거나 제자리로 돌아간다.
+  type SheetNow = { top: number; inline: string; moving: boolean } | null;
+  const sheetNow = () =>
+    cdp.evaluate<SheetNow>(
+      "(() => { const s = document.querySelector('.sheet'); return s ? { top: s.getBoundingClientRect().top, inline: s.style.transform, moving: s.getAnimations().some((a) => a.playState === 'running') } : null; })()",
+    );
+  const px = (n: number | null | undefined) => (n === null || n === undefined ? '없음' : `${Math.round(n * 10) / 10}px`);
+  // 저장은 먼저 대기열(localStorage의 calfif.outbox.*)에 적힌다. 적힌 횟수를 센다.
+  await cdp.evaluate(`(() => {
+    if (window.__outboxWrites !== undefined) return;
+    window.__outboxWrites = 0;
+    const set = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) { if (String(k).startsWith('calfif.outbox.')) window.__outboxWrites++; return set.call(this, k, v); };
+  })()`);
+  const outboxWrites = () => cdp.evaluate<number>('window.__outboxWrites');
+  const cellText = () => cdp.evaluate<string>(`(${dayCell}).textContent`);
+  /** 시트가 나타나 자리를 잡을 때까지 기다린 뒤 멈춘 자리(top)를 돌려준다. 나타나지 않으면 null. */
+  async function sheetSettled(): Promise<number | null> {
+    if ((await cdp.evaluate<number | null>(SHEET_TOP_JS(0))) === null) return null;
+    await sleep(700);
+    return (await sheetNow())?.top ?? null;
+  }
+  const openDay = async (): Promise<number | null> => {
+    await tap(await center(dayCell));
+    return sheetSettled();
+  };
+  /** from에서 아래로 dy만큼 steps번에 나눠 끌고, holdMs만큼 멈췄다가 뗀다. follow이면 걸음마다 시트의 top을 읽는다. */
+  async function pull(
+    from: { x: number; y: number },
+    dy: number,
+    steps: number,
+    opts: { holdMs?: number; follow?: boolean } = {},
+  ): Promise<{ follow: Array<{ finger: number; top: number | null }> }> {
+    const follow: Array<{ finger: number; top: number | null }> = [];
+    await touch('touchStart', from.x, from.y);
+    for (let i = 1; i <= steps; i++) {
+      const finger = (dy * i) / steps;
+      await touch('touchMove', from.x, from.y + finger);
+      if (opts.follow) follow.push({ finger, top: (await sheetNow())?.top ?? null });
+      await sleep(MOVE_GAP_MS);
+    }
+    if (opts.holdMs) await sleep(opts.holdMs);
+    await touch('touchEnd');
+    if (!opts.holdMs) releasedMovingAt = Date.now();
+    return { follow };
+  }
+  /**
+   * 걸음마다 읽은 시트 자리가 손가락을 따라갔는가. 움직이기 시작한 뒤로는 걸음마다 손가락과 같은 만큼(±1.5px) 내려가고,
+   * 처음 움직일 때 한 걸음보다 크게 튀지 않으며, 끝에서 손가락보다 25px 넘게 뒤처지지 않아야 한다.
+   * Chromium은 처음 몇 px(이 확인에서는 10px)의 touchmove를 페이지에 보내지 않으므로 시트는 그만큼 늦게 출발한다.
+   */
+  function followed(samples: Array<{ finger: number; top: number | null }>, rest: number | null, step: number): { ok: boolean; text: string } {
+    if (rest === null || samples.length === 0 || samples.some((s) => s.top === null)) return { ok: false, text: '시트를 읽지 못함' };
+    const offsets = samples.map((s) => (s.top as number) - rest);
+    let worst = 0;
+    let start = -1;
+    offsets.forEach((o, i) => {
+      const before = i === 0 ? 0 : offsets[i - 1];
+      const d = o - before;
+      worst = Math.max(worst, before > 0.5 ? Math.abs(d - step) : Math.max(0, d - step), o < -0.5 ? -o : 0);
+      if (start < 0 && o > 0.5) start = i;
+    });
+    const lag = samples[samples.length - 1].finger - offsets[offsets.length - 1];
+    const r = (n: number) => Math.round(n * 10) / 10;
+    return {
+      ok: worst <= 1.5 && lag <= 25,
+      text: `${samples.length}걸음 중 ${start + 1}번째부터 움직임, 걸음마다 손가락과 어긋난 값 최대 ${r(worst)}px, 끝에서 손가락보다 ${r(lag)}px 뒤`,
+    };
+  }
+  const titleBar = () => center($('.sheet .sheet-bar h3'));
+
+  const restA = await openDay();
+  const grabber = await cdp.evaluate<{ content: string; width: string; height: string; color: string; barTop: number } | null>(`(() => {
+    const s = document.querySelector('.sheet');
+    if (!s) return null;
+    const b = getComputedStyle(s, '::before');
+    return { content: b.content, width: b.width, height: b.height, color: b.backgroundColor, barTop: s.querySelector('.sheet-bar').getBoundingClientRect().top - s.getBoundingClientRect().top };
+  })()`);
+  record(
+    '폰 화면의 시트 위 가운데에 손잡이 막대(36x5px)가 있고 제목 줄은 그 아래에서 시작한다',
+    grabber !== null && grabber.content !== 'none' && grabber.width === '36px' && grabber.height === '5px' && grabber.barTop >= 15,
+    grabber ? `막대 ${grabber.width} x ${grabber.height}, 색 ${grabber.color}, 제목 줄은 시트 위에서 ${Math.round(grabber.barTop)}px` : '시트 없음',
+  );
+  const beforeA = { text: await cellText(), writes: await outboxWrites() };
+  const slow = await pull(await titleBar(), 300, 30, { holdMs: 150, follow: true });
+  await sleep(600);
+  const afterA = { sheet: await sheetNow(), text: await cellText(), writes: await outboxWrites() };
+  const followA = followed(slow.follow, restA, 10);
+  record(
+    '편집 화면을 제목 줄에서 천천히 300px 끌어 내리면 시트가 손가락을 따라오고, 놓으면 닫히며 아무것도 저장하지 않는다',
+    followA.ok && slow.follow.length === 30 && afterA.sheet === null && afterA.text === beforeA.text && afterA.writes === beforeA.writes,
+    `멈춘 자리 ${px(restA)}, 끄는 동안 top ${slow.follow.slice(0, 4).map((s) => px(s.top)).join(', ')}..${px(slow.follow.at(-1)?.top)}(${followA.text}), 놓은 뒤 시트 ${afterA.sheet ? '있음' : '없음'}, 칸 글 ${afterA.text === beforeA.text ? '그대로' : '바뀜'}, 대기열 쓰기 ${afterA.writes - beforeA.writes}번`,
+  );
+
+  const restB = await openDay();
+  await pull(await titleBar(), 40, 8, { holdMs: 150 });
+  const springing = await sheetNow();
+  await sleep(400);
+  const settledB = await sheetNow();
+  const swatch = "document.querySelectorAll('.sheet .swatch')[3]";
+  await tap(await center(swatch));
+  await sleep(150);
+  const picked = await cdp.evaluate<boolean>(`(${swatch})?.getAttribute('aria-checked') === 'true'`);
+  record(
+    '40px만 끌고 멈췄다 놓으면 닫히지 않고 제자리로 돌아가며, 그 뒤에도 색 단추가 눌린다',
+    restB !== null && springing !== null && springing.moving && settledB !== null && Math.abs(settledB.top - restB) <= 1 && settledB.inline === '' && !settledB.moving && picked,
+    `멈춘 자리 ${px(restB)}, 놓은 직후 ${springing ? `top ${px(springing.top)}, 움직임 ${springing.moving ? '있음' : '없음'}` : '시트 없음'}, 400ms 뒤 ${settledB ? `top ${px(settledB.top)}, inline transform ${settledB.inline === '' ? '없음' : settledB.inline}` : '시트 없음'}, 색 단추 ${picked ? '눌림' : '안 눌림'}`,
+  );
+  if (settledB) {
+    await tap(await center($('.sheet .textbtn.start'))); // 색을 바꿨으므로 취소로 닫는다
+    await sleep(600);
+  }
+
+  const typed = '끌어 닫기로 저장';
+  await openDay();
+  await tap(await center($('.sheet textarea')));
+  await sleep(200);
+  await cdp.send('Input.insertText', { text: typed });
+  const typedValue = await cdp.evaluate<string>("document.querySelector('.sheet textarea')?.value ?? ''");
+  const writesC = await outboxWrites();
+  await pull(await titleBar(), 300, 30, { holdMs: 150 });
+  await sleep(800);
+  const afterC = { sheet: await sheetNow(), text: await cellText(), writes: await outboxWrites() };
+  record(
+    '메모를 적고 아래로 끌어 닫으면 저장되어 날짜 칸에 보인다',
+    typedValue.includes(typed) && afterC.sheet === null && afterC.text.includes(typed) && afterC.writes > writesC,
+    `메모 칸 ${typedValue.includes(typed) ? '적힘' : '안 적힘'}, 놓은 뒤 시트 ${afterC.sheet ? '있음' : '없음'}, 칸에 ${afterC.text.includes(typed) ? '보임' : '안 보임'}, 대기열 쓰기 ${afterC.writes - writesC}번`,
+  );
+
+  // DevTools로 보내는 터치 하나가 30~40ms 걸려서 그대로 보내면 빠르게 튕긴 손가락이 되지 않는다. 그래서 일어난 시각을
+  // 60Hz 간격(16ms)으로 적어 보낸다. 시트는 놓을 때의 속도를 이벤트가 일어난 시각(timeStamp)으로 잰다.
+  const restD = await openDay();
+  const flickFrom = await titleBar();
+  const flickAt = Date.now() / 1000;
+  await touch('touchStart', flickFrom.x, flickFrom.y, flickAt);
+  for (let i = 1; i <= 3; i++) await touch('touchMove', flickFrom.x, flickFrom.y + 24 * i, flickAt + 0.016 * i);
+  await touch('touchEnd', undefined, undefined, flickAt + 0.056);
+  releasedMovingAt = Date.now();
+  const flickTops = await cdp.evaluate<Array<number | null>>(
+    `new Promise((resolve) => { const out = []; let n = 0; const read = () => { const s = document.querySelector('.sheet'); out.push(s ? s.getBoundingClientRect().top : null); if (++n < 6) setTimeout(read, 40); else resolve(out); }; read(); })`,
+  );
+  await sleep(500);
+  const afterD = await sheetNow();
+  const seenD = flickTops.filter((t): t is number => t !== null);
+  record(
+    '제목 줄을 72px만 빠르게 튕겨 내려도 닫히고, 내려가는 동안 위로 돌아가지 않는다',
+    restD !== null && afterD === null && seenD.every((t, i) => i === 0 || t >= seenD[i - 1]),
+    `72px을 56ms에 끌고 놓음, 놓은 뒤 top ${flickTops.map((t) => (t === null ? '없음' : Math.round(t))).join(', ')}px, 700ms 뒤 시트 ${afterD ? '있음' : '없음'}`,
+  );
+
+  const restE = await openDay();
+  const area = $('.sheet textarea');
+  const scrollBefore = await cdp.evaluate<number>(
+    `(() => { const a = ${area}; a.value = Array.from({ length: 60 }, (_, i) => '줄 ' + (i + 1)).join('\\n'); a.scrollTop = a.scrollHeight; return a.scrollTop; })()`,
+  );
+  const inArea = await pull(await center(area), 150, 15, { holdMs: 150, follow: true });
+  await sleep(300);
+  const scrollAfter = await cdp.evaluate<number>(`${area}.scrollTop`);
+  const afterE = await sheetNow();
+  const worstE = restE === null ? Infinity : inArea.follow.reduce((w, s) => Math.max(w, s.top === null ? Infinity : Math.abs(s.top - restE)), 0);
+  record(
+    '긴 메모를 아래까지 내린 채 메모 칸에서 아래로 끌면 메모만 스크롤되고 시트는 움직이지 않는다',
+    restE !== null && scrollBefore > 200 && scrollAfter < scrollBefore - 50 && worstE <= 0.5 && afterE !== null && Math.abs(afterE.top - restE) <= 0.5,
+    `메모 스크롤 ${Math.round(scrollBefore)} -> ${Math.round(scrollAfter)}px, 끄는 동안 시트가 멈춘 자리에서 가장 크게 벗어난 값 ${px(worstE)}, 뗀 뒤 시트 ${afterE ? `top ${px(afterE.top)}` : '없음'}`,
+  );
+  if (afterE) {
+    await tap(await center($('.sheet .textbtn.start')));
+    await sleep(600);
+  }
+
+  const gear = $('[aria-label="설정"]');
+  await tap(await center(gear));
+  const restF = await sheetSettled();
+  await pull(await titleBar(), 300, 30, { holdMs: 150 });
+  await sleep(600);
+  const settingsGone = (await sheetNow()) === null;
+  await tap(await center(gear));
+  const restF2 = await sheetSettled();
+  // 목록이 시트보다 길어야 스크롤된다. 위젯 설치 방법을 펼치고, 그래도 짧으면 시험용 빈 칸을 덧붙인다.
+  const listBefore = await cdp.evaluate<{ top: number; padded: boolean } | null>(`(() => {
+    const s = document.querySelector('.sheet.settings');
+    if (!s) return null;
+    const d = s.querySelector('details');
+    if (d) d.open = true;
+    let padded = false;
+    if (s.scrollHeight - s.clientHeight < 300) { const pad = document.createElement('div'); pad.style.cssText = 'flex: none; height: 600px'; s.append(pad); padded = true; }
+    s.scrollTop = 300;
+    return { top: s.scrollTop, padded };
+  })()`);
+  const onList = await pull({ x: Math.round(PHONE.width / 2), y: 460 }, 150, 15, { holdMs: 150, follow: true });
+  await sleep(300);
+  const listAfter = await cdp.evaluate<number | null>("document.querySelector('.sheet.settings')?.scrollTop ?? null");
+  const afterF = await sheetNow();
+  const worstF = restF2 === null ? Infinity : onList.follow.reduce((w, s) => Math.max(w, s.top === null ? Infinity : Math.abs(s.top - restF2)), 0);
+  record(
+    '설정도 제목 줄에서 끌어 내리면 닫히고, 목록이 내려가 있으면 아래로 끌어도 목록만 스크롤된다',
+    restF !== null && settingsGone && restF2 !== null && listBefore !== null && listAfter !== null && listAfter < listBefore.top - 50 && worstF <= 0.5 && afterF !== null,
+    `끌어 닫은 뒤 설정 ${settingsGone ? '없음' : '있음'}, 목록 스크롤 ${listBefore ? Math.round(listBefore.top) : '없음'} -> ${listAfter === null ? '없음' : Math.round(listAfter)}px${listBefore?.padded ? '(시험용 빈 칸을 덧붙임)' : ''}, 끄는 동안 시트가 벗어난 값 ${px(worstF)}, 뗀 뒤 설정 ${afterF ? '열림' : '없음'}`,
+  );
+  // 목록을 내린 채로도 제목 줄은 시트 맨 위에 붙어 있고, 제목 줄을 잡고 끌어 내리면 닫힌다.
+  const stuck = await cdp.evaluate<{ scrollTop: number; barTop: number; barBottom: number; closeVisible: boolean } | null>(`(() => {
+    const s = document.querySelector('.sheet.settings');
+    if (!s) return null;
+    s.scrollTop = 300;
+    const sheet = s.getBoundingClientRect();
+    const bar = s.querySelector('.sheet-bar').getBoundingClientRect();
+    const close = s.querySelector('.sheet-bar .textbtn.end').getBoundingClientRect();
+    return { scrollTop: s.scrollTop, barTop: bar.top - sheet.top, barBottom: bar.bottom - sheet.top, closeVisible: close.top >= sheet.top && close.bottom <= sheet.bottom };
+  })()`);
+  await sleep(200);
+  if (stuck) await pull(await titleBar(), 300, 30, { holdMs: 150 });
+  await sleep(600);
+  const goneFromBar = (await sheetNow()) === null;
+  record(
+    '설정 목록을 내린 채로도 제목 줄과 닫기는 시트 맨 위에 붙어 있고, 제목 줄을 잡고 끌어 내리면 닫힌다',
+    stuck !== null && stuck.scrollTop > 200 && Math.abs(stuck.barTop) <= 0.5 && stuck.barBottom >= 56 && stuck.closeVisible && goneFromBar,
+    stuck === null ? '설정 시트가 없다' : `목록 스크롤 ${Math.round(stuck.scrollTop)}px, 제목 줄은 시트 위에서 ${px(stuck.barTop)}~${px(stuck.barBottom)}, 닫기 ${stuck.closeVisible ? '보임' : '안 보임'}, 제목 줄을 끌어 내린 뒤 설정 ${goneFromBar ? '없음' : '있음'}`,
+  );
+  if (!goneFromBar) {
+    await tap(await center($('.sheet .sheet-bar .textbtn.end')));
+    await sleep(600);
+  }
+
+  // 음력과 공휴일: 12월에는 성탄절이 있다. 다음 달 단추로 가장 가까운 12월까지 가서 그 칸을 본다.
+  const monthNow = Number((await view()).title.split('년')[1].replace('월', '').trim());
+  for (let i = monthNow; i < 12; i++) await pressNext();
+  type HolidayCell = { holiday: boolean; numRed: boolean; name: string | null; nameBelow: boolean; nameFits: boolean; lunar: string | null; lunarBeside: boolean; lunarCount: number; lunarClipped: number; days: number };
+  const xmas = await cdp.evaluate<HolidayCell | null>(`(() => {
+    const cell = document.querySelector('.grid.current .cell[data-key$="-12-25"]');
+    if (!cell) return null;
+    const num = cell.querySelector('.num');
+    const name = cell.querySelector('.hname');
+    const lunar = cell.querySelector('.lunar');
+    const box = (el) => el.getBoundingClientRect();
+    // 글이 상자보다 넓은가. 음력은 앞쪽이 잘리므로 scrollWidth로는 알 수 없어 글의 폭을 직접 잰다.
+    const wider = (el) => { const range = document.createRange(); range.selectNodeContents(el); return range.getBoundingClientRect().width > box(el).width + 0.5; };
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--sun)';
+    document.body.append(probe);
+    const sun = getComputedStyle(probe).color;
+    probe.remove();
+    const lunars = [...document.querySelectorAll('.grid.current .cell:not(.other) .lunar')];
+    return {
+      holiday: cell.classList.contains('holiday'),
+      numRed: getComputedStyle(num).color === sun || cell.classList.contains('today') || cell.hasAttribute('data-color'),
+      name: name ? name.textContent : null,
+      nameBelow: !!name && box(name).top >= box(num).bottom - 0.5,
+      nameFits: !!name && !wider(name),
+      lunar: lunar ? lunar.textContent : null,
+      lunarBeside: !!lunar && box(lunar).left >= box(num).right - 0.5 && box(lunar).top < box(num).bottom && box(lunar).right <= box(cell).right + 0.5,
+      lunarCount: lunars.length,
+      lunarClipped: lunars.filter(wider).length,
+      days: document.querySelectorAll('.grid.current .cell:not(.other)').length,
+    };
+  })()`);
+  record(
+    '공휴일은 숫자가 빨갛고 이름이 숫자 아래에 나오며, 음력은 숫자 옆에 잘리지 않고 나온다',
+    xmas !== null && xmas.holiday && xmas.numRed && xmas.name === '성탄절' && xmas.nameBelow && xmas.nameFits && xmas.lunar !== null && xmas.lunarBeside && xmas.days === 31 && xmas.lunarCount === 31 && xmas.lunarClipped === 0,
+    xmas === null
+      ? '12월 25일 칸을 찾지 못했다'
+      : `12월 25일: 공휴일 ${xmas.holiday ? '표시' : '아님'}, 숫자 ${xmas.numRed ? '빨강' : '빨강 아님'}, 이름 ${xmas.name ?? '없음'}(${xmas.nameBelow ? '숫자 아래' : '숫자 아래가 아님'}, ${xmas.nameFits ? '다 보임' : '잘림'}), 음력 ${xmas.lunar ?? '없음'}(${xmas.lunarBeside ? '숫자 옆' : '숫자 옆이 아님'}), 이번 달 ${xmas.days}일 가운데 음력 ${xmas.lunarCount}칸, 잘린 것 ${xmas.lunarClipped}칸`,
+  );
+  await tap(await center($('.pill')));
+  await rest();
+
+  // 설정: 고르면 바로 바뀌고 이 기기에 저장된다. 다시 고르면 처음으로 돌아온다.
+  type Look = { theme: string | null; accent: string; lunars: number; dow: string; memoSize: string; weeks: number; saved: Record<string, unknown> | null };
+  const look = () =>
+    cdp.evaluate<Look>(`(() => ({
+      theme: document.documentElement.getAttribute('data-theme'),
+      accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim().toUpperCase(),
+      lunars: document.querySelectorAll('.grid.current .lunar').length,
+      dow: [...document.querySelectorAll('.dow span')].map((s) => s.textContent).join(''),
+      memoSize: document.querySelector('.calendar').style.getPropertyValue('--memo-size'),
+      weeks: document.querySelectorAll('.grid.current .wk').length,
+      saved: JSON.parse(localStorage.getItem('calfif.prefs') || 'null'),
+    }))()`);
+  const choice = (group: string, value: string) => `document.querySelector('[aria-labelledby="${group}"] [data-value="${value}"]')`;
+  const toggleOf = (name: string) => `[...document.querySelectorAll('label.pref-row')].find((l) => l.querySelector('.pref-name').textContent === ${JSON.stringify(name)}).querySelector('input')`;
+  /** 설정 목록에서 그 조작부가 보이게 한 뒤 손가락으로 누른다. */
+  const tapIn = async (elementJs: string): Promise<void> => {
+    await cdp.evaluate(`(${elementJs}).scrollIntoView({ block: 'center' })`);
+    await sleep(150);
+    await tap(await center(elementJs));
+    await sleep(350);
+  };
+  const lookBefore = await look();
+  await tap(await center(gear));
+  await sheetSettled();
+  for (const el of [choice('prefTheme', 'dark'), choice('prefAccent', 'pink'), toggleOf('음력'), choice('prefWeekStart', '1'), choice('prefMemoSize', 'large'), toggleOf('주 번호')]) await tapIn(el);
+  const lookChanged = await look();
+  for (const el of [choice('prefTheme', 'auto'), choice('prefAccent', 'blue'), toggleOf('음력'), choice('prefWeekStart', '0'), choice('prefMemoSize', 'medium'), toggleOf('주 번호')]) await tapIn(el);
+  const lookBack = await look();
+  const savedChanged = lookChanged.saved ?? {};
+  record(
+    '설정에서 고르면 달력이 바로 바뀌고 저장된다(밝기, 색상, 음력, 한 주의 시작, 글자 크기, 주 번호). 다시 고르면 처음과 같다',
+    lookChanged.theme === 'dark' && lookChanged.accent === '#FF8FB8' && lookBefore.lunars > 0 && lookChanged.lunars === 0 && lookBefore.dow === '일월화수목금토' && lookChanged.dow === '월화수목금토일' &&
+      lookChanged.memoSize === '12px' && lookBefore.weeks === 0 && lookChanged.weeks > 0 &&
+      savedChanged.theme === 'dark' && savedChanged.accent === 'pink' && savedChanged.lunar === false && savedChanged.weekStart === 1 && savedChanged.memoSize === 'large' && savedChanged.weekNumbers === true &&
+      lookBack.theme === null && lookBack.accent === lookBefore.accent && lookBack.lunars === lookBefore.lunars && lookBack.dow === lookBefore.dow && lookBack.memoSize === '10px' && lookBack.weeks === 0,
+    `바꾼 뒤: 밝기 ${lookChanged.theme}, 강조색 ${lookChanged.accent}, 음력 ${lookBefore.lunars} -> ${lookChanged.lunars}칸, 요일 줄 ${lookChanged.dow}, 메모 글자 ${lookChanged.memoSize}, 주 번호 ${lookChanged.weeks}칸, 저장 ${JSON.stringify(lookChanged.saved)} / 되돌린 뒤: 밝기 ${lookBack.theme ?? '자동'}, 강조색 ${lookBack.accent}, 음력 ${lookBack.lunars}칸, 요일 줄 ${lookBack.dow}, 메모 글자 ${lookBack.memoSize}`,
+  );
+  // 목록이 내려가 있어도 닫기는 위에 붙어 있으므로 그대로 누른다.
+  await tap(await center($('.sheet .sheet-bar .textbtn.end')));
+  await sleep(600);
+  const closedByButton = (await sheetNow()) === null;
+  if (!closedByButton) throw new Error('목록을 내린 채로 설정의 닫기를 눌렀는데 닫히지 않았다');
+
+  // 좁은 폰(폭 320px): 음력이 칸에 안 들어가면 그 쪽을 좁은 꼴로 바꾸고, 그래도 넘치는 칸은 숨긴다.
+  // 앞쪽이 잘린 채 보이면 다른 날짜로 읽히므로("11.15"가 "1.15"로) 잘린 채 보이는 것이 하나도 없어야 한다.
+  type LunarFit = { tight: boolean; shown: number; hidden: number; clipped: number };
+  const lunarFit = () =>
+    cdp.evaluate<LunarFit>(`(() => {
+      const grid = document.querySelector('.grid.current');
+      const labels = [...grid.querySelectorAll('.lunar')];
+      const wider = (el) => { const range = document.createRange(); range.selectNodeContents(el); return range.getBoundingClientRect().width > el.getBoundingClientRect().width + 0.5; };
+      const hidden = labels.filter((l) => getComputedStyle(l).visibility === 'hidden');
+      const shown = labels.filter((l) => !hidden.includes(l));
+      return { tight: grid.classList.contains('lunar-tight'), shown: shown.length, hidden: hidden.length, clipped: shown.filter(wider).length };
+    })()`);
+  const resizeTo = async (width: number): Promise<void> => {
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: PHONE.height, deviceScaleFactor: PHONE.deviceScaleFactor, mobile: true });
+    await sleep(500);
+    await rest();
+  };
+  await resizeTo(320);
+  const narrowFit = await lunarFit();
+  await resizeTo(PHONE.width);
+  const wideFit = await lunarFit();
+  record(
+    '폭 320px의 좁은 폰에서는 음력을 좁은 꼴로 바꾸고 안 들어가는 칸은 숨긴다. 잘린 채 보이는 음력은 없고, 폭을 되돌리면 처음과 같다',
+    narrowFit.tight && narrowFit.clipped === 0 && narrowFit.shown > 0 && !wideFit.tight && wideFit.hidden === 0 && wideFit.clipped === 0 && wideFit.shown === narrowFit.shown + narrowFit.hidden,
+    `폭 320: 좁은 꼴 ${narrowFit.tight ? '예' : '아니오'}, 보이는 음력 ${narrowFit.shown}칸, 숨긴 것 ${narrowFit.hidden}칸, 잘린 채 보이는 것 ${narrowFit.clipped}칸 / 폭 ${PHONE.width}: 좁은 꼴 ${wideFit.tight ? '예' : '아니오'}, 보이는 음력 ${wideFit.shown}칸, 숨긴 것 ${wideFit.hidden}칸, 잘린 것 ${wideFit.clipped}칸`,
+  );
+
   await emulatePhone(cdp, { reducedMotion: true });
   await sleep(500);
   g = await pressNext();
@@ -301,6 +643,20 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   await tap(await center($('.sheet .textbtn.start')));
   const reducedLeft = await cdp.evaluate<number | null>(SHEET_NOW_JS(40));
   record('움직임 줄이기에서는 취소하면 50ms 안에 시트가 사라진다', reducedLeft === null, reducedLeft === null ? '시트 없음' : `top ${Math.round(reducedLeft)}px에 남아 있다`);
+  await sleep(300);
+
+  // 움직임 줄이기: 손가락을 따라가는 것은 그대로이고, 놓은 뒤의 움직임만 없다.
+  const restG = await openDay();
+  const pulledG = await pull(await titleBar(), 40, 8, { holdMs: 150, follow: true });
+  const backG = await sheetNow();
+  const followG = followed(pulledG.follow, restG, 5);
+  await pull(await titleBar(), 300, 30, { holdMs: 150 });
+  const goneG = await cdp.evaluate<number | null>(SHEET_NOW_JS(40));
+  record(
+    '움직임 줄이기에서도 끄는 동안은 따라오고, 놓으면 움직임 없이 바로 제자리로 가거나 50ms 안에 사라진다',
+    followG.ok && backG !== null && restG !== null && Math.abs(backG.top - restG) <= 0.5 && !backG.moving && goneG === null,
+    `${followG.text}, 40px 끌고 놓은 직후 ${backG ? `top ${px(backG.top)}, 움직임 ${backG.moving ? '있음' : '없음'}` : '시트 없음'}, 300px 끌고 놓은 뒤 ${goneG === null ? '시트 없음' : `top ${Math.round(goneG)}px에 남아 있다`}`,
+  );
   await sleep(300);
 
   record(
@@ -376,7 +732,9 @@ async function main(): Promise<void> {
   const { cdp, kill } = await launchEdge({
     headless: true,
     profileDir: resolve('.tools', 'edge-profile-touch'),
-    args: [`--window-size=${PHONE.width},${PHONE.height}`],
+    // Windows의 애니메이션 효과가 꺼져 있으면(설정 → 접근성 → 시각 효과) Chromium은 scrollTo의 부드러운 스크롤을 한 번에 건너뛴다.
+    // 그러면 다음 달 단추와 멈췄다 떼기의 확인이 PC 설정 때문에 실패한다. 이 확인은 움직임이 켜진 기기를 보는 것이므로 켜 둔다.
+    args: [`--window-size=${PHONE.width},${PHONE.height}`, '--enable-smooth-scrolling'],
   });
   let passed = false;
   try {

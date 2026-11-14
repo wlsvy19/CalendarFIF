@@ -7,6 +7,14 @@
     <meta name="theme-color" content="#2550D0" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <title>달력 메모</title>
+    <script>
+      // 설정에서 고른 밝기를 첫 화면이 그려지기 전에 건다(앱 스크립트가 오기 전에 반대 밝기로 깜빡이지 않게).
+      // 나머지 설정은 src/web/prefs.ts가 건다. 키와 값은 그 파일의 PREFS_KEY, ThemeMode와 같아야 한다.
+      try {
+        var theme = JSON.parse(localStorage.getItem('calfif.prefs') || '{}').theme;
+        if (theme === 'light' || theme === 'dark') document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="app"></div>

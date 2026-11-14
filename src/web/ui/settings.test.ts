@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { swipeDown } from './fakeSwipe';
 import { mountSettings } from './settings';
 
 beforeEach(() => {
@@ -18,6 +19,17 @@ function mount(overrides: Partial<Parameters<typeof mountSettings>[1]> = {}) {
   return { root, button, onSignOut, handle };
 }
 
+it('폰 화면에서 목록이 맨 위일 때 아래로 끌면 닫고, 스크롤이 내려가 있으면 닫지 않는다', () => {
+  const onClose = vi.fn();
+  const { root } = mount({ onClose });
+  const sheet = root.querySelector<HTMLElement>('.sheet')!;
+  sheet.scrollTop = 120;
+  swipeDown(root.querySelector('.settings-email')!);
+  expect(onClose).not.toHaveBeenCalled();
+  sheet.scrollTop = 0;
+  swipeDown(root.querySelector('.sheet-bar h3')!);
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
 it('계정과 대기 건수를 보여 주고 로그아웃한다', () => {
   const { root, button, onSignOut } = mount();
   expect(root.textContent).toContain('me@example.com');
@@ -322,4 +334,15 @@ it('비밀번호 변경: 던지는 콜백도 거부처럼 다루고 폼을 푼�
   await vi.advanceTimersByTimeAsync(0);
   expect(note()).toBe('바꾸지 못했습니다.');
   expect(input('current').disabled).toBe(false);
+});
+
+it('prefs를 주면 맨 위에 화면·달력·메모 칸을 두고, 고른 것을 바로 알린다. 안 주면 그 칸이 없다', async () => {
+  const { DEFAULT_PREFS } = await import('../prefs');
+  const onChange = vi.fn();
+  const { root } = mount({ prefs: { value: { ...DEFAULT_PREFS, theme: 'dark' }, onChange } });
+  expect([...root.querySelectorAll('.field-label')].map((l) => l.textContent)).toEqual(['화면', '달력', '메모', '계정', '동기화']);
+  expect(root.querySelector('[aria-labelledby="prefTheme"] [aria-checked="true"]')!.textContent).toBe('어둡게');
+  root.querySelector<HTMLInputElement>('label.pref-row input')!.click(); // 음력
+  expect(onChange).toHaveBeenLastCalledWith({ ...DEFAULT_PREFS, theme: 'dark', lunar: false });
+  expect(mount().root.querySelector('.prefs')).toBeNull();
 });

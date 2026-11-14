@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { UserRow } from '../users';
+import { swipeDown } from './fakeSwipe';
 import { mountUsers, type UsersProps } from './users';
 
 const admin: UserRow = { uid: 'a1', email: 'boss@example.com', role: 'admin', disabled: false, createdAt: 1 };
@@ -44,6 +45,11 @@ function setup(over: Partial<UsersProps> = {}) {
   return { root, props, handle, emit: (rows: UserRow[]) => emit(rows), fail: (c: string) => fail(c), stop, row, btn, status, email, password, submit };
 }
 
+it('폰 화면에서 아래로 끌면 닫는다(openSheet의 시트)', () => {
+  const { root, props } = setup();
+  swipeDown(root.querySelector('.sheet-bar h3')!);
+  expect(props.onClose).toHaveBeenCalledTimes(1);
+});
 it('시트의 구조와 접근성 속성을 갖는다', () => {
   const { root } = setup();
   const sheet = root.querySelector('.sheet.users')!;

@@ -29,6 +29,9 @@ import type { WidgetInstallDeps } from './ui/widgetInstall';
 import { isBusy, reloadOnUpdate } from './update';
 import { closeAction, parseHash } from './router';
 import { openStorage } from './storage';
+import { applyPrefs, loadPrefs, prefsAppearance, savePrefs, type Prefs } from './prefs';
+import { holidayLabel } from '../core/holidays';
+import { lunarLong } from '../core/lunar';
 import { splitDateKey, todayKey } from '../core/dates';
 import { EMPTY_DAY } from '../core/types';
 import { FirestoreMonthStore } from '../sync/firestoreStore';
@@ -43,6 +46,8 @@ const accounts = firebaseAccountMaker(app.options, {
 
 // PC 앱(데스크톱 빌드)에서만 켠다. 웹앱은 이 값들을 쓰지 않는다.
 const DESKTOP = import.meta.env.VITE_DESKTOP === '1';
+// 웹앱의 밝기와 색상은 로그인 화면에도 걸려야 하므로 화면을 올리기 전에 건다. PC 앱은 자기 설정(appearance)을 쓴다.
+if (!DESKTOP) applyPrefs(document.documentElement, loadPrefs(openStorage().store));
 // 옮긴 자리는 상자마다 따로, 앱이 켜져 있는 동안만 기억한다.
 const editorMemory = sessionMemory();
 const usersMemory = sessionMemory();
@@ -80,6 +85,8 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   const source = new FirestoreMonthStore(db, session.uid);
   let appearance: Appearance | undefined = DESKTOP ? loadAppearance(storage.store) : undefined;
   if (appearance) applyAppearance(document.documentElement, appearance);
+  // 웹앱의 설정(밝기, 색상, 달력과 메모의 표시). 이 기기의 브라우저에만 저장한다.
+  let prefs: Prefs | undefined = DESKTOP ? undefined : loadPrefs(storage.store);
   const engine = new SyncEngine({ store: source, outbox, editedBy });
   const store = new CalendarStore({
     source,
@@ -152,6 +159,22 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       return false;
     }
   };
+  // 웹앱 설정에서 고른 것은 바로 달력과 <html>에 반영하고 이 기기에 저장한다. 저장하지 못해도 열려 있는 동안은 그대로 쓴다.
+  const changePrefs = (next: Prefs): void => {
+    prefs = next;
+    applyPrefs(document.documentElement, next);
+    calendar.setAppearance(prefsAppearance(next), { memoSize: next.memoSize });
+    try {
+      savePrefs(storage.store, next);
+    } catch {
+      // 저장소가 막힌 브라우저: 창을 닫으면 기본값으로 돌아간다.
+    }
+  };
+  // 편집 화면의 제목 아래에 적을 음력과 공휴일 이름. 설정에서 끈 것은 적지 않는다.
+  const dayNote = (dateKey: string): { lunar: string; holiday: string } => {
+    const show = prefs ?? appearance;
+    return { lunar: show?.lunar ? lunarLong(dateKey) : '', holiday: show?.holidays ? holidayLabel(dateKey) : '' };
+  };
   const changeMyPassword = async (current: string, next: string): Promise<{ ok: boolean; message: string }> => {
     const result = await changePassword(firebasePasswordDeps(auth), current, next);
     return { ok: result.ok, message: passwordMessage(result) };
@@ -179,7 +202,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     };
     settings = appearance
       ? mountDesktopSettings(root, { appearance, onAppearance: changeAppearance, bridge, account, page: settingsPage, onClose })
-      : mountSettings(root, { ...account, onClose, widget: DESKTOP ? undefined : widgetInstall });
+      : mountSettings(root, { ...account, onClose, widget: DESKTOP ? undefined : widgetInstall, prefs: prefs ? { value: prefs, onChange: changePrefs } : undefined });
     settingsPage = undefined;
     interactivity.begin('settings');
   };
@@ -200,6 +223,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     const handle = mountEditor(root, {
       dateKey,
       value: base,
+      note: dayNote(dateKey),
       onSave: (next) => {
         closeEditor(); // 주소가 바뀌기를 기다리지 않고 바로 닫는다
         engine.saveEdit(monthId, day, base, next);
@@ -325,7 +349,8 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       pushedByApp = true;
       location.hash = 'settings';
     },
-    appearance,
+    appearance: appearance ?? (prefs ? prefsAppearance(prefs) : undefined),
+    web: prefs ? { memoSize: prefs.memoSize } : undefined,
     desktop: DESKTOP ? { onDayMenu: openCellMenu, onOpenMenu: (at) => bridge?.showMenu(at) } : undefined,
   });
   // 앱 메뉴의 명령으로 여는 설정은 열려 있던 편집 화면을 먼저 닫고, 닫으면 늘 달력으로 간다(앞 기록의 날짜 주소로 돌아가지 않는다).

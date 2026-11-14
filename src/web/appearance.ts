@@ -22,7 +22,8 @@ export const DEFAULT_APPEARANCE: Appearance = {
   lunarInk: '9FB3C8', transparency: 60, weekStart: 0, firstWeek: 'jan1', showRestDays: true, restDays: [0, 6],
 };
 
-export const WEB_APPEARANCE: Appearance = { ...DEFAULT_APPEARANCE, layout: 'month', holidays: false, monthGap: false, shadow: false };
+/** 웹앱(아이폰 화면)의 기본값. 전체 월 배치이고 음력과 공휴일을 보여 준다. */
+export const WEB_APPEARANCE: Appearance = { ...DEFAULT_APPEARANCE, layout: 'month', lunar: true, monthGap: false, shadow: false };
 
 type Raw = Record<string, unknown>;
 

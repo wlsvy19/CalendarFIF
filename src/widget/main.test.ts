@@ -481,6 +481,27 @@ describe('기본 부품 위젯(기본)', () => {
     }
   });
 
+  it('음력을 적는 것이 기본이고, 매개변수에 nolunar나 음력끔이 있으면 적지 않는다(그림 방식도 같다)', async () => {
+    const plain = makeNative({ keychain: loggedIn });
+    await run(plain, cfg, now);
+    expect(nativeTexts(plain)).toEqual(expect.arrayContaining(['10.5', '10.22'])); // 11월 13일과 30일의 음력
+    for (const parameter of ['nolunar', 'dark NoLunar', '음력끔']) {
+      const host = makeNative({ keychain: loggedIn, widgetParameter: parameter });
+      await run(host, cfg, now);
+      expect(nativeTexts(host)).toContain('2026년 11월');
+      expect(nativeTexts(host).filter((t) => /^윤?\d+\.\d+$/.test(t))).toEqual([]);
+    }
+    // 그림 방식: 그린 글자 가운데 음력 꼴의 글이 있고, nolunar면 없다.
+    const drawn = (h: FakeHost): string[] => h.state.contexts[0].calls.filter((c) => c[0] === 'drawTextInRect').map((c) => String(c[1]));
+    const picture = make({ keychain: loggedIn });
+    await run(picture, cfg, now);
+    expect(drawn(picture)).toContain('10.5');
+    const off = make({ keychain: loggedIn, widgetParameter: 'image nolunar' });
+    await run(off, cfg, now);
+    expect(drawn(off).filter((t) => /^윤?\d+\.\d+$/.test(t))).toEqual([]);
+    expect(drawn(off)).toContain('2026년 11월');
+  });
+
   it('작은 위젯은 오늘 하나만 보여 준다', async () => {
     const small = makeNative({ keychain: loggedIn, widgetFamily: 'small' });
     await run(small, cfg, now);

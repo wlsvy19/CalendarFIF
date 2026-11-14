@@ -2,6 +2,7 @@ import { PALETTE } from '../../core/color';
 import { normalizeText, toggleDoneInRange } from '../../core/text';
 import type { DayValue } from '../../core/types';
 import { dismiss } from './sheetMotion';
+import { attachSwipeToClose } from './sheetSwipe';
 
 const WEEKDAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 const WIDE_PX = 880;
@@ -26,6 +27,8 @@ export function mountEditor(
   props: {
     dateKey: string;
     value: DayValue;
+    /** 제목 아래에 적을 그날의 음력과 공휴일 이름. 빈 글은 적지 않는다. */
+    note?: { lunar: string; holiday: string };
     onSave(next: DayValue): void;
     onCancel(): void;
   },
@@ -44,7 +47,10 @@ export function mountEditor(
   sheet.innerHTML = `
     <div class="sheet-bar">
       <button type="button" class="textbtn start">취소</button>
-      <h3 id="sheetTitle"></h3>
+      <div class="sheet-title">
+        <h3 id="sheetTitle"></h3>
+        <p class="sheet-note" hidden></p>
+      </div>
       <button type="button" class="textbtn end">저장</button>
     </div>
     <div class="field">
@@ -59,6 +65,15 @@ export function mountEditor(
       <textarea class="memo-input" id="memoInput" placeholder="한 줄에 하나씩 적으세요"></textarea>
     </div>`;
   sheet.querySelector('h3')!.textContent = titleOf(props.dateKey);
+  const noteEl = sheet.querySelector<HTMLElement>('.sheet-note')!;
+  for (const [className, text] of [['note-lunar', props.note?.lunar ?? ''], ['note-holiday', props.note?.holiday ?? '']]) {
+    if (text === '') continue;
+    const span = document.createElement('span');
+    span.className = className;
+    span.textContent = text;
+    noteEl.append(span);
+    noteEl.hidden = false;
+  }
   const swatches = sheet.querySelector<HTMLElement>('.swatches')!;
   const area = sheet.querySelector<HTMLTextAreaElement>('textarea')!;
   const cancelBtn = sheet.querySelector<HTMLButtonElement>('.textbtn.start')!;
@@ -102,6 +117,7 @@ export function mountEditor(
     finished = true;
     props.onCancel();
   };
+  const changed = (): boolean => area.value !== props.value.text || color !== props.value.color;
   swatches.addEventListener('click', (e) => {
     const b = (e.target as Element).closest<HTMLElement>('.swatch');
     if (!b) return;
@@ -128,7 +144,7 @@ export function mountEditor(
   cancelBtn.addEventListener('click', cancel);
   // 바깥을 눌러 닫는 것은 고친 것이 없을 때만이다. 적던 글이 실수로 사라지지 않게 한다.
   scrim.addEventListener('click', () => {
-    if (area.value === props.value.text && color === props.value.color) cancel();
+    if (!changed()) cancel();
   });
   sheet.addEventListener('keydown', (e) => {
     if (e.isComposing) return; // 한글 조합 중의 Esc와 Ctrl+Enter는 조합을 끝내는 키다
@@ -169,6 +185,8 @@ export function mountEditor(
   root.append(scrim, sheet);
   document.documentElement.classList.add('sheet-open');
   const drag = env?.attachDrag?.(sheet, sheet.querySelector<HTMLElement>('.sheet-bar')!);
+  // 폰 화면에서 아래로 끌어 닫으면 고친 것이 있을 때 저장한다. 적던 글을 잃는 것이 원치 않은 저장보다 나쁘다. 버리려면 취소를 누른다.
+  const swipe = attachSwipeToClose(sheet, scrim, { onClose: () => (changed() ? save() : cancel()) });
   if (env?.focusText || window.innerWidth >= WIDE_PX) {
     area.focus();
     area.setSelectionRange(area.value.length, area.value.length);
@@ -182,6 +200,7 @@ export function mountEditor(
       viewport?.removeEventListener('scroll', followViewport);
       document.documentElement.classList.remove('sheet-open');
       drag?.destroy();
+      swipe.destroy();
       dismiss(scrim, sheet);
       if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
     },

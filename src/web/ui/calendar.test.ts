@@ -3,8 +3,8 @@ import type { DayValue } from '../../core/types';
 import type { SyncStatus } from '../../sync/engine';
 import type { CalendarStore } from '../state';
 import { shiftMonth } from '../../core/dates';
-import { DEFAULT_APPEARANCE, type Appearance } from '../appearance';
-import { displayLines, mountCalendar, visibleLines } from './calendar';
+import { DEFAULT_APPEARANCE, WEB_APPEARANCE, type Appearance } from '../appearance';
+import { displayLines, mountCalendar, visibleLines, type WebLook } from './calendar';
 
 function fakeStore(days: Record<string, DayValue>) {
   let month = '2026-11';
@@ -225,6 +225,116 @@ describe('화면 설정', () => {
     expect([[...cell(root, '2026-12-01').classList].filter((c) => c.startsWith('m-')), has(cell(root, '2026-11-01'), 'm-top')]).toEqual([['m-top', 'm-left'], false]);
     const off = mountA({ shadow: false, titleBar: false }).querySelector<HTMLElement>('.calendar')!;
     expect([has(off, 'shadow'), off.querySelector<HTMLElement>('.app-head')!.hidden]).toEqual([false, true]);
+  });
+});
+describe('웹(아이폰 화면)의 음력과 공휴일', () => {
+  function mountWeb(today: string, days: Record<string, DayValue> = {}) {
+    const root = document.createElement('div');
+    const month = today.slice(0, 7);
+    const store = { current: () => month, show: vi.fn(), days: (m: string) => (m === month ? days : {}), onChange: () => () => {}, readProblem: () => null } as unknown as CalendarStore;
+    mountCalendar(root, { store, status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} }, today: () => today, onOpenDay: vi.fn(), onOpenSettings: vi.fn() });
+    return root;
+  }
+  const texts = (el: Element, selector: string) => [...el.querySelectorAll(selector)].map((x) => x.textContent);
+  afterEach(() => vi.restoreAllMocks());
+
+  it('칸마다 음력을 짧게 적고, 공휴일과 대체공휴일은 빨간 날로 표시하고 이름을 적는다', () => {
+    const root = mountWeb('2026-10-01');
+    const of = (key: string) => {
+      const c = cell(root, key);
+      return [has(c, 'holiday'), texts(c, '.hname'), texts(c, '.lunar')];
+    };
+    // 10/3 개천절(토), 10/5 그 대체공휴일(월), 10/6 평일, 10/9 한글날
+    expect([of('2026-10-03'), of('2026-10-05'), of('2026-10-06'), of('2026-10-09')]).toEqual([
+      [true, ['개천절'], ['8.23']],
+      [true, ['대체공휴일'], ['8.25']],
+      [false, [], ['8.26']],
+      [true, ['한글날'], ['8.29']],
+    ]);
+  });
+  it('윤달은 윤을 붙이고, 음력 표 밖의 해는 음력을 적지 않는다', () => {
+    expect(texts(cell(mountWeb('2025-07-25'), '2025-07-25'), '.lunar')).toEqual(['윤6.1']);
+    const far = mountWeb('2060-08-15');
+    expect([texts(cell(far, '2060-08-15'), '.lunar'), texts(cell(far, '2060-08-15'), '.hname')]).toEqual([[], ['광복절']]);
+  });
+  it('음력이 칸보다 넓으면 그 쪽의 음력을 모두 좁은 꼴로 바꾸고, 그래도 넘치는 칸은 숨긴다(앞쪽이 잘린 채 보이지 않게)', () => {
+    // 가짜 폭: 음력 상자는 boxWidth, 글은 글자마다 5.5(좁은 꼴에서는 4.5)다.
+    const fake = (boxWidth: number): void => {
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+        return { width: this.classList.contains('lunar') ? boxWidth : 0 } as DOMRect;
+      });
+      vi.spyOn(document, 'createRange').mockImplementation(() => {
+        let el: Element | null = null;
+        return {
+          selectNodeContents: (node: Element) => void (el = node),
+          getBoundingClientRect: () => ({ width: (el?.textContent?.length ?? 0) * (el?.closest('.lunar-tight') ? 4.5 : 5.5) }) as DOMRect,
+        } as unknown as Range;
+      });
+    };
+    const state = (root: HTMLElement) => {
+      const grid = root.querySelector<HTMLElement>('.grid.current')!;
+      return [has(grid, 'lunar-tight'), texts(grid, '.lunar.hidden')];
+    };
+    // 넉넉한 칸: 그대로다.
+    fake(40);
+    expect(state(mountWeb('2026-11-13'))).toEqual([false, []]);
+    vi.restoreAllMocks();
+    // 다섯 글자('10.15')가 넘치는 칸: 좁은 꼴이면 모두 들어간다.
+    fake(25);
+    expect(state(mountWeb('2026-11-13'))).toEqual([true, []]);
+    vi.restoreAllMocks();
+    // 더 좁은 칸: 좁은 꼴로도 다섯 글자는 넘쳐서 숨기고, 네 글자는 보인다. 2026년 11월의 쪽은 음력 9.22부터 10.27까지다.
+    fake(20);
+    const [tight, hidden] = state(mountWeb('2026-11-13')) as [boolean, string[]];
+    expect([tight, hidden[0], hidden.at(-1), hidden.length, hidden.every((t) => t.length === 5)]).toEqual([true, '10.10', '10.27', 18, true]);
+  });
+  it('공휴일 이름이 한 줄을 쓰므로 그 칸은 메모를 한 줄 덜 보여 준다', () => {
+    // 넓은 화면(happy-dom의 기본 폭): 줄 높이 17, 숫자 자리 30, 이름 줄 16. 칸 높이 115면 평일 5줄, 공휴일 4줄이다.
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(115);
+    const six = { text: ['a', 'b', 'c', 'd', 'e', 'f'].join('\n'), color: '' };
+    const root = mountWeb('2026-10-01', { '05': six, '06': six });
+    expect([texts(cell(root, '2026-10-05'), '.ln'), texts(cell(root, '2026-10-06'), '.ln')]).toEqual([
+      ['a', 'b', 'c', '+3'],
+      ['a', 'b', 'c', 'd', '+2'],
+    ]);
+  });
+});
+describe('웹앱의 설정(모양은 웹, 동작은 설정)', () => {
+  const eight = { text: ['[+]a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].join('\n'), color: '' };
+  function mountPrefs(a: Partial<Appearance>, web: WebLook = { memoSize: 'medium' }) {
+    const root = document.createElement('div');
+    const store = fakeStore({ '13': eight });
+    const handle = mountCalendar(root, { store, status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} }, today: () => '2026-11-13', onOpenDay: vi.fn(), onOpenSettings: vi.fn(), appearance: { ...WEB_APPEARANCE, ...a }, web });
+    return { root, handle, cal: root.querySelector<HTMLElement>('.calendar')! };
+  }
+  const lines = (root: HTMLElement) => [...cell(root, '2026-11-13').querySelectorAll('.ln')].map((l) => l.textContent);
+  afterEach(() => vi.restoreAllMocks());
+
+  it('설정을 줘도 웹 모양이다: 음력은 짧게 적고 PC 앱의 색 변수를 걸지 않는다', () => {
+    const { root, cal } = mountPrefs({});
+    expect([cell(root, '2026-11-13').querySelector('.lunar')!.textContent, cal.style.getPropertyValue('--desk-cal-ink'), cells(root).length]).toEqual(['10.5', '', 35]);
+  });
+  it('시작 요일, 주 번호, 음력과 공휴일 끄기, 완료한 줄, 줄 머리 기호를 따른다', () => {
+    const { root, cal } = mountPrefs({ weekStart: 1, weekNumbers: true, lunar: false, holidays: false, showDone: false, bullet: 'dot' });
+    expect([root.querySelector('.dow span:nth-child(2)')!.textContent, root.querySelectorAll('.grid.current .wk').length > 0, root.querySelector('.lunar'), cal.dataset.bullet]).toEqual(['월', true, null, 'dot']);
+    expect(lines(root)).toEqual(['b', 'c', 'd', 'e', 'f', 'g', 'h']);
+    expect(lines(mountPrefs({ doneToBottom: true }).root).at(-1)).toBe('a');
+  });
+  it('글자 크기에 따라 줄 높이와 보이는 줄 수가 달라진다', () => {
+    // 넓은 화면(happy-dom의 기본 폭)에서 칸 높이 115: 작게는 줄 높이 15라 5줄, 크게는 20이라 4줄이 들어간다.
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(115);
+    const small = mountPrefs({}, { memoSize: 'small' });
+    const large = mountPrefs({}, { memoSize: 'large' });
+    expect([small.cal.style.getPropertyValue('--memo-size'), small.cal.style.getPropertyValue('--memo-line'), lines(small.root)]).toEqual(['12px', '15px', ['a', 'b', 'c', 'd', '+4']]);
+    expect([large.cal.style.getPropertyValue('--memo-size'), large.cal.style.getPropertyValue('--memo-line'), lines(large.root)]).toEqual(['15px', '20px', ['a', 'b', 'c', '+5']]);
+  });
+  it('열어 둔 채로 설정과 글자 크기를 바꾼다', () => {
+    const { root, handle, cal } = mountPrefs({});
+    handle.setAppearance({ ...WEB_APPEARANCE, lunar: false, weekStart: 1 }, { memoSize: 'large' });
+    expect([root.querySelector('.lunar'), root.querySelector('.dow span')!.textContent, cal.style.getPropertyValue('--memo-size'), cal.style.getPropertyValue('--desk-cal-ink')]).toEqual([null, '월', '15px', '']);
+    // 글자 크기를 주지 않으면 그대로 둔다.
+    handle.setAppearance({ ...WEB_APPEARANCE, lunar: true });
+    expect([cell(root, '2026-11-13').querySelector('.lunar')!.textContent, cal.style.getPropertyValue('--memo-size')]).toEqual(['10.5', '15px']);
   });
 });
 describe('구독과 날짜 열기', () => {

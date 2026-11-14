@@ -72,17 +72,52 @@ describe('buildTree large', () => {
       const first = c.children[0] as StackNode;
       expect(first.kind).toBe('stack');
       expect(first.dir).toBe('h');
-      expect(isFlex(first.children.at(-1))).toBe(true);
+      expect(isFlex(first.children[1])).toBe(true);
     }
+  });
+
+  it('머리 줄의 뒤쪽 끝에 음력을 적는다(이번 달의 칸에만). lunar가 false면 적지 않는다', () => {
+    const head = (tree: Tree, day: number): Node[] => (cellOf(tree, day).children[0] as StackNode).children;
+    expect(head(t, 14)).toHaveLength(3);
+    expect(head(t, 14)[2]).toMatchObject({ kind: 'text', text: '10.6', size: 7.5, color: pair('muted'), lines: 1, minScale: 0.7 });
+    // 2026년 12월의 달력에는 11월 29, 30일이 앞에 붙는다. 그 칸에는 음력이 없다.
+    const december = build('large', month({}, '2026-12'), '2026-12-10');
+    const others = cells(december).filter((c) => ((c.children[0] as StackNode).children[0] as TextNode).opacity === 0.4);
+    expect(others.length).toBeGreaterThan(0);
+    for (const c of others) expect((c.children[0] as StackNode).children).toHaveLength(2);
+    const off = buildTree({ family: 'large', size: widgetSize(SCREEN, 'large'), today: TODAY, month: month({}), offline: false, lunar: false });
+    for (const c of cells(off)) expect(isFlex((c.children[0] as StackNode).children.at(-1))).toBe(true);
+  });
+
+  it('공휴일과 대체공휴일은 숫자가 빨갛고 이름 한 줄을 적는다. 그 칸은 메모를 한 줄 덜 넣는다', () => {
+    // 2026년 10월: 3일 개천절(토), 5일 대체공휴일(월), 9일 한글날(금)
+    const many = ['가', '나', '다', '라', '마', '바', '사', '아', '자', '차'].join('\n');
+    const october = build('large', month({ '05': { text: many, color: '' }, '06': { text: many, color: '' }, '09': { text: '', color: 'F12424' } }, '2026-10'), '2026-10-01');
+    // 10월 1일은 목요일이라 앞에 9월의 칸이 있다. 흐리지 않은 숫자로 이번 달의 칸을 찾는다.
+    const first = (c: StackNode): TextNode => (c.children[0] as StackNode).children[0] as TextNode;
+    const cellOf = (_t: Tree, day: number): StackNode => cells(october).find((c) => first(c).kind === 'text' && first(c).text === String(day) && first(c).opacity === undefined)!;
+    const memosOf = (c: StackNode): TextNode[] => texts({ ...october, children: [c] }).filter((x) => x.size === 9);
+    const numberOf = (day: number): TextNode => first(cellOf(october, day));
+    const nameOf = (day: number): TextNode | undefined => texts({ ...october, children: [cellOf(october, day)] }).find((x) => x.size === 8);
+    expect([numberOf(3).color, numberOf(5).color, numberOf(6).color]).toEqual([pair('sun'), pair('sun'), pair('ink')]);
+    expect([nameOf(3)?.text, nameOf(5)?.text, nameOf(6)]).toEqual(['개천절', '대체공휴일', undefined]);
+    expect(nameOf(5)).toMatchObject({ weight: 'semibold', color: pair('sun'), lines: 1, minScale: 0.8 });
+    // 색을 칠한 날은 숫자가 ink이고 이름은 그대로 빨갛다.
+    expect([numberOf(9).color, nameOf(9)?.text]).toEqual([pair('ink'), '한글날']);
+    expect(memosOf(cellOf(october, 6)).length - memosOf(cellOf(october, 5)).length).toBe(1);
   });
 
   it('오늘 칸: 숫자가 강조색 상자 안에 있고 다른 칸에는 없다', () => {
     const pills = stacks(t).filter((s) => s.background && s.background.light === PALETTES.light.accent);
     expect(pills).toHaveLength(1);
-    expect(pills[0]).toMatchObject({ radius: 7.5, padding: [1, 4, 1, 4], dir: 'h' });
+    // 음력을 같이 적는 두 자리 날은 옆 여백이 2.5다(음력이 들어갈 자리를 남긴다). 한 자리 날과 음력을 끈 때는 4다.
+    expect(pills[0]).toMatchObject({ radius: 7.5, padding: [1, 2.5, 1, 2.5], dir: 'h' });
+    const pillOf = (tree: Tree): StackNode => stacks(tree).find((s) => s.background && s.background.light === PALETTES.light.accent)!;
+    expect(pillOf(build('large', month({}), '2026-11-05')).padding).toEqual([1, 4, 1, 4]);
+    expect(pillOf(buildTree({ family: 'large', size: widgetSize(SCREEN, 'large'), today: TODAY, month: month({}), offline: false, lunar: false })).padding).toEqual([1, 4, 1, 4]);
     expect(pills[0].children).toHaveLength(1);
     expect(pills[0].children[0]).toMatchObject({ kind: 'text', text: '13', color: pair('onAccent') });
-    expect(cellOf(t, 13).children[0]).toMatchObject({ children: [pills[0], { kind: 'spacer', length: null }] });
+    expect(cellOf(t, 13).children[0]).toMatchObject({ children: [pills[0], { kind: 'spacer', length: null }, { kind: 'text', text: '10.5' }] });
   });
 
   it('날짜 색이 있으면 칸 바탕이 그 색이고 숫자는 ink, 잘못된 색은 surface', () => {
@@ -215,13 +250,29 @@ describe('buildTree small', () => {
   });
 
   it('여섯 줄이 넘으면 +N으로 줄이고, 완료 줄은 취소선과 흐림', () => {
-    const t = small(month({ '13': { text: '[+]하나\n둘\n셋\n넷\n다섯\n여섯\n일곱\n여덟', color: '' } }));
+    const eight = month({ '13': { text: '[+]하나\n둘\n셋\n넷\n다섯\n여섯\n일곱\n여덟', color: '' } });
+    const t = buildTree({ family: 'small', size: widgetSize(SCREEN, 'small'), today: TODAY, month: eight, offline: false, lunar: false });
+    // 날짜 아래에 음력 줄이 있으면 한 줄을 덜 넣는다.
+    expect(memoRows(small(eight)).map((r) => r.text).slice(1)).toEqual(['둘', '셋', '넷', '+4']);
     const rows = memoRows(t);
     expect(rows.map((r) => r.text)).toEqual(['\u2713 하나', '둘', '셋', '넷', '다섯', '+3']);
     expect(rows[0].opacity).toBe(0.55);
     expect(rows[1].opacity).toBeUndefined();
     expect(rows[5].color).toEqual(pair('muted'));
     for (const r of rows) expect(r.lines).toBe(1);
+  });
+
+  it('날짜 아래 한 줄에 음력과 공휴일 이름을 적고, 공휴일은 숫자와 그 줄이 빨갛다', () => {
+    const under = (t: Tree): Node => t.children[1];
+    expect(under(small(month({})))).toMatchObject({ kind: 'stack', dir: 'h', children: [{ text: '음 10.5', size: 10, color: pair('muted'), lines: 1 }, { kind: 'spacer', length: null }] });
+    // 2026-10-05는 개천절(토)의 대체공휴일인 월요일이다.
+    const holiday = build('small', month({}, '2026-10'), '2026-10-05');
+    expect(under(holiday)).toMatchObject({ children: [{ text: '음 8.25 · 대체공휴일', color: pair('sun') }, { kind: 'spacer' }] });
+    expect(((holiday.children[0] as StackNode).children[0] as TextNode).color).toEqual(pair('sun'));
+    // 음력을 끄면 평일에는 그 줄이 없고(바로 틈), 공휴일에는 이름만 적는다.
+    const plain = (today: string, monthId: string): Tree => buildTree({ family: 'small', size: widgetSize(SCREEN, 'small'), today, month: month({}, monthId), offline: false, lunar: false });
+    expect(under(plain(TODAY, '2026-11'))).toEqual({ kind: 'spacer', length: 6 });
+    expect(under(plain('2026-10-05', '2026-10'))).toMatchObject({ children: [{ text: '대체공휴일' }, { kind: 'spacer' }] });
   });
 
   it('배경은 오늘 날짜 색을 따른다', () => {
