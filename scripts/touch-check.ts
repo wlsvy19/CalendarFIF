@@ -152,6 +152,9 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
 
   await cdp.send('Page.enable');
   await emulatePhone(cdp);
+  // 프로필(.tools/edge-profile-touch)은 실행 사이에 남는다. 지난 실행이 남긴 웹앱 설정(calfif.prefs 등)이 있으면
+  // 설정 확인이 켜고 끄기를 거꾸로 하게 되므로, 이 주소의 브라우저 저장소를 비우고 시작한다.
+  await cdp.send('Storage.clearDataForOrigin', { origin: new URL(url).origin, storageTypes: 'local_storage' });
   await cdp.send('Page.navigate', { url });
   let calendarUp = false;
   for (let i = 0; i < 100 && !calendarUp; i++) {

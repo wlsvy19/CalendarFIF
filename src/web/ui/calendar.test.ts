@@ -3,6 +3,7 @@ import type { DayValue } from '../../core/types';
 import type { SyncStatus } from '../../sync/engine';
 import type { CalendarStore } from '../state';
 import { shiftMonth } from '../../core/dates';
+import { setOfficialHolidays } from '../../core/holidays';
 import { DEFAULT_APPEARANCE, WEB_APPEARANCE, type Appearance } from '../appearance';
 import { displayLines, mountCalendar, visibleLines, type WebLook } from './calendar';
 
@@ -524,5 +525,57 @@ describe('년도와 월 고르기', () => {
     yearBtn.click();
     handle.destroy();
     expect([root.querySelector('.datepick'), root.querySelector('.datepick-scrim')]).toEqual([null, null]);
+  });
+});
+
+describe('다시 그리기를 줄인다', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setOfficialHolidays(null);
+  });
+  function emitterMount() {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(100); // 칸 높이를 잰 것으로 친다
+    const months = new Map<string, Record<string, DayValue>>();
+    const listeners = new Set<() => void>();
+    const store = {
+      current: () => '2026-11',
+      show: vi.fn(),
+      days: (m: string) => months.get(m) ?? {},
+      onChange: (fn: () => void) => {
+        listeners.add(fn);
+        return () => listeners.delete(fn);
+      },
+      readProblem: () => null,
+    } as unknown as CalendarStore;
+    const root = document.createElement('div');
+    document.body.append(root);
+    const handle = mountCalendar(root, { store, status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} }, today: () => '2026-11-13', onOpenDay: vi.fn(), onOpenSettings: vi.fn() }, { pager: { width: () => 400 } });
+    const emit = () => listeners.forEach((fn) => fn());
+    // 세 쪽(10월, 11월, 12월)에서 각 쪽의 첫 칸. 다시 그리면 새 요소로 바뀐다.
+    const firsts = () => [...root.querySelectorAll<HTMLElement>('.grid')].map((g) => g.querySelector('.cell'));
+    return { root, months, emit, firsts, handle };
+  }
+
+  it('내용이 그대로면 다시 그리라는 알림이 와도 쪽을 다시 만들지 않고, 바뀐 달이 보이는 쪽만 다시 그린다', () => {
+    const { months, emit, firsts } = emitterMount();
+    const before = firsts();
+    emit();
+    expect(firsts()).toEqual(before); // 같은 요소 그대로
+    expect(firsts().every((c, i) => c === before[i])).toBe(true);
+    // 2027년 1월은 12월 쪽의 끝(1월 1~2일)에만 보인다
+    months.set('2027-01', { '01': { text: '새해', color: '' } });
+    emit();
+    const after = firsts();
+    expect([after[0] === before[0], after[1] === before[1], after[2] === before[2]]).toEqual([true, true, false]);
+  });
+  it('공휴일 자료가 바뀌거나 창 크기가 바뀌면 모든 쪽을 다시 그린다', () => {
+    const { emit, firsts } = emitterMount();
+    const before = firsts();
+    setOfficialHolidays({ 2026: { days: [{ date: '2026-11-20', name: '임시공휴일' }] } });
+    emit();
+    const afterHolidays = firsts();
+    expect(afterHolidays.some((c, i) => c === before[i])).toBe(false);
+    window.dispatchEvent(new Event('resize'));
+    expect(firsts().some((c, i) => c === afterHolidays[i])).toBe(false);
   });
 });

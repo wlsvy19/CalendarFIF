@@ -1,5 +1,5 @@
 import { shiftMonth } from '../../core/dates';
-import { holidayLabel } from '../../core/holidays';
+import { holidayDataVersion, holidayLabel } from '../../core/holidays';
 import { buildPage, pageMonths, stepPage, type Page } from '../../core/layout';
 import { lunarLabel, lunarShort } from '../../core/lunar';
 import type { Point } from '../../desktop/api';
@@ -138,13 +138,12 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   }
 
   // 격자 요소 하나에 한 쪽의 칸을 채운다. 칸 높이는 그 쪽이 놓인 자리에서 잰다.
-  function fillGrid(target: HTMLElement, page: Page, today: string): void {
+  // 쪽 하나를 그린다. 칸 높이를 재지 못했으면(화면에 붙기 전) false를 돌려준다. 그때는 붙은 뒤에 다시 그려야 한다.
+  function fillGrid(target: HTMLElement, page: Page, today: string, daysByMonth: Map<string, ReturnType<CalendarStore['days']>>): boolean {
     target.style.setProperty('--rows', String(page.rows.length));
     const a = appearance;
     const lineOpts = { showDone: a.showDone, doneToBottom: a.doneToBottom };
 
-    // 공휴일과 음력은 칸마다 한 번만 계산한다.
-    const daysByMonth = new Map<string, ReturnType<CalendarStore['days']>>();
     const built: { button: HTMLButtonElement; lines: { text: string; done: boolean }[]; named: boolean }[] = [];
     const children: HTMLElement[] = [];
     page.rows.forEach((row, rowIndex) => {
@@ -187,28 +186,35 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     target.replaceChildren(...children);
 
     // 칸 높이를 재서 들어가는 줄 수를 정한다. 높이가 0이면(배치가 없으면) 제한하지 않는다.
-    const first = built[0]?.button;
-    const cellHeight = first?.clientHeight ?? 0;
+    // 재기는 배치가 같으면(창 크기와 설정이 그대로면) 줄 수(5줄, 6줄)마다 한 번만 한다. 쪽마다 재면 그때마다 브라우저가
+    // 배치를 새로 계산해야 해서 폰에서 넘길 때 멈칫한다.
+    let size = measured.get(page.rows.length);
+    if (!size) {
+      const first = built[0]?.button;
+      const cellHeight = first?.clientHeight ?? 0;
+      let used = NUMBER_AREA_PX;
+      if (custom) {
+        const style = first ? getComputedStyle(first) : null;
+        const padding = style ? (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0) : 0;
+        used = (first?.querySelector<HTMLElement>('.head')?.offsetHeight ?? 0) + padding;
+      }
+      size = { cellHeight, used };
+      if (cellHeight > 0) measured.set(page.rows.length, size);
+    }
+    const { cellHeight, used } = size;
     let lineHeight: number;
-    let used: number;
     if (custom) {
       lineHeight = Math.round(a.memoFont.size * a.lineSpacing);
-      const style = first ? getComputedStyle(first) : null;
-      const padding = style ? (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0) : 0;
-      used = (first?.querySelector<HTMLElement>('.head')?.offsetHeight ?? 0) + padding;
     } else {
       // 메모 줄의 글자 크기와 높이는 여기서 정해 CSS 변수로 넘긴다(styles.css의 .ln). 줄 수 계산과 늘 같은 값을 쓰게 한다.
-      const memo = MEMO_METRICS[web?.memoSize ?? 'medium'];
-      const metrics = window.innerWidth >= WIDE_PX ? memo.wide : memo.narrow;
-      el.style.setProperty('--memo-size', `${metrics.size}px`);
-      el.style.setProperty('--memo-line', `${metrics.line}px`);
+      const metrics = memoMetrics();
+      setMemoVars(metrics);
       lineHeight = metrics.line;
-      used = NUMBER_AREA_PX;
     }
     const linesIn = (taken: number): number => (cellHeight > 0 ? Math.max(1, Math.floor((cellHeight - taken) / lineHeight)) : Infinity);
     const maxLines = linesIn(used);
     // 웹에서는 공휴일 이름이 숫자 아래에 한 줄을 차지한다(PC 앱은 숫자 옆에 놓는다).
-    const maxNamedLines = custom ? maxLines : linesIn(used + (window.innerWidth >= WIDE_PX ? HOLIDAY_LINE_PX.wide : HOLIDAY_LINE_PX.narrow));
+    const maxNamedLines = custom ? maxLines : linesIn(used + (wide ? HOLIDAY_LINE_PX.wide : HOLIDAY_LINE_PX.narrow));
     for (const { button, lines, named } of built) {
       if (lines.length === 0) continue;
       const { shown, more } = visibleLines(lines, named ? maxNamedLines : maxLines);
@@ -221,6 +227,47 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     // 잘린 줄 표시: 폭을 모두 읽은 뒤에 표시를 붙인다(줄마다 배치를 다시 계산하지 않게).
     const cut = [...target.querySelectorAll<HTMLElement>('.ln:not(.more)')].filter((ln) => ln.scrollWidth > ln.clientWidth);
     for (const ln of cut) ln.classList.add('cut');
+    return cellHeight > 0;
+  }
+
+  // 메모 줄의 글자 크기와 높이(웹 모양). 폭이 넓은 화면은 크게.
+  const memoMetrics = (): { size: number; line: number } => {
+    const memo = MEMO_METRICS[web?.memoSize ?? 'medium'];
+    return wide ? memo.wide : memo.narrow;
+  };
+  // 값이 바뀔 때만 쓴다. 같은 값을 쪽마다 다시 쓰면 그때마다 모양 계산이 다시 돈다.
+  let memoVars = '';
+  const setMemoVars = (m: { size: number; line: number }): void => {
+    const next = `${m.size}|${m.line}`;
+    if (next === memoVars) return;
+    memoVars = next;
+    el.style.setProperty('--memo-size', `${m.size}px`);
+    el.style.setProperty('--memo-line', `${m.line}px`);
+  };
+
+  // 쪽마다 마지막으로 그린 것의 서명(배치, 쪽, 오늘, 공휴일 자료, 그 쪽에 보이는 달들의 날짜 자료). 같으면 다시 그리지 않는다.
+  // 저장 상태가 바뀌거나 편집 화면을 열 때도 달력을 다시 그리라는 알림이 오는데, 그때마다 붙어 있는 세 쪽을 통째로 다시
+  // 만들면 폰에서 버벅인다.
+  const drawn = new WeakMap<HTMLElement, string>();
+  // 배치가 바뀌면(창 크기, 설정) 올린다. 서명에 들어가 모든 쪽을 다시 그리게 하고, 재 둔 칸 크기를 버린다.
+  let epoch = 0;
+  let measured = new Map<number, { cellHeight: number; used: number }>();
+  // 넓은 화면인지는 배치가 바뀔 때만 읽는다. window.innerWidth를 읽으면 브라우저가 그때까지 바뀐 것의 배치를 바로 계산하므로,
+  // 쪽을 그리는 도중에 읽으면 쪽마다 배치 계산이 한 번 더 돈다(프로파일에서 그리기 시간의 반을 넘었다).
+  let wide = window.innerWidth >= WIDE_PX;
+  const relayout = (): void => {
+    epoch += 1;
+    measured = new Map();
+    wide = window.innerWidth >= WIDE_PX;
+  };
+  function drawPage(grid: HTMLElement, anchor: string): void {
+    const page = buildPage(pageOptions(appearance), anchor);
+    const today = deps.today();
+    const daysByMonth = new Map(pageMonths(page).map((m) => [m, store.days(m)] as const));
+    const signature = [epoch, anchor, today, holidayDataVersion(), ...[...daysByMonth].map(([m, d]) => `${m}:${JSON.stringify(d)}`)].join('\u0001');
+    if (drawn.get(grid) === signature) return;
+    if (fillGrid(grid, page, today, daysByMonth)) drawn.set(grid, signature);
+    else drawn.delete(grid);
   }
 
   function applyClasses(): void {
@@ -242,10 +289,17 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
       anchor: firstAnchor,
       neighbours: deps.desktop ? 0 : 1, // PC 앱은 단추로만 넘기고 옆 쪽을 붙여 두지 않는다
       step: (a, delta) => stepPage(pageOptions(appearance), a, delta),
-      fill: (grid, a) => fillGrid(grid, buildPage(pageOptions(appearance), a), deps.today()),
+      fill: (grid, a) => drawPage(grid, a),
       onCurrent: () => {
         closePicker(); // 다른 쪽으로 넘어갔으면 고르던 해와 달이 달라졌다
         renderHead();
+        // 구독 바꾸기(서버 자료 받기를 새로 걸고 끊기)는 무겁다. 손가락으로 넘기는 동안이면 멈춘 뒤에 한다.
+        if (pager.busy()) subscribeLater = true;
+        else subscribe();
+      },
+      onSettle: () => {
+        if (!subscribeLater) return;
+        subscribeLater = false;
         subscribe();
       },
     },
@@ -253,14 +307,22 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   );
   el.append(pager.el);
 
+  let headHtml = '';
   function renderHead(): void {
     const page = buildPage(pageOptions(appearance), pager.anchor());
     const [year, month] = page.title.split('-');
-    yearText.textContent = `${year}년`;
-    monthText.textContent = `${Number(month)}월`;
-    dowEl.innerHTML = (appearance.weekNumbers ? '<span></span>' : '') + page.weekdays.map(dowSpan).join('');
+    const yearLabel = `${year}년`;
+    const monthLabel = `${Number(month)}월`;
+    if (yearText.textContent !== yearLabel) yearText.textContent = yearLabel;
+    if (monthText.textContent !== monthLabel) monthText.textContent = monthLabel;
+    const dow = (appearance.weekNumbers ? '<span></span>' : '') + page.weekdays.map(dowSpan).join('');
+    if (dow !== headHtml) {
+      headHtml = dow;
+      dowEl.innerHTML = dow;
+    }
   }
 
+  let subscribeLater = false;
   // 구독할 달을 알린다. 붙어 있는 쪽들이 보여 주는 달 중 지금 달과 그 앞뒤 한 달 밖의 것은 더해서 구독한다.
   // 그래야 미끄러져 들어오거나 나가는 쪽도 메모를 잃지 않는다.
   function subscribe(): void {
@@ -360,7 +422,11 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   window.addEventListener('online', onConnection);
   window.addEventListener('offline', onConnection);
   // 고르는 상자는 폭이 바뀔 때만 스스로 닫는다(datePick.ts). 높이만 바뀌는 것은 아이폰 Safari의 주소 막대일 수 있다.
-  const onResize = (): void => redraw();
+  // 창 크기가 바뀌면 칸 크기를 다시 재고 모든 쪽을 다시 그린다.
+  const onResize = (): void => {
+    relayout();
+    redraw();
+  };
   window.addEventListener('resize', onResize);
 
   // 창을 켜 둔 채 날짜가 바뀌어도 오늘 표시가 따라가게 한다. 자정 직후의 타이머는 숨은 탭에서 늦어질 수 있어
@@ -402,6 +468,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
       appearance = next;
       if (nextWeb) web = nextWeb;
       custom = web === undefined;
+      relayout();
       applyClasses();
       pager.jump(pager.anchor()); // 넘기는 폭과 배치가 바뀌었을 수 있다
     },
