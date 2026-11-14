@@ -493,6 +493,92 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     await sleep(600);
   }
 
+  // 음력과 공휴일: 12월에는 성탄절이 있다. 다음 달 단추로 가장 가까운 12월까지 가서 그 칸을 본다.
+  const monthNow = Number((await view()).title.split('년')[1].replace('월', '').trim());
+  for (let i = monthNow; i < 12; i++) await pressNext();
+  type HolidayCell = { holiday: boolean; numRed: boolean; name: string | null; nameBelow: boolean; nameFits: boolean; lunar: string | null; lunarBeside: boolean; lunarCount: number; lunarClipped: number; days: number };
+  const xmas = await cdp.evaluate<HolidayCell | null>(`(() => {
+    const cell = document.querySelector('.grid.current .cell[data-key$="-12-25"]');
+    if (!cell) return null;
+    const num = cell.querySelector('.num');
+    const name = cell.querySelector('.hname');
+    const lunar = cell.querySelector('.lunar');
+    const box = (el) => el.getBoundingClientRect();
+    // 글이 상자보다 넓은가. 음력은 앞쪽이 잘리므로 scrollWidth로는 알 수 없어 글의 폭을 직접 잰다.
+    const wider = (el) => { const range = document.createRange(); range.selectNodeContents(el); return range.getBoundingClientRect().width > box(el).width + 0.5; };
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--sun)';
+    document.body.append(probe);
+    const sun = getComputedStyle(probe).color;
+    probe.remove();
+    const lunars = [...document.querySelectorAll('.grid.current .cell:not(.other) .lunar')];
+    return {
+      holiday: cell.classList.contains('holiday'),
+      numRed: getComputedStyle(num).color === sun || cell.classList.contains('today') || cell.hasAttribute('data-color'),
+      name: name ? name.textContent : null,
+      nameBelow: !!name && box(name).top >= box(num).bottom - 0.5,
+      nameFits: !!name && !wider(name),
+      lunar: lunar ? lunar.textContent : null,
+      lunarBeside: !!lunar && box(lunar).left >= box(num).right - 0.5 && box(lunar).top < box(num).bottom && box(lunar).right <= box(cell).right + 0.5,
+      lunarCount: lunars.length,
+      lunarClipped: lunars.filter(wider).length,
+      days: document.querySelectorAll('.grid.current .cell:not(.other)').length,
+    };
+  })()`);
+  record(
+    '공휴일은 숫자가 빨갛고 이름이 숫자 아래에 나오며, 음력은 숫자 옆에 잘리지 않고 나온다',
+    xmas !== null && xmas.holiday && xmas.numRed && xmas.name === '성탄절' && xmas.nameBelow && xmas.nameFits && xmas.lunar !== null && xmas.lunarBeside && xmas.days === 31 && xmas.lunarCount === 31 && xmas.lunarClipped === 0,
+    xmas === null
+      ? '12월 25일 칸을 찾지 못했다'
+      : `12월 25일: 공휴일 ${xmas.holiday ? '표시' : '아님'}, 숫자 ${xmas.numRed ? '빨강' : '빨강 아님'}, 이름 ${xmas.name ?? '없음'}(${xmas.nameBelow ? '숫자 아래' : '숫자 아래가 아님'}, ${xmas.nameFits ? '다 보임' : '잘림'}), 음력 ${xmas.lunar ?? '없음'}(${xmas.lunarBeside ? '숫자 옆' : '숫자 옆이 아님'}), 이번 달 ${xmas.days}일 가운데 음력 ${xmas.lunarCount}칸, 잘린 것 ${xmas.lunarClipped}칸`,
+  );
+  await tap(await center($('.pill')));
+  await rest();
+
+  // 설정: 고르면 바로 바뀌고 이 기기에 저장된다. 다시 고르면 처음으로 돌아온다.
+  type Look = { theme: string | null; accent: string; lunars: number; dow: string; memoSize: string; weeks: number; saved: Record<string, unknown> | null };
+  const look = () =>
+    cdp.evaluate<Look>(`(() => ({
+      theme: document.documentElement.getAttribute('data-theme'),
+      accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim().toUpperCase(),
+      lunars: document.querySelectorAll('.grid.current .lunar').length,
+      dow: [...document.querySelectorAll('.dow span')].map((s) => s.textContent).join(''),
+      memoSize: document.querySelector('.calendar').style.getPropertyValue('--memo-size'),
+      weeks: document.querySelectorAll('.grid.current .wk').length,
+      saved: JSON.parse(localStorage.getItem('calfif.prefs') || 'null'),
+    }))()`);
+  const choice = (group: string, value: string) => `document.querySelector('[aria-labelledby="${group}"] [data-value="${value}"]')`;
+  const toggleOf = (name: string) => `[...document.querySelectorAll('label.pref-row')].find((l) => l.querySelector('.pref-name').textContent === ${JSON.stringify(name)}).querySelector('input')`;
+  /** 설정 목록에서 그 조작부가 보이게 한 뒤 손가락으로 누른다. */
+  const tapIn = async (elementJs: string): Promise<void> => {
+    await cdp.evaluate(`(${elementJs}).scrollIntoView({ block: 'center' })`);
+    await sleep(150);
+    await tap(await center(elementJs));
+    await sleep(350);
+  };
+  const lookBefore = await look();
+  await tap(await center(gear));
+  await sheetSettled();
+  for (const el of [choice('prefTheme', 'dark'), choice('prefAccent', 'pink'), toggleOf('음력'), choice('prefWeekStart', '1'), choice('prefMemoSize', 'large'), toggleOf('주 번호')]) await tapIn(el);
+  const lookChanged = await look();
+  for (const el of [choice('prefTheme', 'auto'), choice('prefAccent', 'blue'), toggleOf('음력'), choice('prefWeekStart', '0'), choice('prefMemoSize', 'medium'), toggleOf('주 번호')]) await tapIn(el);
+  const lookBack = await look();
+  const savedChanged = lookChanged.saved ?? {};
+  record(
+    '설정에서 고르면 달력이 바로 바뀌고 저장된다(밝기, 색상, 음력, 한 주의 시작, 글자 크기, 주 번호). 다시 고르면 처음과 같다',
+    lookChanged.theme === 'dark' && lookChanged.accent === '#FF8FB8' && lookBefore.lunars > 0 && lookChanged.lunars === 0 && lookBefore.dow === '일월화수목금토' && lookChanged.dow === '월화수목금토일' &&
+      lookChanged.memoSize === '12px' && lookBefore.weeks === 0 && lookChanged.weeks > 0 &&
+      savedChanged.theme === 'dark' && savedChanged.accent === 'pink' && savedChanged.lunar === false && savedChanged.weekStart === 1 && savedChanged.memoSize === 'large' && savedChanged.weekNumbers === true &&
+      lookBack.theme === null && lookBack.accent === lookBefore.accent && lookBack.lunars === lookBefore.lunars && lookBack.dow === lookBefore.dow && lookBack.memoSize === '10px' && lookBack.weeks === 0,
+    `바꾼 뒤: 밝기 ${lookChanged.theme}, 강조색 ${lookChanged.accent}, 음력 ${lookBefore.lunars} -> ${lookChanged.lunars}칸, 요일 줄 ${lookChanged.dow}, 메모 글자 ${lookChanged.memoSize}, 주 번호 ${lookChanged.weeks}칸, 저장 ${JSON.stringify(lookChanged.saved)} / 되돌린 뒤: 밝기 ${lookBack.theme ?? '자동'}, 강조색 ${lookBack.accent}, 음력 ${lookBack.lunars}칸, 요일 줄 ${lookBack.dow}, 메모 글자 ${lookBack.memoSize}`,
+  );
+  if ((await sheetNow()) !== null) {
+    await cdp.evaluate("document.querySelector('.sheet.settings').scrollTop = 0");
+    await sleep(100);
+    await tap(await center($('.sheet .sheet-bar .textbtn.end')));
+    await sleep(600);
+  }
+
   await emulatePhone(cdp, { reducedMotion: true });
   await sleep(500);
   g = await pressNext();
@@ -598,7 +684,9 @@ async function main(): Promise<void> {
   const { cdp, kill } = await launchEdge({
     headless: true,
     profileDir: resolve('.tools', 'edge-profile-touch'),
-    args: [`--window-size=${PHONE.width},${PHONE.height}`],
+    // Windows의 애니메이션 효과가 꺼져 있으면(설정 → 접근성 → 시각 효과) Chromium은 scrollTo의 부드러운 스크롤을 한 번에 건너뛴다.
+    // 그러면 다음 달 단추와 멈췄다 떼기의 확인이 PC 설정 때문에 실패한다. 이 확인은 움직임이 켜진 기기를 보는 것이므로 켜 둔다.
+    args: [`--window-size=${PHONE.width},${PHONE.height}`, '--enable-smooth-scrolling'],
   });
   let passed = false;
   try {
