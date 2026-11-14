@@ -72,7 +72,7 @@ it('사용자 관리 단추는 onManageUsers를 부른다', () => {
   button('사용자 관리').click();
   expect(onManageUsers).toHaveBeenCalledTimes(1);
 });
-const widget = { load: () => new Promise<string>(() => {}), config: { projectId: 'demo-calfif', apiKey: 'k', appUrl: 'https://example.test' }, copy: async () => {} };
+const widget = { load: () => new Promise<string>(() => {}), config: { projectId: 'demo-calfif', apiKey: 'k', appUrl: 'https://example.test', holidayUrl: '' }, copy: async () => {} };
 it('사용자와 비밀번호 칸은 동기화 뒤, 위젯 앞에 있다', () => {
   const { root } = mount({ onManageUsers: vi.fn(), onChangePassword: vi.fn(), widget });
   const labels = [...root.querySelectorAll('.field-label')].map((l) => l.textContent);
@@ -91,7 +91,7 @@ it('widget을 주면 위젯 칸이 로그아웃 앞에 있다', () => {
 });
 
 function widgetMount(copy: () => Promise<void>) {
-  const m = mount({ widget: { load: async () => '"__PROJECT_ID__" "__API_KEY__" "__APP_URL__"', config: widget.config, copy } });
+  const m = mount({ widget: { load: async () => '"__PROJECT_ID__" "__API_KEY__" "__APP_URL__" "__HOLIDAY_URL__"', config: widget.config, copy } });
   const sheet = m.root.querySelector<HTMLElement>('.sheet')!;
   const close = m.root.querySelector<HTMLElement>('.textbtn.end')!;
   m.button('로그아웃').hidden = true; // 위젯 칸의 것이 맨 끝이 되게 한다

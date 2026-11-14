@@ -1,0 +1,93 @@
+# 공공데이터포털의 특일 정보에서 공휴일을 받아 holiday-data 가지의 holidays.json으로 올린다(하루 한 번).
+# 웹앱, PC 앱, 위젯은 그 파일을 하루에 한 번 읽어 계산한 공휴일에 더한다. 그래서 새 임시공휴일은 배포 없이 나온다.
+# 인증키는 저장소 비밀값 DATA_GO_KR_KEY에 둔다. 없으면 아무것도 하지 않고 성공으로 끝난다. 준비 순서는 README의 "공휴일 자료 받아 오기 준비".
+name: 공휴일 자료 갱신
+
+on:
+  schedule:
+    - cron: '23 18 * * *' # 한국 시각 03:23
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: holiday-data
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 올려 둔 자료 읽기
+        id: published
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 가지가 아직 없으면(처음 실행) 지난 자료 없이 간다. ls-remote --exit-code는 찾지 못하면 2로 끝난다.
+          set +e
+          git ls-remote --exit-code --heads origin holiday-data > /dev/null
+          code=$?
+          set -e
+          if [ "$code" -eq 2 ]; then
+            echo "holiday-data 가지가 아직 없다. 처음 만든다."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$code" -ne 0 ]; then
+            echo "holiday-data 가지를 확인하지 못했다 (git ls-remote 종료 코드 $code)." >&2
+            exit "$code"
+          fi
+          git fetch --no-tags --depth=1 origin +refs/heads/holiday-data:refs/remotes/origin/holiday-data
+          if git cat-file -e origin/holiday-data:holidays.json 2> /dev/null; then
+            git show origin/holiday-data:holidays.json > "$RUNNER_TEMP/previous.json"
+          fi
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+          echo "last_commit=$(git log -1 --format=%ct origin/holiday-data)" >> "$GITHUB_OUTPUT"
+
+      - name: 특일 정보 받기
+        id: fetch
+        shell: bash
+        env:
+          DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+        run: |
+          set -euo pipefail
+          args=(--out "$RUNNER_TEMP/holidays.json")
+          if [ -f "$RUNNER_TEMP/previous.json" ]; then
+            args+=(--previous "$RUNNER_TEMP/previous.json")
+          fi
+          node scripts/fetch-holidays.mjs "${args[@]}"
+
+      - name: holiday-data 가지에 올리기
+        if: steps.fetch.outputs.skipped != 'true'
+        shell: bash
+        env:
+          EXISTS: ${{ steps.published.outputs.exists }}
+          LAST_COMMIT: ${{ steps.published.outputs.last_commit }}
+        run: |
+          set -euo pipefail
+          new="$RUNNER_TEMP/holidays.json"
+          old="$RUNNER_TEMP/previous.json"
+          message="공휴일 자료를 새로 받는다"
+          if [ "$EXISTS" = "true" ] && [ -f "$old" ] && cmp -s "$new" "$old"; then
+            # 내용이 같으면 올리지 않는다. 다만 마지막 커밋이 7일 넘게 지났으면 빈 커밋을 하나 올린다.
+            # 공개 저장소에 60일 동안 활동이 없으면 GitHub가 예약 실행을 멈추기 때문이다.
+            age=$(( $(date +%s) - ${LAST_COMMIT:-0} ))
+            if [ "$age" -lt $(( 7 * 86400 )) ]; then
+              echo "올려 둔 자료와 같다. 올리지 않는다."
+              exit 0
+            fi
+            message="공휴일 자료가 그대로임을 적는다(예약 실행이 멈추지 않게)"
+          fi
+          # holidays.json 하나만 든 트리로 커밋을 만든다. 가지가 없으면 부모 없는 커밋(새 가지)이 된다.
+          blob=$(git hash-object -w --no-filters "$new")
+          tree=$(printf '100644 blob %s\tholidays.json\n' "$blob" | git mktree)
+          parent=()
+          if [ "$EXISTS" = "true" ]; then
+            parent=(-p origin/holiday-data)
+          fi
+          commit=$(git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit-tree "$tree" "${parent[@]}" -m "$message")
+          git push origin "$commit:refs/heads/holiday-data"
+          echo "holiday-data 가지에 올렸다: $message"

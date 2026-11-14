@@ -15,11 +15,12 @@ const header = (version: string): string => `// Variables used by Scriptable.
 // icon-color: deep-blue; icon-glyph: calendar-alt;
 // CalendarFIF 위젯 ${version}. 웹앱 설정의 "위젯 스크립트 복사"로 받은 것을 그대로 붙여 넣는다.
 `;
+// __HOLIDAY_URL__은 공휴일 자료 파일의 주소다. 웹앱이 채우며, 준비 전이면 빈 글로 채운다(위젯은 계산한 공휴일만 쓴다).
 const start = (version: string): string => `
-await CalendarFIFWidget.run({ ${GLOBALS.join(', ')} }, { projectId: "__PROJECT_ID__", apiKey: "__API_KEY__", appUrl: "__APP_URL__", version: ${JSON.stringify(version)} });
+await CalendarFIFWidget.run({ ${GLOBALS.join(', ')} }, { projectId: "__PROJECT_ID__", apiKey: "__API_KEY__", appUrl: "__APP_URL__", holidayUrl: "__HOLIDAY_URL__", version: ${JSON.stringify(version)} });
 Script.complete();
 `;
-const PLACEHOLDERS = ['__PROJECT_ID__', '__API_KEY__', '__APP_URL__'];
+const PLACEHOLDERS = ['__PROJECT_ID__', '__API_KEY__', '__APP_URL__', '__HOLIDAY_URL__'];
 
 /** 스크립트의 버전 글: package.json의 버전과 만든 날(이 PC의 날짜). 예: '0.4.0 (2026-11-14)'. */
 export function versionText(version: string, built: Date): string {

@@ -1,13 +1,18 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { fillPlaceholders, widgetSection, type WidgetConfig, type WidgetInstallDeps } from './widgetInstall';
 
-const config: WidgetConfig = { projectId: 'demo-calfif', apiKey: 'fake-key', appUrl: 'https://example.test' };
-const script = 'const c = { projectId: "__PROJECT_ID__", apiKey: "__API_KEY__", appUrl: "__APP_URL__" };';
+const config: WidgetConfig = { projectId: 'demo-calfif', apiKey: 'fake-key', appUrl: 'https://example.test', holidayUrl: 'https://example.com/holidays.json' };
+const script = 'const c = { projectId: "__PROJECT_ID__", apiKey: "__API_KEY__", appUrl: "__APP_URL__", holidayUrl: "__HOLIDAY_URL__" };';
 
 afterEach(() => document.body.replaceChildren());
 
-it('자리 표시 셋을 채운다', () => {
-  expect(fillPlaceholders(script, config)).toBe('const c = { projectId: "demo-calfif", apiKey: "fake-key", appUrl: "https://example.test" };');
+it('자리 표시 넷을 채운다', () => {
+  expect(fillPlaceholders(script, config)).toBe('const c = { projectId: "demo-calfif", apiKey: "fake-key", appUrl: "https://example.test", holidayUrl: "https://example.com/holidays.json" };');
+});
+it('공휴일 자료 주소는 비어도 된다(빈 글로 채운다)', () => {
+  expect(fillPlaceholders(script, { ...config, holidayUrl: '' })).toBe('const c = { projectId: "demo-calfif", apiKey: "fake-key", appUrl: "https://example.test", holidayUrl: "" };');
+  expect(() => fillPlaceholders(script.replace('__HOLIDAY_URL__', ''), config)).toThrow('__HOLIDAY_URL__');
+  expect(() => fillPlaceholders(script, { ...config, holidayUrl: '', appUrl: '' })).toThrow('appUrl');
 });
 it('값 안의 따옴표와 역슬래시는 글자열 안에서 안전하게 쓴다', () => {
   const tricky = { ...config, apiKey: 'a"b\\c$&' };
@@ -16,7 +21,7 @@ it('값 안의 따옴표와 역슬래시는 글자열 안에서 안전하게 쓴
   expect(new Function(`${out}; return c;`)().apiKey).toBe('a"b\\c$&');
 });
 it("줄바꿈과 따옴표, 달러 기호 묶음도 그대로 들어가고 결과는 여전히 글로 읽힌다", () => {
-  const tricky = { projectId: 'a\nb', apiKey: "x$'y$`z$&w$1", appUrl: 'https://example.test/$`' };
+  const tricky = { projectId: 'a\nb', apiKey: "x$'y$`z$&w$1", appUrl: 'https://example.test/$`', holidayUrl: 'https://example.com/"h\\$&' };
   const out = fillPlaceholders(script, tricky);
   expect(out).not.toContain('a\nb'); // 줄바꿈은 \n 두 글자로 들어간다
   expect(new Function(`${out}; return c;`)()).toEqual(tricky);

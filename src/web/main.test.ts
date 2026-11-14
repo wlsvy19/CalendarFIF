@@ -75,6 +75,16 @@ vi.mock('./accessStore', () => ({
     remove: () => Promise.resolve(),
   }),
 }));
+// 공휴일 자료 받기는 네트워크에 닿으므로 켜는 것만 기록한다. 시험이 onChange를 직접 부른다.
+const feed: { starts: number; deps?: import('./holidayFeed').HolidayFeedDeps } = { starts: 0 };
+vi.mock('./holidayFeed', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./holidayFeed')>()),
+  startHolidayFeed: (deps: import('./holidayFeed').HolidayFeedDeps) => {
+    feed.starts += 1;
+    feed.deps = deps;
+    return { stop() {} };
+  },
+}));
 const captured: { mountMain?: (root: HTMLElement, session: { uid: string; email: string }) => { destroy(): void } } = {};
 vi.mock('./app', () => ({
   createApp: (deps: { mountMain: typeof captured.mountMain }) => {
@@ -86,6 +96,7 @@ vi.mock('./app', () => ({
 const bridge = new FakeBridge();
 async function loadMain(): Promise<NonNullable<typeof captured.mountMain>> {
   vi.stubEnv('VITE_DESKTOP', '1');
+  vi.stubEnv('VITE_HOLIDAY_URL', 'https://example.com/holidays.json');
   (window as Window).calfifDesktop = bridge;
   await import('./main');
   return captured.mountMain!;
@@ -300,6 +311,32 @@ it('안내를 거쳐 달력이 돌아와도 주소 바뀜 한 번에 주소 맞�
   counts.redraws = 0;
   window.dispatchEvent(new StorageEvent('storage', { key: null }));
   expect(counts.redraws).toBe(1);
+});
+
+it('공휴일 자료 받기는 로그인 전에 한 번만 켜고, 새 자료가 오면 열려 있는 달력을 다시 그린다', async () => {
+  await loadMain();
+  expect(feed.starts).toBe(1); // 페이지를 불러올 때 한 번(로그인 전)
+  expect(feed.deps!.url).toBe('https://example.com/holidays.json'); // VITE_HOLIDAY_URL
+  feed.deps!.onChange(); // 달력이 없을 때는 아무것도 하지 않는다
+
+  const first = await start('feed-a');
+  counts.redraws = 0;
+  feed.deps!.onChange();
+  expect(counts.redraws).toBe(1);
+
+  // 안내를 거쳐 달력을 다시 올려도 한 번만 다시 그린다.
+  access.emit!(server(accessDoc({ disabled: true })));
+  access.emit!(server(accessDoc()));
+  expect(first.root.querySelectorAll('.calendar')).toHaveLength(1);
+  counts.redraws = 0;
+  feed.deps!.onChange();
+  expect(counts.redraws).toBe(1);
+
+  first.app.destroy();
+  counts.redraws = 0;
+  feed.deps!.onChange();
+  expect(counts.redraws).toBe(0);
+  expect(feed.starts).toBe(1); // 다시 로그인해도 새로 켜지 않는다
 });
 
 it('접근 상태를 <html data-access>에 적고, 로그아웃하면 지운다', async () => {

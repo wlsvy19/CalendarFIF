@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { setOfficialHolidays } from '../core/holidays';
 import type { Config } from './api';
 import { drawnTexts, makeFakeHost, nativeTexts, widgetRecord, type FakeAnswer, type FakeNode, type FakeHost, type FakeOptions, type FakeRequest, type FakeWidgetRecord } from './fakeHost';
 import { readCache, run } from './main';
@@ -699,5 +700,133 @@ describe('기본 부품 그리기가 깨지면(오류 내용은 끝까지 보인
     const bare = makeNative({ keychain: loggedIn, failTexts: 2, failDrawing: 99 });
     await run(bare, { ...cfg, version: '0.4.0 (2026-11-14)' }, now);
     expect(textsOf(lastWidget(bare))).toEqual(['오류', '글자 시험 오류', '(0.4.0 (2026-11-14))']);
+  });
+});
+
+describe('공휴일 자료', () => {
+  // 지어낸 주소와 자료. 2026-11-20(금)을 임시공휴일로 알린다.
+  const HOLIDAY_URL = 'https://example.com/holidays.json';
+  const HOLIDAYS = '/docs/calendarfif-holidays.json';
+  const withUrl: Config = { ...cfg, holidayUrl: HOLIDAY_URL };
+  const file = (name = '임시공휴일', date = '2026-11-20') => ({ version: 1, updatedAt: '2026-11-12T18:23:05.000Z', years: { 2026: { days: [{ date, name }] } } });
+  const at = now().getTime();
+  const HOUR = 3_600_000;
+  const saved = (fetchedAt: number, data: unknown = file(), attemptedAt = fetchedAt) => ({ [HOLIDAYS]: JSON.stringify({ fetchedAt, attemptedAt, data }) });
+  /** 공휴일 자료 주소에는 answer로, 그 밖은 보통 서버처럼 답한다. */
+  const host = (o: FakeOptions, answer: () => FakeAnswer = () => ({ body: file() })): FakeHost => {
+    const rest = backend();
+    return makeFakeHost({ handler: (req) => (req.url === HOLIDAY_URL ? answer() : rest(req)), keychain: loggedIn, ...o });
+  };
+  const holidayRequests = (h: FakeHost) => h.state.requests.filter((r) => r.url === HOLIDAY_URL);
+  const savedFile = (h: FakeHost) => JSON.parse(h.state.files.get(HOLIDAYS)!) as { fetchedAt: number; attemptedAt: number; data: unknown };
+  afterEach(() => setOfficialHolidays(null));
+
+  it('받아 둔 것이 없으면 받아서 보관하고, 그 공휴일을 그린다', async () => {
+    const h = host({});
+    await run(h, withUrl, now);
+    expect(holidayRequests(h)).toEqual([expect.objectContaining({ method: 'GET', headers: {} })]);
+    expect(savedFile(h)).toEqual({ fetchedAt: at, attemptedAt: at, data: { version: 1, years: file().years } });
+    expect(nativeTexts(h)).toContain('임시공휴일');
+    expect(nativeTexts(h)).toContain('리뷰');
+  });
+
+  it('그림 위젯에도 나온다', async () => {
+    const h = host({ widgetParameter: 'image' });
+    await run(h, withUrl, now);
+    expect(drawnTexts(h)).toContain('임시공휴일');
+  });
+
+  it('24시간 안에 받은 것은 묻지 않고 쓴다', async () => {
+    const h = host({ files: saved(at - 23 * HOUR) });
+    await run(h, withUrl, now);
+    expect(holidayRequests(h)).toEqual([]);
+    expect(nativeTexts(h)).toContain('임시공휴일');
+  });
+
+  it('주소가 없어도 받아 둔 것은 쓰고, 묻지는 않는다', async () => {
+    for (const config of [cfg, { ...cfg, holidayUrl: '' }, { ...cfg, holidayUrl: '__HOLIDAY_URL__' }]) {
+      setOfficialHolidays(null);
+      const h = host({ files: saved(at - 48 * HOUR) });
+      await run(h, config, now);
+      expect(holidayRequests(h)).toEqual([]);
+      expect(h.state.requests.filter((r) => !r.url.includes('googleapis'))).toEqual([]);
+      expect(nativeTexts(h)).toContain('임시공휴일');
+    }
+  });
+
+  it('24시간이 지났으면 새로 받는다', async () => {
+    const h = host({ files: saved(at - 25 * HOUR) }, () => ({ body: file('대통령선거일', '2026-11-25') }));
+    await run(h, withUrl, now);
+    expect(holidayRequests(h)).toHaveLength(1);
+    expect(nativeTexts(h)).toContain('대통령선거일');
+    expect(nativeTexts(h)).not.toContain('임시공휴일');
+    expect(savedFile(h).fetchedAt).toBe(at);
+  });
+
+  it('받지 못하면 받아 둔 것으로 그리고, 시도한 때를 적어 6시간 동안은 다시 묻지 않는다', async () => {
+    const failing = () => {
+      throw new Error('연결 안 됨');
+    };
+    const h = host({ files: saved(at - 25 * HOUR) }, failing);
+    await run(h, withUrl, now);
+    expect(holidayRequests(h)).toHaveLength(1);
+    expect(nativeTexts(h)).toContain('임시공휴일');
+    expect(nativeTexts(h)).toContain('리뷰');
+    expect(savedFile(h)).toMatchObject({ fetchedAt: at - 25 * HOUR, attemptedAt: at, data: { version: 1, years: file().years } });
+
+    // 5시간 뒤: 묻지 않는다. 7시간 뒤: 다시 묻는다.
+    const files = Object.fromEntries(h.state.files);
+    const later = host({ files }, failing);
+    await run(later, withUrl, () => new Date(at + 5 * HOUR));
+    expect(holidayRequests(later)).toEqual([]);
+    const after = host({ files }, failing);
+    await run(after, withUrl, () => new Date(at + 7 * HOUR));
+    expect(holidayRequests(after)).toHaveLength(1);
+  });
+
+  it('잘못된 파일이나 HTTP 오류는 받지 못한 것과 같다(위젯은 지금처럼 그린다)', async () => {
+    const answers: (() => FakeAnswer)[] = [
+      () => ({ body: { version: 2, years: {} } }),
+      () => ({ body: 'not json' }),
+      () => ({ status: 404, body: file() }),
+    ];
+    for (const answer of answers) {
+      const h = host({}, answer);
+      await run(h, withUrl, now);
+      expect(holidayRequests(h)).toHaveLength(1);
+      expect(nativeTexts(h)).not.toContain('임시공휴일');
+      expect(nativeTexts(h)).toContain('리뷰');
+      expect(savedFile(h)).toMatchObject({ attemptedAt: at, data: null });
+    }
+  });
+
+  it('보관한 파일이 깨졌으면 없는 것으로 본다', async () => {
+    const h = host({ files: { [HOLIDAYS]: '{' } });
+    await run(h, withUrl, now);
+    expect(holidayRequests(h)).toHaveLength(1);
+    expect(nativeTexts(h)).toContain('임시공휴일');
+  });
+
+  it('파일 다루기가 깨져도 위젯은 지금처럼 그린다', async () => {
+    const h = host({});
+    const local = h.FileManager.local();
+    h.FileManager.local = () => ({ ...local, writeString: () => { throw new Error('쓰기 시험 오류'); } });
+    await run(h, withUrl, now);
+    expect(h.state.setWidgets).toHaveLength(1);
+    expect(nativeTexts(h)).toContain('리뷰');
+    expect(nativeTexts(h)).toContain('임시공휴일'); // 보관하지 못해도 이번에는 쓴다
+  });
+
+  it('연결이 안 돼 오프라인으로 그릴 때도 받아 둔 공휴일을 쓴다', async () => {
+    const files = { ...saved(at - HOUR), [CACHE]: JSON.stringify({ monthId: '2026-11', days: {}, savedAt: 1 }) };
+    const h = makeFakeHost({ handler: () => { throw new Error('offline'); }, keychain: loggedIn, files });
+    await run(h, withUrl, now);
+    expect(nativeTexts(h)).toEqual(expect.arrayContaining(['오프라인', '임시공휴일']));
+  });
+
+  it('로그인 전에는 묻지 않는다', async () => {
+    const h = host({ keychain: {} });
+    await run(h, withUrl, now);
+    expect(h.state.requests).toEqual([]);
   });
 });
