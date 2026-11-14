@@ -1,6 +1,8 @@
 /**
  * 대한민국의 공휴일(일요일은 뺀다). 「관공서의 공휴일에 관한 규정」의 공휴일과 대체공휴일을 해마다 계산하고,
- * 선거일과 임시공휴일은 아래 표(ONE_OFF)에 적힌 날만 안다(2010년부터 적었다). 새로 정해지면 표에 더한다.
+ * 선거일과 임시공휴일은 아래 표(ONE_OFF)에 적힌 날을 안다(2010년부터 적었다).
+ * 받아 둔 공휴일 자료(한국천문연구원 특일 정보, setOfficialHolidays)가 있으면 그 자료에만 있는 날을 더한다.
+ * 그래서 새로 정해진 임시공휴일은 배포 없이 나온다. 계산한 날은 자료에 없어도 빼지 않는다.
  * 1998년 이전은 그때의 규정과 다를 수 있다(1월 2일, 설날과 추석 연휴의 길이, 국군의 날 등은 따지지 않는다).
  */
 import { solarOfLunar } from './lunar';
@@ -43,6 +45,71 @@ const ONE_OFF: Record<string, string> = {
 };
 
 const tables = new Map<number, Map<string, string[]>>();
+
+/** 받아 둔 공휴일 자료의 한 해. 날짜(YYYY-MM-DD)와 자료에 적힌 이름이다. */
+export type OfficialYear = { days: { date: string; name: string }[] };
+
+const NAME_MAX = 30;
+const DAYS_MAX = 60;
+let official: Record<string, OfficialYear> | null = null;
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** 실제로 있는 날짜인가(YYYY-MM-DD). */
+function isRealDate(dateKey: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return false;
+  const ms = msOf(dateKey);
+  return !Number.isNaN(ms) && keyOf(ms) === dateKey;
+}
+
+/** 한 해의 자료를 확인하고 날짜와 이름만 남긴다. 하나라도 잘못되면 null(그해를 쓰지 않는다). */
+function checkYear(year: string, value: unknown): OfficialYear | null {
+  if (!/^\d{4}$/.test(year) || !isObject(value) || !Array.isArray(value.days) || value.days.length > DAYS_MAX) return null;
+  const days: OfficialYear['days'] = [];
+  for (const item of value.days) {
+    if (!isObject(item) || typeof item.date !== 'string' || typeof item.name !== 'string') return null;
+    const name = item.name.trim();
+    if (!item.date.startsWith(`${year}-`) || !isRealDate(item.date) || name === '' || Array.from(name).length > NAME_MAX) return null;
+    days.push({ date: item.date, name });
+  }
+  return { days };
+}
+
+/** 해마다의 자료에서 쓸 수 있는 해만 남긴다. 남는 해가 없으면 null. */
+function checkYears(years: unknown): Record<string, OfficialYear> | null {
+  if (!isObject(years)) return null;
+  const out: Record<string, OfficialYear> = {};
+  for (const [year, value] of Object.entries(years)) {
+    const checked = checkYear(year, value);
+    if (checked) out[year] = checked;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * 올려 둔 공휴일 자료 파일(holidays.json)을 확인한다: { version: 1, years: { "2026": { days: [{ date, name }] } } }.
+ * 맨 위가 잘못되면 null. 해의 이름이 네 자리 숫자가 아니거나, 날짜가 그해의 실제 날짜가 아니거나, 이름이 비었거나 30자를 넘거나,
+ * 한 해에 60일이 넘으면 그해를 뺀다. 쓸 수 있는 해가 하나도 없으면 null.
+ */
+export function parseOfficialHolidays(input: unknown): Record<string, OfficialYear> | null {
+  if (!isObject(input) || input.version !== 1) return null;
+  return checkYears(input.years);
+}
+
+/** 받아 둔 공휴일 자료를 쓴다. null이나 잘못된 자료를 주면 자료 없이 계산만 한다. */
+export function setOfficialHolidays(years: Record<string, OfficialYear> | null): void {
+  official = years === null ? null : checkYears(years);
+  tables.clear();
+}
+
+/** 자료에만 있는 날의 이름을 앱이 쓰는 이름에 맞춘다. 그 밖의 이름(임시공휴일, 대통령선거일 등)은 그대로 둔다. */
+function officialName(name: string): string {
+  if (name === '1월1일') return '신정';
+  if (name === '기독탄신일') return '성탄절';
+  if (name === '삼일절') return '3.1절';
+  if (name.startsWith(SUBSTITUTE)) return SUBSTITUTE; // 자료는 뒤에 (설날) 같은 까닭을 붙이기도 한다
+  return name;
+}
 
 const msOf = (dateKey: string): number => Date.UTC(Number(dateKey.slice(0, 4)), Number(dateKey.slice(5, 7)) - 1, Number(dateKey.slice(8, 10)));
 const keyOf = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
@@ -98,6 +165,18 @@ function build(year: number): Map<string, string[]> {
   for (const e of base) add(e.key, e.name);
   for (const [key, name] of Object.entries(ONE_OFF)) if (key.startsWith(`${y}-`)) add(key, name);
   for (const key of substitutes) add(key, SUBSTITUTE);
+
+  // 받아 둔 자료에만 있는 날을 더한다. 둘 다 있는 날은 화면이 써 온 계산의 이름(설날 연휴, 3.1절 등)을 쓴다.
+  // 계산한 날은 자료에 없어도 남긴다: 자료가 늦게 고쳐지거나 빠뜨려도(지난날의 제헌절처럼) 실제 공휴일을 가리지 않게 한다.
+  const extra = official?.[y];
+  if (extra) {
+    const computed = new Set(all.keys());
+    for (const { date, name } of extra.days) {
+      if (computed.has(date)) continue;
+      const shown = officialName(name);
+      if (!(all.get(date) ?? []).includes(shown)) add(date, shown);
+    }
+  }
   return new Map([...all].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 

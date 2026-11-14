@@ -1,4 +1,5 @@
 import { isColor } from '../core/color';
+import { parseOfficialHolidays, setOfficialHolidays, type OfficialYear } from '../core/holidays';
 import type { DayValue } from '../core/types';
 import { isApiError, readMonth, refreshSession, signIn, type Config } from './api';
 import type { Host, ListWidgetLike } from './host';
@@ -12,6 +13,9 @@ import { buildTree, messageTree, type Tree } from './tree';
 const REFRESH_KEY = 'calendarfif.refreshToken';
 const UID_KEY = 'calendarfif.uid';
 const CACHE_FILE = 'calendarfif-cache.json';
+const HOLIDAY_FILE = 'calendarfif-holidays.json';
+const HOLIDAY_FRESH_MS = 24 * 3_600_000; // 받은 지 이만큼 안이면 다시 받지 않는다
+const HOLIDAY_RETRY_MS = 6 * 3_600_000; // 받지 못하면 이만큼 지나야 다시 받는다(위젯은 자주 새로 그려진다)
 
 /** 위젯에 놓을 것: 기본은 기본 부품의 나무, 위젯 매개변수에 image가 있으면 그림 장면. */
 type View = { tree: Tree } | { scene: Scene };
@@ -93,6 +97,70 @@ export function readCache(host: Host, monthId: string): MonthData | null {
   }
 }
 
+type SavedHolidays = { fetchedAt: number; attemptedAt: number; data: Record<string, OfficialYear> | null };
+
+/** 보관해 둔 공휴일 자료. 없거나 깨졌으면 빈 것. */
+function readHolidays(host: Host, path: string): SavedHolidays {
+  try {
+    const fm = host.FileManager.local();
+    if (!fm.fileExists(path)) return { fetchedAt: 0, attemptedAt: 0, data: null };
+    const v = JSON.parse(fm.readString(path)) as { fetchedAt?: unknown; attemptedAt?: unknown; data?: unknown } | null;
+    const data = parseOfficialHolidays(v?.data);
+    return {
+      fetchedAt: data && typeof v?.fetchedAt === 'number' ? v.fetchedAt : 0,
+      attemptedAt: typeof v?.attemptedAt === 'number' ? v.attemptedAt : 0,
+      data,
+    };
+  } catch {
+    return { fetchedAt: 0, attemptedAt: 0, data: null };
+  }
+}
+
+const within = (now: number, at: number, ms: number): boolean => at > 0 && now - at >= 0 && now - at < ms;
+
+/** 공휴일 자료 파일을 받는다. 받지 못하거나 잘못된 파일이면 null. */
+async function fetchHolidays(host: Host, url: string): Promise<Record<string, OfficialYear> | null> {
+  try {
+    const req = new host.Request(url);
+    req.method = 'GET';
+    req.timeoutInterval = 10;
+    const json = await req.loadJSON();
+    const status = req.response?.statusCode;
+    if (status !== undefined && (status < 200 || status >= 300)) return null;
+    return parseOfficialHolidays(json);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 공휴일 자료(웹앱이 채운 holidayUrl)를 달력에 더한다. 보관해 둔 것을 먼저 쓰고, 없거나 받은 지 24시간이 지났으면 받는다.
+ * 받지 못하면 시도한 때를 적고 6시간이 지나야 다시 묻는다. 어떤 문제가 나도 던지지 않는다(그러면 지금처럼 계산한 공휴일로 그린다).
+ */
+async function prepareHolidays(host: Host, cfg: Config, now: Date): Promise<void> {
+  try {
+    const fm = host.FileManager.local();
+    const path = fm.joinPath(fm.documentsDirectory(), HOLIDAY_FILE);
+    const saved = readHolidays(host, path);
+    setOfficialHolidays(saved.data);
+    const url = cfg.holidayUrl ?? '';
+    if (!/^https?:\/\//i.test(url)) return; // 비었거나 채워지지 않은 자리 표시
+    const t = now.getTime();
+    if (saved.data && within(t, saved.fetchedAt, HOLIDAY_FRESH_MS)) return;
+    if (within(t, saved.attemptedAt, HOLIDAY_RETRY_MS)) return;
+    const data = await fetchHolidays(host, url);
+    const next: SavedHolidays = data ? { fetchedAt: t, attemptedAt: t, data } : { ...saved, attemptedAt: t };
+    try {
+      fm.writeString(path, JSON.stringify({ fetchedAt: next.fetchedAt, attemptedAt: next.attemptedAt, data: next.data ? { version: 1, years: next.data } : null }));
+    } catch {
+      // 보관하지 못해도 이번에는 쓴다.
+    }
+    if (data) setOfficialHolidays(data);
+  } catch {
+    // 공휴일 자료가 없어도 위젯은 그린다.
+  }
+}
+
 function clearLogin(host: Host): void {
   for (const key of [REFRESH_KEY, UID_KEY]) if (host.Keychain.contains(key)) host.Keychain.remove(key);
 }
@@ -118,9 +186,15 @@ async function load(host: Host, cfg: Config, env: Env, now: Date): Promise<View>
   const token = host.Keychain.contains(REFRESH_KEY) ? host.Keychain.get(REFRESH_KEY) : '';
   if (token === '') return loginHint(env);
   const monthId = env.today.slice(0, 7);
-  const fromCache = (code: string | null): View => {
+  // 공휴일 자료는 달을 읽는 동안 함께 받고, 달을 그리기 전에 기다린다. 이 약속은 거절되지 않는다.
+  const holidays = prepareHolidays(host, cfg, now);
+  const drawMonth = async (month: MonthData, offline: boolean): Promise<View> => {
+    await holidays;
+    return monthView(env, month, offline);
+  };
+  const fromCache = async (code: string | null): Promise<View> => {
     const cached = readCache(host, monthId);
-    if (cached) return monthView(env, cached, true);
+    if (cached) return drawMonth(cached, true);
     return code === null
       ? message(env, '불러오지 못했습니다', ['네트워크를 확인하세요.'])
       : message(env, '불러오지 못했습니다', ['잠시 뒤 다시 시도합니다.', `(${Array.from(code).slice(0, 40).join('')})`]);
@@ -131,7 +205,7 @@ async function load(host: Host, cfg: Config, env: Env, now: Date): Promise<View>
     const days = await readMonth(host, cfg, session, monthId);
     const month: MonthData = { monthId, days };
     writeCache(host, month, now);
-    return monthView(env, month, false);
+    return await drawMonth(month, false);
   } catch (e) {
     if (!isApiError(e)) throw e;
     if (e.kind === 'network') return fromCache(null);

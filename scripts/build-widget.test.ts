@@ -21,7 +21,7 @@ describe('finishBundle', () => {
     expect(script).toContain(iife);
     const lines = script.trimEnd().split('\n');
     expect(lines.at(-1)).toBe('Script.complete();');
-    expect(lines.at(-2)).toBe('await CalendarFIFWidget.run({ Keychain, Request, Alert, DrawContext, ListWidget, FileManager, Script, config, args, Device, Color, Font, Size, Rect, Point, Path }, { projectId: "__PROJECT_ID__", apiKey: "__API_KEY__", appUrl: "__APP_URL__", version: "0.4.0 (2026-11-14)" });');
+    expect(lines.at(-2)).toBe('await CalendarFIFWidget.run({ Keychain, Request, Alert, DrawContext, ListWidget, FileManager, Script, config, args, Device, Color, Font, Size, Rect, Point, Path }, { projectId: "__PROJECT_ID__", apiKey: "__API_KEY__", appUrl: "__APP_URL__", holidayUrl: "__HOLIDAY_URL__", version: "0.4.0 (2026-11-14)" });');
   });
 
   it('버전은 JSON 글자열로 들어가 따옴표가 있어도 글이 깨지지 않는다', () => {
@@ -59,6 +59,7 @@ describe('bundleProblems', () => {
   it('자리표시자는 각각 정확히 한 번', () => {
     expect(problems(ok.replace('__API_KEY__', 'abc'))).toContain('__API_KEY__가 0번');
     expect(problems(`${ok}\n// __PROJECT_ID__`)).toContain('__PROJECT_ID__가 2번');
+    expect(problems(ok.replace('__HOLIDAY_URL__', ''))).toContain('__HOLIDAY_URL__가 0번');
   });
 
   it('시험용 값', () => {
