@@ -30,6 +30,7 @@ import { isBusy, reloadOnUpdate } from './update';
 import { closeAction, parseHash } from './router';
 import { openStorage } from './storage';
 import { applyPrefs, loadPrefs, prefsAppearance, savePrefs, type Prefs } from './prefs';
+import { fetchHolidayFile, startHolidayFeed } from './holidayFeed';
 import { holidayLabel } from '../core/holidays';
 import { lunarLong } from '../core/lunar';
 import { splitDateKey, todayKey } from '../core/dates';
@@ -53,6 +54,22 @@ const editorMemory = sessionMemory();
 const usersMemory = sessionMemory();
 const bridge = DESKTOP ? getBridge() : null;
 const interactivity = new Interactivity((on) => bridge?.setInteractive(on));
+
+// 공휴일 자료(VITE_HOLIDAY_URL, 하루에 한 번 받는다). 로그인과 상관없이 페이지마다 한 번 켜고, 저장해 둔 것은 첫 화면 전에 쓴다.
+// 새 자료가 오면 열려 있는 달력을 다시 그린다. 주소가 비었으면(에뮬레이터, 준비 전) 계산한 공휴일만 쓴다.
+let redrawHolidays: () => void = () => {};
+startHolidayFeed({
+  url: import.meta.env.VITE_HOLIDAY_URL ?? '',
+  store: openStorage().store,
+  fetchJson: (url) => fetchHolidayFile(url),
+  now: () => Date.now(),
+  onChange: () => redrawHolidays(),
+  doc: document,
+  every: (ms, fn) => {
+    const id = setInterval(fn, ms);
+    return () => clearInterval(id);
+  },
+});
 // 로그인 뒤 화면이 열려 있는 동안 메인 프로세스의 명령을 받는 동작들. 로그인 전에는 null이라 명령을 무시한다.
 // 저장되지 않아 이 페이지의 메모리에만 있는 편집이 있는가. mountMain이 로그인 중에만 채운다(새 버전으로 다시 읽기를 미룰지 정한다).
 let unsavedOnlyInMemory: () => boolean = () => false;
@@ -372,6 +389,9 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       signOut: () => (engine.status().pending === 0 ? signOutNow() : openSettingsFromCommand('account')),
     };
   }
+  // 공휴일 자료가 바뀌면 달력(과 붙어 있는 쪽)을 다시 그린다.
+  const redraw = (): void => store.refresh();
+  redrawHolidays = redraw;
   syncRoute();
   return {
     accessChanged() {
@@ -382,6 +402,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     holding: () => editor !== null || passwordBusy,
     destroy() {
       deskActions = null;
+      if (redrawHolidays === redraw) redrawHolidays = () => {};
       closeCellMenu();
       window.removeEventListener('hashchange', syncRoute);
       closeEditor();
