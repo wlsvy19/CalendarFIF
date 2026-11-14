@@ -5,8 +5,15 @@ import { noteReleaseVelocity, translateYOf } from './sheetMotion';
 
 const NARROW = '(max-width: 879.98px)';
 const REDUCED = '(prefers-reduced-motion: reduce)';
-/** 손가락이 이만큼 움직여야 첫 움직임으로 보고 누가 가질지 정한다. 닿을 때의 1~2px 떨림으로 정하지 않게 한다. */
+/**
+ * 손가락이 이만큼 움직여야 첫 움직임으로 보고 누가 가질지 정한다. 정하기 전에는 touchmove도 touchend도 막지 않는다.
+ * 빈 곳과 글자 위에서는 3px: iOS가 스스로 스크롤을 시작하기(10pt쯤) 전에 정한다. 닿을 때의 1~2px 떨림으로는 정하지 않는다.
+ * 누르면 동작하는 것(단추, 색, 스위치, 글 칸) 위에서는 8px: iOS Safari는 막은(preventDefault) touchmove가 하나라도 있으면
+ * 그 손가락에 click을 주지 않으므로, 엄지가 7px까지 굴러도 누르기가 그대로 눌리게 한다.
+ */
 const DECIDE_PX = 3;
+const DECIDE_ON_CONTROL_PX = 8;
+const CONTROL = 'button, input, textarea, select, label, summary, a[href], [role="radio"], [role="switch"], [role="button"], [contenteditable]';
 /**
  * 이만큼 내려간 뒤부터 시트가 따라온다. 그 뒤로는 튀지 않고 손가락과 같은 만큼 움직인다.
  * 첫 움직임이 이미 이보다 멀리서 오면(Chromium은 처음 몇 px의 touchmove를 보내지 않는다) 거기서부터 따라온다.
@@ -46,6 +53,25 @@ export function canScrollUp(target: Element, sheet: Element): boolean {
   return false;
 }
 
+/** 손가락 밑의 요소에서 시트까지(둘 다 넣어서) test를 만족하는 요소가 있는가. */
+function within(target: Element, sheet: Element, test: (el: Element) => boolean): boolean {
+  for (let el: Element | null = target; el; el = el.parentElement) {
+    if (test(el)) return true;
+    if (el === sheet) break;
+  }
+  return false;
+}
+
+/** 손가락이 닿은 곳에 따라 누가 가질지 정하는 거리(px). 누르면 동작하는 것 위면 8px, 아니면 3px. */
+export function decideDistance(target: Element, sheet: Element): number {
+  return within(target, sheet, (el) => el.matches(CONTROL)) ? DECIDE_ON_CONTROL_PX : DECIDE_PX;
+}
+
+/** 시트의 제목 줄(.sheet-bar) 안에서 닿았는가. 제목 줄은 시트가 스크롤되어 있어도 끌어 닫는 손잡이다. */
+export function onTitleBar(target: Element, sheet: Element): boolean {
+  return within(target, sheet, (el) => el.classList.contains('sheet-bar'));
+}
+
 export type FirstMove = {
   dx: number;
   dy: number;
@@ -57,13 +83,16 @@ export type FirstMove = {
   sheet: Element;
 };
 
-/** 첫 움직임에서 이 손짓을 시트가 가질지 정한다. 아니면 그 손짓은 끝까지 브라우저(스크롤, 글 고르기)의 것이다. */
+/**
+ * 첫 움직임에서 이 손짓을 시트가 가질지 정한다. 아니면 그 손짓은 끝까지 브라우저(스크롤, 글 고르기)의 것이다.
+ * 제목 줄에서 시작한 손짓은 시트가 스크롤되어 있어도 가진다(제목 줄 자신은 스크롤하지 않는다).
+ */
 export function mayClaim(m: FirstMove): boolean {
   if (!m.cancelable || m.fingers !== 1) return false;
   if (!(m.dy > 0 && m.dy > Math.abs(m.dx))) return false; // 아래쪽이고 세로가 더 커야 한다
   if (isRange(m.target)) return false;
   if (isTextField(m.target) && m.elapsedMs > LONG_PRESS_MS) return false;
-  return !canScrollUp(m.target, m.sheet);
+  return onTitleBar(m.target, m.sheet) || !canScrollUp(m.target, m.sheet);
 }
 
 export type Sample = { t: number; y: number };
@@ -115,6 +144,8 @@ type Track = {
   y0: number;
   t0: number;
   target: Element;
+  /** 손가락이 이만큼 움직이면 누가 가질지 정한다(decideDistance). */
+  decideAt: number;
   /** watch: 아직 정하지 않았다. claimed: 시트가 가졌다. ignored: 브라우저에 돌려줬다. */
   state: 'watch' | 'claimed' | 'ignored';
   base: number;
@@ -194,6 +225,8 @@ export function attachSwipeToClose(sheet: HTMLElement, scrim: HTMLElement, opts:
       scrim.animate([{ opacity: Number.isFinite(fromOpacity) ? fromOpacity : 1 }, { opacity: 1 }], timing),
     ];
     springs = mine;
+    // 다시 잡으면 cancel하므로 finished가 거부될 수 있다(둘 다 받아 둔다).
+    void mine[1].finished.catch(() => {});
     void mine[0].finished.then(
       () => {
         if (springs === mine) springs = [];
@@ -228,24 +261,27 @@ export function attachSwipeToClose(sheet: HTMLElement, scrim: HTMLElement, opts:
   const onStart = (e: TouchEvent): void => {
     if (closed) return;
     if (track) {
-      if (findTouch(e.touches, track.id)) {
+      if (findTouch(e.touches, track.id) && !findTouch(e.changedTouches, track.id)) {
         // 손가락이 하나 더 닿았다. 아직 정하기 전이면 이 손짓은 브라우저의 것이다. 끄는 중이면 첫 손가락만 따라간다.
         if (track.state === 'watch') track.state = 'ignored';
         return;
       }
-      // 끝을 듣지 못한 손가락(그 밑의 요소가 다시 그려졌다). 끌던 것이면 제자리로 돌려 놓는다.
+      // 끝을 듣지 못한 손가락(그 밑의 요소가 다시 그려졌다). 새로 닿은 손가락이 같은 번호를 다시 쓸 수도 있다(Chromium).
+      // 끌던 것이면 제자리로 돌려 놓고 새로 시작한다.
       if (track.state === 'claimed') settle(track);
       track = null;
     }
     if (e.touches.length !== 1 || !phone()) return;
     const p = e.changedTouches[0];
     if (!p) return;
+    const target = e.target as Element;
     track = {
       id: p.identifier,
       x0: p.clientX,
       y0: p.clientY,
       t0: timeOf(e),
-      target: e.target as Element,
+      target,
+      decideAt: decideDistance(target, sheet),
       state: 'watch',
       base: 0,
       height: 0,
@@ -266,7 +302,7 @@ export function attachSwipeToClose(sheet: HTMLElement, scrim: HTMLElement, opts:
     const dx = p.clientX - t.x0;
     const dy = p.clientY - t.y0;
     if (t.state === 'watch') {
-      if (Math.hypot(dx, dy) < DECIDE_PX) return;
+      if (Math.hypot(dx, dy) < t.decideAt) return; // 아직 누르기일 수 있다. 막지 않는다.
       // iOS Safari는 스크롤이나 끝에서 늘어나기가 시작된 뒤에는 touchmove를 막을 수 없다. 그래서 첫 움직임에서 정하고 바꾸지 않는다.
       const first: FirstMove = { dx, dy, elapsedMs: timeOf(e) - t.t0, cancelable: e.cancelable, fingers: e.touches.length, target: t.target, sheet };
       if (!mayClaim(first)) {
