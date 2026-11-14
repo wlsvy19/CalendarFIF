@@ -8,6 +8,8 @@ export type Config = {
   authBase?: string; // 기본 'https://identitytoolkit.googleapis.com'
   tokenBase?: string; // 기본 'https://securetoken.googleapis.com'
   firestoreBase?: string; // 기본 'https://firestore.googleapis.com'
+  /** 스크립트의 버전과 만든 날짜(예: '0.4.0 (2026-11-14)'). 앱의 메뉴 제목과 오류 줄에 보인다. */
+  version?: string;
 };
 export type Session = { idToken: string; refreshToken: string; uid: string };
 export type ApiError = { kind: 'credentials' | 'throttled' | 'rejected' | 'denied' | 'network' | 'failed'; code: string };

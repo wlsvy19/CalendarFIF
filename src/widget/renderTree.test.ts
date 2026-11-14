@@ -52,6 +52,43 @@ describe('renderTree', () => {
     expect(w.backgroundImage).toBeNull();
   });
 
+  it('밝기를 정해 주면 Color.dynamic 없이 그쪽 색으로만 칠한다', () => {
+    const tree: Tree = {
+      background: D('#FFFFFF', '#000000'), padding: [0, 0, 0, 0], spacing: 0,
+      children: [
+        { kind: 'text', text: '글', size: 9, weight: 'regular', color: D('#111111', '#EEEEEE'), lines: 1 },
+        { kind: 'stack', dir: 'h', background: D('#AAAAAA', '#222222'), children: [{ kind: 'text', text: '안', size: 9, weight: 'regular', color: D('#333333', '#CCCCCC'), lines: 1 }] },
+      ],
+    };
+    for (const [force, bg, ink, box, inner] of [['dark', '#000000', '#EEEEEE', '#222222', '#CCCCCC'], ['light', '#FFFFFF', '#111111', '#AAAAAA', '#333333']] as const) {
+      const host = makeFakeHost();
+      host.Color.dynamic = () => { throw new Error('dynamic을 쓰면 안 된다'); };
+      const rec = widgetRecord(renderTree(host, tree, 'https://example.test/', now, force));
+      const plain = (hex: string) => ({ hex, alpha: 1 });
+      expect(rec.props.backgroundColor).toEqual(plain(bg));
+      expect(rec.children[0]).toMatchObject({ kind: 'text', textColor: plain(ink) });
+      expect(rec.children[1]).toMatchObject({ kind: 'stack', backgroundColor: plain(box), children: [{ kind: 'text', textColor: plain(inner) }] });
+    }
+  });
+
+  it('칸의 메모 줄은 lineLimit 1, minimumScaleFactor 0.9인 글 하나씩이고, 완료 줄은 흐리다', () => {
+    const ten = Array.from({ length: 10 }, (_, i) => `줄${i}`).join('\n');
+    const month = { monthId: '2026-11', days: { '14': { text: '회의\n[+]장보기', color: '' }, '17': { text: ten, color: '' } } };
+    const tree = buildTree({ family: 'large', size: widgetSize({ width: 390, height: 844 }, 'large'), today: '2026-11-13', month, offline: false });
+    const rec = widgetRecord(renderTree(makeFakeHost(), tree, 'https://example.test/', now));
+    const found: Extract<FakeNode, { kind: 'text' }>[] = [];
+    const walk = (nodes: FakeNode[]): void => nodes.forEach((n) => (n.kind === 'text' ? found.push(n) : n.kind === 'stack' ? walk(n.children) : undefined));
+    walk(rec.children);
+    const byText = (t: string) => found.filter((n) => n.text === t);
+    for (const t of ['회의', '✓ 장보기', '줄0', '줄1', '+8']) {
+      expect(byText(t)).toHaveLength(1);
+      expect(byText(t)[0]).toMatchObject({ font: { font: 'system', size: 9 }, lineLimit: 1, minimumScaleFactor: 0.9 });
+    }
+    expect(byText('✓ 장보기')[0].textOpacity).toBe(0.55);
+    expect(byText('회의')[0].textOpacity).toBeUndefined();
+    expect(found.some((n) => n.text.includes('\n'))).toBe(false);
+  });
+
   it('buildTree의 결과는 나무와 같은 수의 글자, 상자, 빈 곳이 된다', () => {
     const month = { monthId: '2026-11', days: { '13': { text: '회의\n[+]장보기', color: 'F12424' }, '14': { text: 'a\nb\nc\nd\ne\nf', color: '' } } };
     for (const family of ['large', 'medium', 'small'] as const) {

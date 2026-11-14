@@ -34,10 +34,16 @@ const weeks = (t: Tree): StackNode[] => grid(t).children as StackNode[];
 const cells = (t: Tree): StackNode[] => weeks(t).flatMap((w) => w.children as StackNode[]);
 /** n번째 날(1부터)이 든 칸. 2026년 11월은 1일이 일요일이라 첫 주의 앞이 비지 않는다. */
 const cellOf = (t: Tree, dayOfMonth: number): StackNode => cells(t)[dayOfMonth - 1];
-const memoOf = (cell: StackNode): TextNode | undefined => {
-  const row = cell.children[1];
-  return row.kind === 'stack' && row.children[0].kind === 'text' ? row.children[0] : undefined;
-};
+/** 칸의 메모 줄들: 숫자 줄과 마지막 남는 곳 채우기 사이에, 줄마다 [글, 남는 곳 채우기]인 가로 상자 하나. */
+const memosOf = (cell: StackNode): TextNode[] =>
+  cell.children.slice(1, -1).map((row) => {
+    if (row.kind !== 'stack' || row.dir !== 'h' || row.children.length !== 2 || row.children[0].kind !== 'text' || !isFlex(row.children[1])) {
+      throw new Error('메모 줄은 글 하나를 앞으로 미는 가로 상자여야 한다');
+    }
+    return row.children[0];
+  });
+const memoTexts = (cell: StackNode): string[] => memosOf(cell).map((m) => m.text);
+const MEMO = { size: 9, weight: 'regular', color: pair('ink'), lines: 1, minScale: 0.9 };
 
 describe('buildTree large', () => {
   const t = build('large', month({}));
@@ -88,29 +94,45 @@ describe('buildTree large', () => {
     expect(((cellOf(c, 14).children[0] as StackNode).children[0] as TextNode).color).toEqual(pair('sat')); // 토요일
   });
 
-  it('완료 줄은 체크 표시, 메모는 글 하나에 줄바꿈으로 이어 붙인다', () => {
+  it('메모는 줄마다 한 줄짜리 글이고(줄여 맞출 수 있다), 완료 줄은 체크 표시와 흐림', () => {
     const c = build('large', month({ '14': { text: '회의\n[+]장보기', color: '' } }));
-    expect(memoOf(cellOf(c, 14))).toMatchObject({ text: '회의\n\u2713 장보기', lines: 2, size: 9, weight: 'regular', color: pair('ink') });
+    const memos = memosOf(cellOf(c, 14));
+    expect(memos).toHaveLength(2);
+    expect(memos[0]).toEqual({ kind: 'text', text: '회의', ...MEMO });
+    expect(memos[1]).toEqual({ kind: 'text', text: '✓ 장보기', ...MEMO, opacity: 0.55 });
   });
 
-  it('줄이 넘치면 마지막 줄이 +N이고 줄 수가 칸의 수용량과 같다', () => {
+  it('세 줄에 수용량 3이면 한 줄짜리 메모 글 셋', () => {
+    const c = build('large', month({ '14': { text: '하나\n둘\n셋', color: '' } }));
+    expect(memosOf(cellOf(c, 14))).toEqual(['하나', '둘', '셋'].map((text) => ({ kind: 'text', text, ...MEMO })));
+  });
+
+  it('줄이 넘치면 마지막 줄이 따로 된 +N이고 줄 수가 칸의 수용량과 같다', () => {
     const ten = Array.from({ length: 10 }, (_, i) => `줄${i}`).join('\n');
     const c = build('large', month({ '14': { text: ten, color: '' } }));
-    const memo = memoOf(cellOf(c, 14))!;
-    const lines = memo.text.split('\n');
-    expect(lines).toHaveLength(3);
-    expect(memo.lines).toBe(3);
-    expect(lines.at(-1)).toBe('+8');
-    expect(lines.slice(0, 2)).toEqual(['줄0', '줄1']);
+    const memos = memosOf(cellOf(c, 14));
+    expect(memos.map((m) => m.text)).toEqual(['줄0', '줄1', '+8']);
+    expect(memos[2]).toEqual({ kind: 'text', text: '+8', ...MEMO });
   });
 
   it('긴 줄은 칸 폭에 맞게 잘린다', () => {
     const size = widgetSize(SCREEN, 'large');
     const inner = (size.width - 24 - 6) / 7 - 4;
     const c = build('large', month({ '14': { text: '아주아주아주 긴 한국어 메모\nlong english memo line that overflows\n[+]완료된 아주 긴 한국어 줄', color: '' } }));
-    const memo = memoOf(cellOf(c, 14))!;
-    for (const line of memo.text.split('\n')) expect(estimateWidth(line, 9)).toBeLessThanOrEqual(inner + 1e-9);
-    expect(memo.text.split('\n')[0]).not.toBe('아주아주아주 긴 한국어 메모');
+    const lines = memoTexts(cellOf(c, 14));
+    expect(lines).toHaveLength(3);
+    for (const line of lines) expect(estimateWidth(line, 9)).toBeLessThanOrEqual(inner + 1e-9);
+    expect(lines[0]).not.toBe('아주아주아주 긴 한국어 메모');
+    expect(lines[2].startsWith('✓ ')).toBe(true);
+  });
+
+  it('격자의 어떤 글에도 줄바꿈이 없다(아이폰에서 한 줄이 두 줄로 접히지 않는다)', () => {
+    const many = { '01': { text: '가\n나\n다\n라\n마\n바\n사', color: '' }, '13': { text: '회의\n[+]장보기\n세 번째\n네 번째', color: 'F12424' }, '14': { text: 'a\r\nb\n\nc', color: '' } };
+    const trees = [build('large', month(many)), build('medium', month(many)), build('large', month(many, '2027-01'), '2027-01-09')];
+    for (const tr of trees) {
+      expect(texts(tr).length).toBeGreaterThan(20);
+      for (const x of texts(tr)) expect(x.text).not.toMatch(/[\r\n]/);
+    }
   });
 
   it('달 밖의 날: 숫자는 흐리고 메모와 색은 없다', () => {
@@ -123,7 +145,7 @@ describe('buildTree large', () => {
       expect(cell.children).toHaveLength(2);
       expect(cell.background).toEqual(pair('surface'));
     }
-    expect(memoOf(cellOf(c, 30))?.text).toBe('월말');
+    expect(memoTexts(cellOf(c, 30))).toEqual(['월말']);
   });
 
   it('1월(2027)은 6주, 2월(2026)은 4주이고 수용량이 그에 따라 변한다', () => {
@@ -133,7 +155,7 @@ describe('buildTree large', () => {
     const nov = build('large', month({ '10': { text: ten, color: '' } }), TODAY);
     expect(weeks(jan)).toHaveLength(6);
     expect(weeks(feb)).toHaveLength(4);
-    const lines = (tr: Tree, row: number, col: number): number => (((weeks(tr)[row].children[col] as StackNode).children[1] as StackNode).children[0] as TextNode).lines;
+    const lines = (tr: Tree, row: number, col: number): number => memosOf(weeks(tr)[row].children[col] as StackNode).length;
     // 2027-01-10은 일요일, 셋째 주 첫 칸(첫 주는 12월 27일부터). 2026-02-10은 화요일, 둘째 주 셋째 칸. 2026-11-10은 화요일, 둘째 주 셋째 칸.
     expect(lines(jan, 2, 0)).toBe(2);
     expect(lines(nov, 1, 2)).toBe(3);
@@ -157,15 +179,16 @@ describe('buildTree medium', () => {
       return n.kind === 'text' ? n.text : ((n as StackNode).children[0] as TextNode).text;
     });
     expect(numbers).toEqual(['8', '9', '10', '11', '12', '13', '14']);
-    expect(memoOf(weeks(t)[0].children[5] as StackNode)?.text).toBe('리뷰');
+    expect(memoTexts(weeks(t)[0].children[5] as StackNode)).toEqual(['리뷰']);
   });
 
   it('수용량은 한 줄 높이로 계산하며 6줄까지', () => {
     const ten = Array.from({ length: 10 }, (_, i) => `줄${i}`).join('\n');
     const t = build('medium', month({ '13': { text: ten, color: '' } }));
-    const memo = ((weeks(t)[0].children[5] as StackNode).children[1] as StackNode).children[0] as TextNode;
-    expect(memo.lines).toBe(6);
-    expect(memo.text.split('\n').at(-1)).toBe('+5');
+    const memos = memosOf(weeks(t)[0].children[5] as StackNode);
+    expect(memos).toHaveLength(6);
+    for (const m of memos) expect(m).toMatchObject({ lines: 1, minScale: 0.9 });
+    expect(memos.at(-1)!.text).toBe('+5');
   });
 });
 
@@ -222,13 +245,19 @@ describe('buildTree small', () => {
 });
 
 describe('모든 나무', () => {
-  it('고정 크기는 없고 spacer.length는 null이거나 양수', () => {
-    const trees = [build('large', month({ '13': { text: '가\n나', color: 'F12424' } })), build('medium', month({})), build('small', month({})), messageTree({ title: 't', lines: ['a'] })];
+  // 나무에 고정 크기를 넣을 자리가 생기면(크기 속성이 붙으면) 이 시험이 실패한다.
+  const ALLOWED: Record<Node['kind'], string[]> = {
+    text: ['kind', 'text', 'size', 'weight', 'color', 'opacity', 'lines', 'minScale'],
+    spacer: ['kind', 'length'],
+    stack: ['kind', 'dir', 'children', 'spacing', 'padding', 'background', 'radius', 'align'],
+  };
+
+  it('마디는 정해진 속성만 가져 고정 크기가 없고, spacer.length는 null이거나 양수', () => {
+    const trees = [build('large', month({ '13': { text: '가\n나', color: 'F12424' } })), build('medium', month({})), build('small', month({ '13': { text: '[+]가\n나', color: '' } }), TODAY, true), messageTree({ title: 't', lines: ['a'] })];
     for (const tr of trees) {
       for (const n of all(tr)) {
         if (n.kind === 'spacer') expect(n.length === null || n.length > 0).toBe(true);
-        expect(n).not.toHaveProperty('width');
-        expect(n).not.toHaveProperty('height');
+        for (const key of Object.keys(n)) expect(ALLOWED[n.kind]).toContain(key);
       }
     }
   });
@@ -250,7 +279,7 @@ describe('칸 폭과 수용량', () => {
   it('402x874 화면의 큰 위젯에서 `가족 모임`은 잘리지 않고 한글 여섯 글자는 잘린다', () => {
     const size = widgetSize({ width: 402, height: 874 }, 'large');
     const t = buildTree({ family: 'large', size, today: TODAY, month: month({ '14': { text: '가족 모임\n가나다라마바', color: '' } }), offline: false });
-    expect(memoOf(cellOf(t, 14))!.text.split('\n')).toEqual(['가족 모임', '가나다라']);
+    expect(memoTexts(cellOf(t, 14))).toEqual(['가족 모임', '가나다라']);
   });
 
   const ten = Array.from({ length: 10 }, (_, i) => `줄${i}`).join('\n');
@@ -261,12 +290,10 @@ describe('칸 폭과 수용량', () => {
   it('수용량이 0이면 메모가 없다(+N도 없다)', () => {
     const c = cell10(jan(150));
     expect(c.children).toHaveLength(2);
-    expect(memoOf(c)).toBeUndefined();
+    expect(memosOf(c)).toEqual([]);
   });
 
   it('수용량이 1이고 줄이 더 있으면 +N만 보인다', () => {
-    const memo = memoOf(cell10(jan(282)))!;
-    expect(memo.text).toBe('+10');
-    expect(memo.lines).toBe(1);
+    expect(memosOf(cell10(jan(282)))).toEqual([{ kind: 'text', text: '+10', ...MEMO }]);
   });
 });

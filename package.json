@@ -6,7 +6,7 @@
   "main": "build/desktop/main.cjs",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && tsx scripts/build-widget.ts && vite build",
     "dev:emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && vite --mode emulator\"",
     "dev:desktop-emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && vite --mode desktop-emu\"",
     "widget:preview": "tsx scripts/widget-preview.ts",

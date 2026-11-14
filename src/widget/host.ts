@@ -55,6 +55,9 @@ export type ListWidgetLike = WidgetContainerLike & {
   presentLarge(): Promise<void>;
 };
 
+/** Scriptable의 TextField 중 위젯이 쓰는 부분. 오래된 Scriptable은 addTextField가 아무것도 돌려주지 않을 수 있다. */
+export type TextFieldLike = { setEmailAddressKeyboard?(): void };
+
 /** Scriptable이 주는 것 중 위젯이 쓰는 부분. 실제 실행에서는 전역을 모아 넘기고, 시험에서는 가짜를 넘긴다. */
 export type Host = {
   Keychain: { contains(key: string): boolean; get(key: string): string; set(key: string, value: string): void; remove(key: string): void };
@@ -65,7 +68,7 @@ export type Host = {
   };
   Alert: new () => {
     title: string; message: string;
-    addTextField(placeholder: string, text?: string): void;
+    addTextField(placeholder: string, text?: string): TextFieldLike | undefined;
     addSecureTextField(placeholder: string, text?: string): void;
     addAction(title: string): void;
     addCancelAction(title: string): void;

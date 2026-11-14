@@ -60,14 +60,62 @@ it('사용자 관리 단추는 onManageUsers를 부른다', () => {
   button('사용자 관리').click();
   expect(onManageUsers).toHaveBeenCalledTimes(1);
 });
+const widget = { load: () => new Promise<string>(() => {}), config: { projectId: 'demo-calfif', apiKey: 'k', appUrl: 'https://example.test' }, copy: async () => {} };
 it('사용자와 비밀번호 칸은 동기화 뒤, 위젯 앞에 있다', () => {
-  const { root } = mount({ onManageUsers: vi.fn(), onChangePassword: vi.fn() });
+  const { root } = mount({ onManageUsers: vi.fn(), onChangePassword: vi.fn(), widget });
   const labels = [...root.querySelectorAll('.field-label')].map((l) => l.textContent);
   expect(labels).toEqual(['계정', '동기화', '사용자', '비밀번호', '위젯']);
 });
 
+it('widget을 주지 않으면 위젯 칸이 없다', () => {
+  const { root } = mount();
+  expect(root.textContent).not.toContain('위젯');
+});
+it('widget을 주면 위젯 칸이 로그아웃 앞에 있다', () => {
+  const { root } = mount({ widget });
+  const fields = [...root.querySelectorAll('.sheet > .field, .sheet > div > .field')];
+  const labels = fields.map((f) => f.querySelector('.field-label')?.textContent);
+  expect(labels.at(-2)).toBe('위젯');
+});
+
+function widgetMount(copy: () => Promise<void>) {
+  const m = mount({ widget: { load: async () => '"__PROJECT_ID__" "__API_KEY__" "__APP_URL__"', config: widget.config, copy } });
+  const sheet = m.root.querySelector<HTMLElement>('.sheet')!;
+  const close = m.root.querySelector<HTMLElement>('.textbtn.end')!;
+  m.button('로그아웃').hidden = true; // 위젯 칸의 것이 맨 끝이 되게 한다
+  const tab = (from: HTMLElement) => {
+    from.focus();
+    const e = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    from.dispatchEvent(e);
+    return e;
+  };
+  return { ...m, sheet, close, tab };
+}
+it('Tab 순서에 "설치 방법"이 들어간다: 그것이 끝이면 거기서 처음으로 돈다', async () => {
+  vi.useRealTimers();
+  const { root, close, tab } = widgetMount(async () => {});
+  await new Promise((r) => setTimeout(r, 0));
+  const summary = root.querySelector<HTMLElement>('summary')!;
+  summary.setAttribute('tabindex', '0'); // jsdom은 summary에 초점을 주지 않는다
+  root.querySelector<HTMLDetailsElement>('details')!.open = true;
+  const e = tab(summary);
+  expect(e.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(close);
+});
+it('Tab 순서에 복사 실패 때 나오는 글 상자가 들어간다: 그것이 끝이면 거기서 처음으로 돈다', async () => {
+  vi.useRealTimers();
+  const { root, button, close, tab } = widgetMount(() => Promise.reject(new Error('denied')));
+  await new Promise((r) => setTimeout(r, 0));
+  button('위젯 스크립트 복사').click();
+  await new Promise((r) => setTimeout(r, 0));
+  const area = root.querySelector<HTMLTextAreaElement>('textarea')!;
+  expect(area.hidden).toBe(false);
+  const e = tab(area);
+  expect(e.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(close);
+});
 it('열린 뒤에 관리자로 확인되면 사용자 관리 단추가 제자리에 생기고, 적던 비밀번호는 그대로다', () => {
-  const { root, button, handle } = mount({ onChangePassword: vi.fn() });
+  const { root, button, handle } = mount({ onChangePassword: vi.fn(), widget });
   expect(button('사용자 관리')).toBeUndefined();
   button('비밀번호 변경').click();
   const current = root.querySelector<HTMLInputElement>('input[name="current"]')!;

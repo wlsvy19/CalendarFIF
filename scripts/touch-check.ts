@@ -308,6 +308,61 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     longTasks === 0 || longTasksAgain === 0,
     longTasksAgain === null ? `긴 작업 ${longTasks}개` : `긴 작업 ${longTasks}개, 다시 해서 ${longTasksAgain}개`,
   );
+
+  // 주소로 곧바로 연 시트를 닫은 뒤 뒤로 가도 그 시트가 다시 열리지 않는다. 페이지를 새로 읽으므로 맨 끝에서 한다.
+  // 앱을 한 번 열어 두고(from=1, 달력), 시트의 주소를 새 문서로 연다(from=2#...). 닫은 뒤 뒤로 가면 첫 쪽의 달력이어야 한다.
+  // 고치기 전에는 닫을 때 기록이 하나 더 쌓여, 뒤로 가면 from=2#... 로 돌아와 시트가 다시 열렸다.
+  type Cold = { opened: boolean; closed: boolean; hashClean: boolean; sameLength: boolean; landed: boolean; reopened: boolean };
+  async function coldSheet(hash: string, closeSelector: string): Promise<Cold> {
+    const pageUrl = (from: number, suffix = ''): string => {
+      const u = new URL(url);
+      u.hash = '';
+      u.searchParams.set('from', String(from));
+      return `${u.href}${suffix}`;
+    };
+    const calendarUp = "!!document.querySelector('.grid.current .cell') && !document.querySelector('.sheet')";
+    await cdp.send('Page.navigate', { url: pageUrl(1) });
+    for (let i = 0; i < 100 && !(await cdp.evaluate<boolean>(calendarUp).catch(() => false)); i++) await sleep(200);
+    await cdp.send('Page.navigate', { url: pageUrl(2, `#${hash}`) });
+    let opened = false;
+    for (let i = 0; i < 100 && !opened; i++) {
+      opened = await cdp.evaluate<boolean>("!!document.querySelector('.sheet') && location.search.includes('from=2')").catch(() => false);
+      if (!opened) await sleep(200);
+    }
+    await sleep(700); // 시트가 자리를 잡고, 첫 누름이 먹히게 한다
+    const lengthBefore = await cdp.evaluate<number>('history.length');
+    releasedMovingAt = 0;
+    await tap(await center($(closeSelector)));
+    await sleep(600);
+    const closed = await cdp.evaluate<boolean>("!document.querySelector('.sheet')");
+    const hashClean = await cdp.evaluate<boolean>("location.hash === ''");
+    const sameLength = (await cdp.evaluate<number>('history.length')) === lengthBefore;
+    await cdp.evaluate('history.back()');
+    let landed = false;
+    for (let i = 0; i < 40 && !landed; i++) {
+      landed = await cdp.evaluate<boolean>(`location.search.includes('from=1') && ${calendarUp}`).catch(() => false);
+      if (!landed) await sleep(200);
+    }
+    await sleep(500);
+    const reopened = await cdp.evaluate<boolean>("!!document.querySelector('.sheet')").catch(() => false);
+    return { opened, closed, hashClean, sameLength, landed, reopened };
+  }
+  const now = new Date();
+  const dayHash = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-15`;
+  const describeCold = (c: Cold) =>
+    `시트 ${c.opened ? '열림' : '안 열림'}, 닫은 뒤 시트 ${c.closed ? '없음' : '있음'}, 주소 ${c.hashClean ? '깨끗' : '#가 남음'}, 기록 수 ${c.sameLength ? '그대로' : '바뀜'}, 뒤로 간 곳 ${c.landed ? '앞 쪽 달력' : '앞 쪽 달력이 아님'}, 뒤로 간 뒤 시트 ${c.reopened ? '다시 열림' : '없음'}`;
+  const coldDay = await coldSheet(dayHash, '.sheet .textbtn.start');
+  record(
+    '날짜 주소로 곧바로 연 편집 화면을 취소한 뒤 뒤로 가도 다시 열리지 않는다',
+    coldDay.opened && coldDay.closed && coldDay.hashClean && coldDay.sameLength && coldDay.landed && !coldDay.reopened,
+    describeCold(coldDay),
+  );
+  const coldSettings = await coldSheet('settings', '.sheet .sheet-bar .textbtn.end');
+  record(
+    '#settings로 곧바로 연 설정을 닫은 뒤 뒤로 가도 다시 열리지 않는다',
+    coldSettings.opened && coldSettings.closed && coldSettings.hashClean && coldSettings.sameLength && coldSettings.landed && !coldSettings.reopened,
+    describeCold(coldSettings),
+  );
   return results;
 }
 

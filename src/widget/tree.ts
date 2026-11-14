@@ -69,11 +69,14 @@ function dayCell(cell: GridCell, day: DayValue | undefined, today: string, lay: 
     ? { kind: 'stack', dir: 'h', background: C.accent, radius: 7.5, padding: [1, 4, 1, 4], children: [numberText] }
     : numberText;
   const children: Node[] = [leading(number)];
-  if (cell.inMonth && day) {
+  if (cell.inMonth && day && lay.capacity > 0) {
+    // 줄마다 한 줄짜리 글이다. 실제 폭이 어림보다 좁으면 iOS가 조금 줄이고, 그래도 넘치면 "…"로 자른다(다음 줄로 접지 않는다).
+    const memo = (t: string, extra: Partial<TextNode> = {}): Node => leading(text(t, 9, 'regular', C.ink, 1, { minScale: 0.9, ...extra }));
     const { shown, more } = capLines(memoLines(day.text), lay.capacity);
-    const lines = shown.map((l) => fitText(l.done ? DONE_MARK + l.text : l.text, 9, lay.innerWidth));
-    if (more > 0) lines.push(`+${more}`);
-    if (lay.capacity > 0 && lines.length > 0) children.push(leading(text(lines.join('\n'), 9, 'regular', C.ink, lines.length)));
+    for (const l of shown) {
+      children.push(l.done ? memo(fitText(DONE_MARK + l.text, 9, lay.innerWidth), { opacity: 0.55 }) : memo(fitText(l.text, 9, lay.innerWidth)));
+    }
+    if (more > 0) children.push(memo(`+${more}`));
   }
   children.push(flex());
   return { kind: 'stack', dir: 'v', padding: [2, 2, 2, 2], background: hasColor && cell.inMonth ? dayPair(color) : C.surface, children };

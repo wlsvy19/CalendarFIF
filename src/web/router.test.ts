@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { hashFor, parseHash } from './router';
+import { closeAction, hashFor, parseHash } from './router';
 
 it('주소를 화면으로 바꾼다', () => {
   expect(parseHash('#2026-11-13')).toEqual({ name: 'day', dateKey: '2026-11-13' });
@@ -17,4 +17,8 @@ it('#users는 사용자 관리 화면이다', () => {
   expect(parseHash('#users')).toEqual({ name: 'users' });
   expect(hashFor({ name: 'users' })).toBe('#users');
   expect(parseHash('#users/x')).toEqual({ name: 'calendar' });
+});
+it('시트를 닫을 때: 앱이 쌓은 기록이면 뒤로, 주소로 연 것이면 바꾼다', () => {
+  expect(closeAction(true)).toBe('back');
+  expect(closeAction(false)).toBe('replace');
 });

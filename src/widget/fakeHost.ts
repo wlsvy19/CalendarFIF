@@ -1,12 +1,12 @@
 // 시험용 가짜 Scriptable. 묶음(번들)에는 들어가지 않는다.
-import type { DrawContextLike, Host, ListWidgetLike, WidgetStackLike, WidgetTextLike } from './host';
+import type { DrawContextLike, Host, ListWidgetLike, TextFieldLike, WidgetStackLike, WidgetTextLike } from './host';
 
 /** 묶음 파일에 이 파일의 코드가 섞여 들어가지 않았는지 찾아볼 표지. */
 export const FAKE_HOST_MARKER = 'calfif-fake-host-marker';
 
 export type FakeRequest = { url: string; method: string; headers: Record<string, string>; body: string; timeoutInterval: number };
 export type FakeAnswer = { status?: number; body?: unknown };
-export type FakeAlertRecord = { title: string; message: string; fields: { kind: 'text' | 'secure'; placeholder: string; text: string }[]; actions: string[]; cancel: string | null };
+export type FakeAlertRecord = { title: string; message: string; fields: { kind: 'text' | 'secure'; placeholder: string; text: string; keyboard?: 'email' }[]; actions: string[]; cancel: string | null };
 export type FakeContextRecord = { size: unknown; opaque: boolean; respectScreenScale: boolean; calls: [string, ...unknown[]][] };
 /** 위젯 안에 놓인 것의 기록. 나무와 같은 모양으로 겹쳐 있어 시험이 나무와 견줄 수 있다. */
 export type FakeNode =
@@ -30,6 +30,8 @@ export type FakeOptions = {
   failDrawing?: number;
   /** 처음 이만큼의 ListWidget은 만들 때 오류를 낸다. */
   failWidgets?: number;
+  /** 처음 이만큼의 addText(위젯과 상자 모두)는 오류를 낸다. 기본 부품 그리기가 깨진 경우다. */
+  failTexts?: number;
 };
 
 export type FakeState = {
@@ -55,6 +57,7 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
   const answers = [...(opts.alerts ?? [])];
   let failures = opts.failDrawing ?? 0;
   let widgetFailures = opts.failWidgets ?? 0;
+  let textFailures = opts.failTexts ?? 0;
 
   class Size { constructor(public width: number, public height: number) {} }
   class Rect { constructor(public x: number, public y: number, public width: number, public height: number) {} }
@@ -102,7 +105,11 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
     message = '';
     private record: FakeAlertRecord = { title: '', message: '', fields: [], actions: [], cancel: null };
     private answer: { button: number; fields?: string[] } = { button: -1 };
-    addTextField(placeholder: string, text = ''): void { this.record.fields.push({ kind: 'text', placeholder, text }); }
+    addTextField(placeholder: string, text = ''): TextFieldLike | undefined {
+      const field: FakeAlertRecord['fields'][number] = { kind: 'text', placeholder, text };
+      this.record.fields.push(field);
+      return { setEmailAddressKeyboard: () => { field.keyboard = 'email'; } };
+    }
     addSecureTextField(placeholder: string, text = ''): void { this.record.fields.push({ kind: 'secure', placeholder, text }); }
     addAction(title: string): void { this.record.actions.push(title); }
     addCancelAction(title: string): void { this.record.cancel = title; }
@@ -152,6 +159,10 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
   /** 위젯과 상자가 같이 쓰는 "안에 넣기": 기록의 children에 쌓는다. */
   const adders = (children: FakeNode[]) => ({
     addText(text: string): WidgetTextLike {
+      if (textFailures > 0) {
+        textFailures -= 1;
+        throw new Error('글자 시험 오류');
+      }
       const node: Extract<FakeNode, { kind: 'text' }> = { kind: 'text', text };
       children.push(node);
       return node as unknown as WidgetTextLike;
@@ -274,5 +285,23 @@ export function nativeTexts(host: FakeHost): string[] {
     }
   };
   for (const w of host.state.widgets) walk(w.children);
+  return out;
+}
+
+/** 위젯 하나가 보이는 글: 그 위젯 안에 놓인 글과, 배경이 그림이면 그 그림에 그린 글. 가짜 위젯이 아니면 빈 배열. */
+export function widgetTexts(host: FakeHost, widget: unknown): string[] {
+  const record = (widget as { record?: FakeWidgetRecord } | null | undefined)?.record;
+  if (!record) return [];
+  const out: string[] = [];
+  const walk = (nodes: FakeNode[]): void => {
+    for (const n of nodes) {
+      if (n.kind === 'text') out.push(n.text);
+      else if (n.kind === 'stack') walk(n.children);
+    }
+  };
+  walk(record.children);
+  const image = record.props.backgroundImage as { image?: unknown } | null | undefined;
+  const context = typeof image?.image === 'number' ? host.state.contexts[image.image] : undefined;
+  if (context) for (const call of context.calls) if (call[0] === 'drawTextInRect') out.push(call[1] as string);
   return out;
 }

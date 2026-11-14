@@ -1,4 +1,5 @@
 import { dismiss } from './sheetMotion';
+import { widgetSection, type WidgetInstallDeps } from './widgetInstall';
 
 export type AccountProps = {
   email: string;
@@ -203,15 +204,6 @@ export function accountSection(props: AccountProps, extra?: HTMLElement, onClean
   return { el, setManageUsers };
 }
 
-function widgetNote(): HTMLElement {
-  const field = document.createElement('div');
-  field.className = 'field';
-  field.innerHTML = `
-      <span class="field-label">위젯</span>
-      <p class="settings-note">아이폰 위젯은 다음 단계에서 추가됩니다.</p>`;
-  return field;
-}
-
 export function mountSettings(
   root: HTMLElement,
   props: {
@@ -224,6 +216,8 @@ export function mountSettings(
     onChangePassword?: AccountProps['onChangePassword'];
     onManageUsers?: AccountProps['onManageUsers'];
     onPasswordBusy?: AccountProps['onPasswordBusy'];
+    /** 주면 "위젯" 칸(스크립트 복사와 설치 방법)을 보인다. 웹앱의 설정 화면만 준다. */
+    widget?: WidgetInstallDeps;
   },
 ): { destroy(): void; setManageUsers: AccountSection['setManageUsers'] } {
   const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -258,7 +252,7 @@ export function mountSettings(
   closeBtn.addEventListener('click', close);
   scrim.addEventListener('click', close);
   const cleanups: Array<() => void> = [];
-  const account = accountSection({ ...props, onSignOut: signOut }, widgetNote(), (fn) => cleanups.push(fn));
+  const account = accountSection({ ...props, onSignOut: signOut }, props.widget ? widgetSection(props.widget) : undefined, (fn) => cleanups.push(fn));
   sheet.append(account.el);
   sheet.addEventListener('keydown', (e) => {
     if (e.isComposing) return;
@@ -268,7 +262,7 @@ export function mountSettings(
       return;
     }
     if (e.key !== 'Tab') return;
-    const stops = [...sheet.querySelectorAll<HTMLElement>('button, input')].filter(
+    const stops = [...sheet.querySelectorAll<HTMLElement>('button, input, summary, textarea')].filter(
       (el) => !el.hidden && !(el as HTMLButtonElement).disabled && !el.closest('[hidden]'),
     );
     const first = stops[0];

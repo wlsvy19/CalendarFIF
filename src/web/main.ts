@@ -25,8 +25,9 @@ import { mountCalendar } from './ui/calendar';
 import { mountEditor } from './ui/editor';
 import { mountSettings } from './ui/settings';
 import { mountUsers } from './ui/users';
+import type { WidgetInstallDeps } from './ui/widgetInstall';
 import { isBusy, reloadOnUpdate } from './update';
-import { parseHash } from './router';
+import { closeAction, parseHash } from './router';
 import { openStorage } from './storage';
 import { splitDateKey, todayKey } from '../core/dates';
 import { EMPTY_DAY } from '../core/types';
@@ -52,7 +53,7 @@ const interactivity = new Interactivity((on) => bridge?.setInteractive(on));
 let unsavedOnlyInMemory: () => boolean = () => false;
 let deskActions: { goToday(): void; openSettings(page?: SettingsPage): void; signOut(): void } | null = null;
 
-/** 주소의 #...을 기록을 남기지 않고 지운다(다시 로그인했을 때 설정이나 사용자 관리가 열리지 않게 한다). */
+/** 주소의 #...을 새 기록을 쌓지 않고 지운다. hashchange가 나지 않으므로 화면은 부른 쪽이 맞춘다. */
 function clearHash(): void {
   history.replaceState(null, '', location.pathname + location.search);
 }
@@ -125,6 +126,20 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     void signOut(auth);
   };
   let settingsPage: SettingsPage | undefined;
+  // 위젯 스크립트는 웹앱의 설정에서 공개 설정을 채워 복사한다. 채운 글은 이 화면의 메모리와 클립보드에만 있다.
+  const widgetInstall: WidgetInstallDeps = {
+    load: async () => {
+      const response = await fetch('/widget/calendarfif-widget.js');
+      if (!response.ok) throw new Error(`위젯 스크립트를 받지 못했습니다 (${response.status})`);
+      return response.text();
+    },
+    config: {
+      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+      apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+      appUrl: location.origin,
+    },
+    copy: (text) => (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error('클립보드를 쓸 수 없습니다.'))),
+  };
   // 설정에서 바꾼 모양은 바로 달력과 <html>에 반영하고 이 기기에 저장한다. 저장하지 못하면 false(값은 화면에 그대로 둔다).
   const changeAppearance = (next: Appearance): boolean => {
     appearance = next;
@@ -164,13 +179,19 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     };
     settings = appearance
       ? mountDesktopSettings(root, { appearance, onAppearance: changeAppearance, bridge, account, page: settingsPage, onClose })
-      : mountSettings(root, { ...account, onClose });
+      : mountSettings(root, { ...account, onClose, widget: DESKTOP ? undefined : widgetInstall });
     settingsPage = undefined;
     interactivity.begin('settings');
   };
+  // 주소로 곧바로 연 시트의 기록은 달력 주소로 바꾼다. 해시를 비우면 기록이 하나 더 쌓여 뒤로 가기가 시트를 다시 연다.
+  // 주소를 바꾸는 것은 hashchange를 내지 않으므로 화면은 직접 맞춘다.
   const backToCalendar = (): void => {
-    if (pushedByApp) history.back();
-    else location.hash = '';
+    if (closeAction(pushedByApp) === 'back') {
+      history.back();
+      return;
+    }
+    clearHash();
+    syncRoute();
   };
   const openEditor = (dateKey: string): void => {
     const { monthId, day } = splitDateKey(dateKey)!;
