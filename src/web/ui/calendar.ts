@@ -6,6 +6,7 @@ import type { Point } from '../../desktop/api';
 import { parseLine, splitLines } from '../../core/text';
 import type { SyncStatus } from '../../sync/engine';
 import { applyAppearance, pageOptions, WEB_APPEARANCE, type Appearance } from '../appearance';
+import { MEMO_METRICS, type MemoSize } from '../prefs';
 import type { CalendarStore } from '../state';
 import { createPager, type PagerEnv } from './pager';
 import { statusText } from './status';
@@ -45,11 +46,16 @@ export type CalendarDeps = {
   onOpenDay(dateKey: string): void;
   onOpenSettings(): void;
   appearance?: Appearance;
+  /** 웹앱이 준다. 주면 appearance는 동작(시작 요일, 음력, 공휴일, 완료 줄 등)만 정하고 모양은 웹의 것(styles.css)을 쓴다. */
+  web?: WebLook;
   /** PC 앱에서만 준다. 두 번 눌러 열고, 오른쪽 클릭은 칸 메뉴, 설정 단추 대신 메뉴 단추를 둔다. */
   desktop?: { onDayMenu(dateKey: string, at: Point): void; onOpenMenu(at: Point): void };
 };
 
-export type CalendarHandle = { destroy(): void; setAppearance(a: Appearance): void; goToday(): void; showMonth(monthId: string): void };
+/** 웹 모양에서 고를 수 있는 것: 칸 안 메모의 글자 크기. */
+export type WebLook = { memoSize: MemoSize };
+
+export type CalendarHandle = { destroy(): void; setAppearance(a: Appearance, web?: WebLook): void; goToday(): void; showMonth(monthId: string): void };
 
 const dowSpan = (dow: number): string => `<span${dow === 0 ? ' class="sun"' : dow === 6 ? ' class="sat"' : ''}>${WEEKDAYS[dow]}</span>`;
 
@@ -62,9 +68,10 @@ function spanOf(className: string, text: string): HTMLSpanElement {
 
 export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: CalendarEnv = {}): CalendarHandle {
   const { store } = deps;
-  // 설정이 없으면 웹앱처럼 그리고 CSS 변수를 쓰지 않는다.
+  // 설정이 없거나 웹 모양(web)이면 웹앱처럼 그리고 PC 앱의 CSS 변수를 쓰지 않는다.
   let appearance: Appearance = deps.appearance ?? WEB_APPEARANCE;
-  let custom = deps.appearance !== undefined;
+  let web: WebLook | undefined = deps.web;
+  let custom = deps.appearance !== undefined && web === undefined;
   const firstAnchor = store.current() === deps.today().slice(0, 7) ? deps.today() : `${store.current()}-01`;
   const el = document.createElement('section');
   el.className = 'app calendar';
@@ -161,7 +168,12 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
       const padding = style ? (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0) : 0;
       used = (first?.querySelector<HTMLElement>('.head')?.offsetHeight ?? 0) + padding;
     } else {
-      lineHeight = window.innerWidth >= WIDE_PX ? 17 : 13;
+      // 메모 줄의 글자 크기와 높이는 여기서 정해 CSS 변수로 넘긴다(styles.css의 .ln). 줄 수 계산과 늘 같은 값을 쓰게 한다.
+      const memo = MEMO_METRICS[web?.memoSize ?? 'medium'];
+      const metrics = window.innerWidth >= WIDE_PX ? memo.wide : memo.narrow;
+      el.style.setProperty('--memo-size', `${metrics.size}px`);
+      el.style.setProperty('--memo-line', `${metrics.line}px`);
+      lineHeight = metrics.line;
       used = NUMBER_AREA_PX;
     }
     const linesIn = (taken: number): number => (cellHeight > 0 ? Math.max(1, Math.floor((cellHeight - taken) / lineHeight)) : Infinity);
@@ -314,9 +326,10 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   pager.refresh();
 
   return {
-    setAppearance(next) {
+    setAppearance(next, nextWeb) {
       appearance = next;
-      custom = true;
+      if (nextWeb) web = nextWeb;
+      custom = web === undefined;
       applyClasses();
       pager.jump(pager.anchor()); // 넘기는 폭과 배치가 바뀌었을 수 있다
     },
