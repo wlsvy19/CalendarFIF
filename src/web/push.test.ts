@@ -100,6 +100,20 @@ describe('PushClient', () => {
     expect(s.client.view().message).toContain('연결되면 저장됩니다');
   });
 
+  it('끄기의 서버 쓰기가 늦어도 이 기기의 이름은 먼저 지워 다음에 열 때 다시 켜지지 않는다', async () => {
+    vi.useFakeTimers();
+    const s = setup({ deviceId: 'AAAAAAAAAAAAAAAAAAAA', doc: { devices: { AAAAAAAAAAAAAAAAAAAA: { token: 't', label: '', at: 1 } }, testAt: 0, sender: null } });
+    s.setPerm('granted');
+    s.remote.removeDevice = vi.fn(() => new Promise<void>(() => {}));
+    s.client.start();
+    const done = s.client.disable();
+    await vi.advanceTimersByTimeAsync(15_000);
+    await done;
+    expect(s.storage.getItem(DEVICE_KEY)).toBeNull();
+    expect(s.platform.dropToken).toHaveBeenCalled();
+    expect(s.client.view().message).toContain('연결되면 저장됩니다');
+  });
+
   it('끄면 문서에서 빼고 이 기기의 이름과 토큰을 지운다', async () => {
     const s = setup({ deviceId: 'AAAAAAAAAAAAAAAAAAAA', doc: { devices: { AAAAAAAAAAAAAAAAAAAA: { token: 't', label: '', at: 1 } }, testAt: 0, sender: null } });
     s.setPerm('granted');

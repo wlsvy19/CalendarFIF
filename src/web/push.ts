@@ -176,14 +176,15 @@ export class PushClient {
     if (this.busy) return;
     const id = this.deviceId();
     this.set(true, '끄는 중…');
+    // 이 기기의 이름과 토큰을 먼저 지운다. 서버 쓰기가 늦어도 다음에 열 때 다시 적지 않는다(쓰기는 연결되면 올라간다).
+    try {
+      this.deps.storage.removeItem(DEVICE_KEY);
+    } catch {
+      // 문서에서 빼면 알림은 오지 않는다.
+    }
+    await this.deps.platform.dropToken().catch(() => undefined);
     try {
       if (id) await withTimeout(this.deps.remote.removeDevice(id), WRITE_WAIT_MS, SLOW);
-      try {
-        this.deps.storage.removeItem(DEVICE_KEY);
-      } catch {
-        // 문서에서 뺐으면 알림은 오지 않는다.
-      }
-      await this.deps.platform.dropToken().catch(() => undefined);
       this.set(false, '껐습니다. 이 기기로는 알림이 오지 않습니다.');
     } catch (e) {
       this.set(false, `끄지 못했습니다: ${errorText(e)}`);

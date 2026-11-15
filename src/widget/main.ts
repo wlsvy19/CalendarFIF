@@ -4,7 +4,7 @@ import type { DayValue } from '../core/types';
 import { parseEventMap, type EventMap } from '../core/events';
 import { clearAlarms, pendingStatus, scheduleAlarms, scheduleTest, type AlarmStatus, type TestResult } from './alarms';
 import { isApiError, readEvents, readMonth, readPushDoc, refreshSession, signIn, type Config, type Session } from './api';
-import { pushCoversIphone } from '../push/doc';
+import { pushCoversUntil } from '../push/doc';
 import type { Host, ListWidgetLike } from './host';
 import { makeWidget } from './render';
 import { renderTree } from './renderTree';
@@ -93,16 +93,16 @@ function writeCache(host: Host, data: MonthData, now: Date): void {
   updateCache(host, { monthId: data.monthId, days: data.days, savedAt: now.getTime() });
 }
 
-/** 마지막으로 읽은 "푸시 알림을 쓰는가". 읽은 적이 없으면 false. */
-function readCachedPushOn(host: Host): boolean {
+/** 마지막으로 읽은 "푸시가 아이폰 알림을 언제까지 맡는가"(밀리초). 읽은 적이 없으면 0. */
+function readCachedPushUntil(host: Host): number {
   try {
     const fm = host.FileManager.local();
     const path = cachePath(host);
-    if (!fm.fileExists(path)) return false;
-    const parsed = JSON.parse(fm.readString(path)) as { pushOn?: unknown } | null;
-    return parsed?.pushOn === true;
+    if (!fm.fileExists(path)) return 0;
+    const parsed = JSON.parse(fm.readString(path)) as { pushUntil?: unknown } | null;
+    return typeof parsed?.pushUntil === 'number' ? parsed.pushUntil : 0;
   } catch {
-    return false;
+    return 0;
   }
 }
 
@@ -149,15 +149,16 @@ async function syncAlarms(host: Host, cfg: Config, session: Session | null, now:
     }
     // 아이폰에서 푸시 알림을 켰고 알림 서버가 살아 있으면 알림은 푸시로 간다. 위젯이 예약하면 같은 알림이 두 번 오므로 예약하지 않고 지운다.
     // 알림 서버가 없거나 멈췄으면 예전처럼 예약한다. 읽지 못하면 마지막으로 읽은 것을 따른다.
-    let pushOn = readCachedPushOn(host);
+    let pushUntil = readCachedPushUntil(host);
     if (session) {
       try {
-        pushOn = pushCoversIphone(await readPushDoc(host, cfg, session), now.getTime());
-        updateCache(host, { pushOn });
+        pushUntil = pushCoversUntil(await readPushDoc(host, cfg, session));
+        updateCache(host, { pushUntil });
       } catch {
-        // 보관한 값을 쓴다.
+        // 보관한 값을 쓴다(그 시각이 지났으면 예전처럼 예약한다).
       }
     }
+    const pushOn = pushUntil > now.getTime();
     if (pushOn) {
       const cleared = clearAlarms(host).then(() => true);
       const done = notifyCapMs === undefined ? await cleared : await waitAtMost(host, cleared, notifyCapMs, false);

@@ -59,5 +59,15 @@ export const IOS_LABEL = '아이폰';
  * 그렇지 않으면(알림 서버를 아직 만들지 않았거나 멈췄다, PC 브라우저에서만 켰다) 위젯이 예전처럼 Scriptable 알림을 예약한다.
  */
 export function pushCoversIphone(doc: PushDoc | null, now: number): boolean {
-  return !!doc && senderAlive(doc, now) && Object.values(doc.devices).some((d) => d.label === IOS_LABEL);
+  return pushCoversUntil(doc) > now;
+}
+
+/**
+ * 푸시가 아이폰 알림을 언제까지 맡는다고 볼 수 있는가(밀리초, 맡지 않으면 0). 알림 서버의 마지막 확인에서 15분 뒤까지다.
+ * 보내기 문제 가운데 권한 문제(FCM 401, 403)만 맡지 않는 것으로 본다. 다른 기기로 보내다 난 잠깐의 문제로 위젯이 같은 알림을 또 예약하지 않게.
+ */
+export function pushCoversUntil(doc: PushDoc | null): number {
+  if (!doc?.sender || doc.sender.at <= 0 || /^FCM 40[13]/.test(doc.sender.error)) return 0;
+  if (!Object.values(doc.devices).some((d) => d.label === IOS_LABEL)) return 0;
+  return doc.sender.at + SENDER_STALE_MS;
 }

@@ -34,6 +34,9 @@ describe('parsePushDoc', () => {
     expect(pushCoversIphone(push({ sender: null }), now)).toBe(false);
     expect(pushCoversIphone(push({ sender: alive, devices: { [D1]: { token: 't', label: '브라우저', at: 1 } } }), now)).toBe(false);
     expect(pushCoversIphone(null, now)).toBe(false);
+    // 다른 기기로 보내다 난 잠깐의 문제는 맡는 것으로 보고, 권한 문제는 맡지 않는 것으로 본다.
+    expect(pushCoversIphone(push({ sender: { ...alive, error: 'FCM 500: INTERNAL' } }), now)).toBe(true);
+    expect(pushCoversIphone(push({ sender: { ...alive, error: 'FCM 403: PERMISSION_DENIED' } }), now)).toBe(false);
   });
 
   it('보내는 쪽이 15분 안에 확인했고 문제가 없으면 살아 있다', () => {
@@ -80,6 +83,9 @@ describe('planSends', () => {
     expect(fresh.sends.map((s) => [s.title, s.body, s.url, s.at])).toEqual([[TEST_TITLE, TEST_BODY, '/', now - 5_000]]);
     expect(planSends([user({}, push({ testAt: now - 5_000, sender: { at: now, testAt: now - 5_000, error: '' } }))], at(17, 59), at(18, 1), now).sends).toEqual([]);
     expect(planSends([user({}, push({ testAt: now - 11 * 60_000 }))], at(17, 59), at(18, 1), now).sends).toEqual([]);
+    // 기기 시계가 빨라 요청한 때가 아직 오지 않았으면 다음 실행이 보낸다(처리했다고 적지 않는다).
+    const ahead = planSends([user({}, push({ testAt: now + 40_000 }))], at(17, 59), at(18, 1), now);
+    expect([ahead.sends, ahead.tests]).toEqual([[], []]);
   });
 
   it('FCM 메시지는 data만 담고 서두르라고 한다', () => {

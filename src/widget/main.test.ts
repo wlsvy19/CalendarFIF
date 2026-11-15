@@ -868,7 +868,7 @@ describe('아이폰 알림 예약', () => {
     await run(host, cfg, now);
     expect(host.state.scheduled).toEqual([]);
     expect(host.state.pending.map((n) => n.identifier)).toEqual(['other:keep']);
-    expect(JSON.parse(host.state.files.get(CACHE)!)).toMatchObject({ pushOn: true });
+    expect(JSON.parse(host.state.files.get(CACHE)!)).toMatchObject({ pushUntil: now().getTime() - 60_000 + 15 * 60_000 });
     expect(host.state.setWidgets).toHaveLength(1);
   });
 
@@ -881,13 +881,17 @@ describe('아이폰 알림 예약', () => {
   });
 
   it('푸시 문서를 읽지 못하면 마지막으로 읽은 것을 따르고, 문서가 없으면 예약한다', async () => {
-    const host = makeNative({ keychain: loggedIn, files: { [CACHE]: JSON.stringify({ pushOn: true }) } }, withPush(() => ({ status: 503, body: {} })));
+    const host = makeNative({ keychain: loggedIn, files: { [CACHE]: JSON.stringify({ pushUntil: now().getTime() + 60_000 }) } }, withPush(() => ({ status: 503, body: {} })));
     await run(host, cfg, now);
     expect(host.state.scheduled).toEqual([]);
     const none = makeNative({ keychain: loggedIn }, withPush(() => ({ status: 404, body: { error: { status: 'NOT_FOUND' } } })));
     await run(none, cfg, now);
     expect(none.state.scheduled.map((n) => n.identifier)).toEqual([ID]);
-    expect(JSON.parse(none.state.files.get(CACHE)!)).toMatchObject({ pushOn: false });
+    expect(JSON.parse(none.state.files.get(CACHE)!)).toMatchObject({ pushUntil: 0 });
+    // 보관한 시각이 지났으면 읽지 못해도 예약한 것으로 돌아간다.
+    const old = makeNative({ keychain: loggedIn, files: { [CACHE]: JSON.stringify({ pushUntil: now().getTime() - 1 }) } }, withPush(() => ({ status: 503, body: {} })));
+    await run(old, cfg, now);
+    expect(old.state.scheduled.map((n) => n.identifier)).toEqual([ID]);
   });
 
   it('앱에서 실행하면 메뉴가 푸시 알림을 쓴다고 알린다', async () => {

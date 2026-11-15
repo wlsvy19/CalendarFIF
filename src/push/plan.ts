@@ -14,7 +14,7 @@ export type Outgoing = {
   url: string;
   /** 같은 알림이 두 번 와도 하나로 보이게 하는 이름. */
   tag: string;
-  /** 울릴 때(밀리초). 시험 알림은 요청한 때(기기 시계가 빠르면 조금 뒤일 수 있다). */
+  /** 울릴 때(밀리초). 시험 알림은 요청한 때(그때가 지난 뒤에만 보낸다. 기기 시계가 빠르면 다음 실행이 보낸다). */
   at: number;
 };
 
@@ -52,7 +52,7 @@ export function planSends(users: UserData[], from: Date, to: Date, now: number):
       }
     }
     const handled = u.push.sender?.testAt ?? 0;
-    if (u.push.testAt > handled && now - u.push.testAt < TEST_FRESH_MS && u.push.testAt <= now + 60_000) {
+    if (u.push.testAt > handled && now - u.push.testAt < TEST_FRESH_MS && u.push.testAt <= now) {
       tests.push({ uid: u.uid, testAt: u.push.testAt });
       for (const [deviceId, d] of unique) {
         sends.push({ uid: u.uid, deviceId, token: d.token, title: TEST_TITLE, body: TEST_BODY, url: '/', tag: `calfif-test:${u.push.testAt}`, at: u.push.testAt });

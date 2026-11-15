@@ -122,7 +122,12 @@ const auth = (ctx: Ctx): Record<string, string> => ({ Authorization: `Bearer ${c
 
 /** 토큰이 거절되면(401) 캐시에서 지워 다음 실행이 새로 받게 한다. */
 function dropTokenOn401(ctx: Ctx, code: number): void {
-  if (code === 401) ctx.host.CacheService.getScriptCache().remove(TOKEN_CACHE);
+  if (code !== 401) return;
+  try {
+    ctx.host.CacheService.getScriptCache().remove(TOKEN_CACHE);
+  } catch {
+    // 50분 뒤에는 저절로 지워진다.
+  }
 }
 
 function failText(what: string, res: GasResponse): string {
@@ -233,9 +238,8 @@ export type Delivery = { errors: string[]; dead: Set<string>; sent: number };
  * 보낼 것들을 울릴 때마다 묶어 그때까지 기다렸다 보낸다. 사람마다 문제와 지울 기기를 모으고, 끝낸 것(보냈거나 토큰이 죽었다)의 이름을 done에 담는다.
  * 묶음 하나를 보내다 던져도(연결 끊김, 한도) 그 묶음은 문제로 적고 다음 묶음으로 간다. done에 없는 것은 부른 쪽이 다시 보낼 수 있게 푼다.
  */
-export function deliver(ctx: Ctx, sends: Outgoing[]): { byUser: Map<string, Delivery>; done: Set<string> } {
+export function deliver(ctx: Ctx, sends: Outgoing[], done: Set<string> = new Set()): { byUser: Map<string, Delivery>; done: Set<string> } {
   const out = new Map<string, Delivery>();
-  const done = new Set<string>();
   const entry = (uid: string) => {
     let e = out.get(uid);
     if (!e) out.set(uid, (e = { errors: [], dead: new Set(), sent: 0 }));
@@ -386,9 +390,10 @@ export function tick(host: GasHost): TickReport {
     lock.releaseLock();
   }
   let byUser = new Map<string, Delivery>();
-  let done = new Set<string>();
+  // deliver가 도중에 던져도 그때까지 끝낸 것은 여기에 남아 끝냄으로 적힌다.
+  const done = new Set<string>();
   try {
-    ({ byUser, done } = deliver(ctx, mine));
+    byUser = deliver(ctx, mine, done).byUser;
   } finally {
     // 끝낸 것은 끝냄으로, 나머지(보내지 못했거나 도중에 던졌다)는 풀어서 다음 실행이 다시 한다.
     if (mine.length > 0 && lock.tryLock(30_000)) {
