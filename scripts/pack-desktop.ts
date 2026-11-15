@@ -54,8 +54,9 @@ function removeOldReleases(keep: string): void {
   if (remove.length === 0 && busy.length === 0) console.log('지울 옛 버전이 없다.');
 }
 
+// 켜진 것이 없으면 Get-Process가 (조용히) 실패해 종료 코드가 1이 되므로 끝에 exit 0을 둔다. 그러지 않으면 "확인하지 못했다"로 멈춘다.
 const runningApps = () =>
-  spawnSync('powershell', ['-NoProfile', '-Command', "Get-Process CalendarFIF -ErrorAction SilentlyContinue | ForEach-Object { if ($_.Path) { $_.Path } else { '?' } }"], { encoding: 'utf8', timeout: 30000 });
+  spawnSync('powershell', ['-NoProfile', '-Command', "Get-Process CalendarFIF -ErrorAction SilentlyContinue | ForEach-Object { if ($_.Path) { $_.Path } else { '?' } }; exit 0"], { encoding: 'utf8', timeout: 30000 });
 
 // 막 만든 파일을 백신이 잠깐 쥐고 있으면 폴더 옮기기가 실패할 수 있어 몇 번 다시 한다.
 function renameRetry(from: string, to: string): void {
