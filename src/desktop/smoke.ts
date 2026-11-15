@@ -622,7 +622,11 @@ async function alarm(): Promise<Result> {
   let onWorkArea = false;
   let closed = false;
   if (popup) {
-    await until(async () => ((await jsOr(popup, "document.body ? document.body.innerText : ''", '')) as string).includes('시험 알림'), 5000);
+    // 창의 페이지는 렌더러가 뜨고 소리를 준비하는 동안 늦게 읽힐 수 있다(이 PC에서 7초쯤 잰 적이 있다). 계획대로 15초 안에
+    // 글이 나오기를 기다리고, 창은 첫 그림을 그린 뒤(ready-to-show, 글보다 몇 ms 늦다) 보이므로 보일 때까지 기다린 뒤에 잰다.
+    // 끝내 글이 없거나 보이지 않으면 text나 visible이 실패한다.
+    await until(async () => ((await jsOr(popup, "document.body ? document.body.innerText : ''", '')) as string).includes('시험 알림'), 15000);
+    await until(() => popup.isDestroyed() || popup.isVisible(), 5000);
     text = (await jsOr(popup, "document.body ? document.body.innerText : ''", '')) as string;
     hasTime = ((await jsOr(popup, "!!document.querySelector('li b')", false)) as boolean) && ((await jsOr(popup, "document.querySelector('li b').textContent", '')) as string) === time;
     title = popup.getTitle();
