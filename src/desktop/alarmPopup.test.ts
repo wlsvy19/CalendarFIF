@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { alarmPopupHtml, alarmWindowOptions, planAlarmPopup, sanitizeAlarmItems, TONE_QUIET_MS } from './alarmPopup';
+import { ALARM_OK_TITLE, alarmPopupHtml, alarmWindowOptions, planAlarmPopup, sanitizeAlarmItems, TONE_QUIET_MS } from './alarmPopup';
 
 const item = { time: '09:30', text: '약 먹기', date: '2026-11-20', advance: 0 };
 
@@ -12,7 +12,8 @@ it('글을 이스케이프하고 항목마다 시각과 글을 넣는다', () =>
   expect(html).toContain('&lt;b&gt;&quot;a&quot; &amp; &#39;b&#39;&lt;/b&gt;');
   expect(html).not.toContain('<b>"a"');
   expect(html).toContain("default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'");
-  expect(html).toContain('window.close()');
+  expect(html).toContain(`document.title = '${ALARM_OK_TITLE}'`);
+  expect(html).not.toContain('window.close()');
   expect(html).toContain('확인');
 });
 
@@ -27,6 +28,15 @@ it('소리가 none이면 소리 코드를 넣지 않는다', () => {
   expect(alarmPopupHtml([item], 'none')).not.toContain('AudioContext');
   expect(alarmPopupHtml([item], 'chime')).toContain('AudioContext');
   expect(alarmPopupHtml([item], 'bell')).toContain('2640');
+});
+
+it('소리는 첫 그림을 그린 뒤에 낸다(AudioContext를 페이지를 읽는 동안 만들지 않는다)', () => {
+  const html = alarmPopupHtml([item], 'chime');
+  expect(html.indexOf('requestAnimationFrame')).toBeGreaterThan(-1);
+  expect(html.indexOf('new AudioContext')).toBeGreaterThan(-1);
+  expect(html).toContain('requestAnimationFrame(() => setTimeout(play, 0))');
+  // play 함수 안에서만 만들고, 바깥에서 곧바로 만들지 않는다
+  expect(html.indexOf('const play = ')).toBeLessThan(html.indexOf('new AudioContext'));
 });
 
 it('미리 알림은 웹앱과 같은 말(하루 전 등)과 그 날짜로 적고, 당일은 적지 않는다', () => {

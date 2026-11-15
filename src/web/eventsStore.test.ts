@@ -273,6 +273,21 @@ describe('EventsStore', () => {
     s.destroy();
   });
 
+  it('듣는 쪽이 던져도 저장은 쓰기를 시작하고 다른 듣는 쪽도 알린다', async () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const s = make();
+    const second = vi.fn();
+    s.onChange(() => { throw new Error('boom'); });
+    s.onChange(second);
+    expect(() => s.save('a1', rec('가'))).not.toThrow();
+    await flushAll();
+    expect(source.doc.a1.text).toBe('가');
+    expect(second).toHaveBeenCalled();
+    expect(quiet).toHaveBeenCalled();
+    s.destroy();
+    quiet.mockRestore();
+  });
+
   it('서버가 받은 뒤에도 보이는 것이 같으면 version을 올리지 않는다', async () => {
     const s = make();
     const fn = vi.fn();

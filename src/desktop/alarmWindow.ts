@@ -1,5 +1,5 @@
 import { BrowserWindow, app, screen } from 'electron';
-import { alarmPopupHtml, alarmWindowOptions, planAlarmPopup } from './alarmPopup';
+import { ALARM_OK_TITLE, alarmPopupHtml, alarmWindowOptions, planAlarmPopup } from './alarmPopup';
 import type { AlarmPopupItem, AlarmTone } from './api';
 
 // 알림 시각에 맨 위에 뜨는 작은 창. 달력 창과 따로이고, 달력 창의 순서 처리(window.ts)의 대상이 아니다.
@@ -40,6 +40,14 @@ export function showAlarmWindow(items: AlarmPopupItem[], tone: AlarmTone): void 
   const mine: Popup = { win, shown: plan.items, closing: false, toneAt: plan.tone !== 'none' ? now : null };
   popup = mine;
   win.setMenu(null);
+  // 확인은 페이지가 제목을 바꿔 알린다(페이지가 직접 닫으면 close가 오지 않는다. data 주소는 #주소 이동도 알려 주지 않는다).
+  // 닫는 것은 이쪽이 맡아 닫히는 중임을 먼저 적는다.
+  win.webContents.on('page-title-updated', (e, title) => {
+    if (title !== ALARM_OK_TITLE) return;
+    e.preventDefault();
+    mine.closing = true;
+    if (!win.isDestroyed()) win.close();
+  });
   win.on('close', () => {
     mine.closing = true;
   });

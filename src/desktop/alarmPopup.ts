@@ -5,6 +5,8 @@ import type { AlarmPopupItem, AlarmTone } from './api';
 // PC 알림 창의 순수한 부분: 화면에서 온 항목을 거르고, 창의 설정과 HTML을 만들고, 떠 있는 창에 합칠지 정한다.
 // Electron의 값은 쓰지 않는다(타입만).
 
+/** 확인을 누른 페이지가 제목을 이것으로 바꿔 메인 프로세스에 알린다. */
+export const ALARM_OK_TITLE = '__calfif_alarm_ok__';
 export const MAX_ALARM_ITEMS = 20;
 /** 이만큼 안에 소리를 냈으면 떠 있는 창에 합칠 때 다시 내지 않는다. */
 export const TONE_QUIET_MS = 5000;
@@ -71,7 +73,7 @@ const escapeHtml = (s: string): string =>
 // src/web/tones.ts의 chime, bell과 같은 소리를 짧게 다시 쓴 것이다. 창이 뜰 때 한 번 낸다.
 const TONE_SCRIPT = `
 const tone = '__TONE__';
-try {
+const play = () => { try {
   const ctx = new AudioContext();
   if (ctx.state === 'suspended') ctx.resume().catch(() => undefined);
   const note = (freq, start, length, volume, decay) => {
@@ -89,7 +91,9 @@ try {
   const t = ctx.currentTime;
   if (tone === 'chime') [880, 1175, 1568].forEach((f, i) => note(f, t + i * 0.18, 0.18, 0.15, false));
   else [[660, 0.1, 1.4], [1650, 0.05, 1.0], [2640, 0.03, 0.6]].forEach(([f, v, len]) => note(f, t, len, v, true));
-} catch (e) {}
+} catch (e) {} };
+// 첫 그림을 그린 뒤에 낸다. 페이지를 읽는 동안 AudioContext를 만들면 창이 몇 초 늦게 뜬다.
+requestAnimationFrame(() => setTimeout(play, 0));
 `;
 
 /** 미리 알림의 말(웹앱의 알림 상자와 같은 ADVANCE_LABELS)과 그 날짜. 당일은 적지 않는다. */
@@ -128,7 +132,7 @@ button { align-self: flex-end; margin-top: 8px; padding: 6px 18px; border: 0; bo
 <ul>${rows}</ul>
 <button id="ok" type="button" autofocus>확인</button>
 <script>
-document.getElementById('ok').addEventListener('click', () => window.close());
+document.getElementById('ok').addEventListener('click', () => { document.title = '${ALARM_OK_TITLE}'; });
 ${sound}
 </script>
 </body></html>`;

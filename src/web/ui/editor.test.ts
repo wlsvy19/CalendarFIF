@@ -430,7 +430,7 @@ it('아이폰의 지금 예약은 저장한 뒤 events.flush로 서버가 받기
   await vi.waitFor(() => expect(ev.flush).toHaveBeenCalledTimes(1));
   expect(ev.save.mock.invocationCallOrder[0]).toBeLessThan(ev.flush.mock.invocationCallOrder[0]);
   expect(root.querySelector<HTMLButtonElement>('.event-sheet .ev-schedule')!.disabled).toBe(true); // 기다리는 중
-  handle.destroy(); // 닫히면 기다리던 것이 끝나도 아무것도 열지 않는다
+  handle.destroy(); // 닫히면 기다리던 것이 끝나도 링크를 만들지 않는다
 });
 it('바깥을 눌러 색 상자를 닫을 때는 초점을 배경 단추로 옮기지 않는다', () => {
   const { root, area } = mount({ text: 'a', color: '' });

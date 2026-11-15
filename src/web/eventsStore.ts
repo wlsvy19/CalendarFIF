@@ -240,7 +240,10 @@ export class EventsStore implements EventsView {
     this.view = out;
     this.viewText = text;
     this.ver += 1;
-    for (const fn of [...this.listeners]) fn();
+    // 듣는 쪽이 던져도 저장(save)이 쓰기를 시작하기 전에 끊기지 않게 한다. 오류는 콘솔에만 남긴다(글 내용은 적지 않는다).
+    for (const fn of [...this.listeners]) {
+      try { fn(); } catch (e) { console.error('EventsStore 듣는 쪽 오류', e instanceof Error ? e.message : 'unknown'); }
+    }
   }
 
   private readPending(): Pending {

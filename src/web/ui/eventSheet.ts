@@ -33,8 +33,6 @@ export type EventSheetProps = {
   onClose(): void;
   /** 저장한 것을 서버가 받을 때까지 기다린다(지금 예약). 받지 못하면 거절한다. 없으면 기다리지 않는다. */
   flush?(): Promise<void>;
-  /** 주소를 연다(지금 예약). 기본은 그 주소로 옮겨 가기. */
-  openUrl?(url: string): void;
 };
 
 type EndMode = 'forever' | 'until' | 'count';
@@ -118,7 +116,7 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps, env?:
   const isAlarm = props.type === 'alarm';
   const rec = props.record;
   const id = props.id ?? newEventId();
-  const editing = props.id !== undefined;
+  let editing = props.id !== undefined; // 지금 예약으로 저장하면 그 뒤로는 있는 항목이다
   const baseDate = rec?.date ?? props.dateKey; // 반복 항목의 기준 날짜는 고쳐도 그대로다
   const alarm = rec?.type === 'alarm' ? rec : null;
   const countdown = rec?.type === 'countdown' ? rec : null;
@@ -274,20 +272,26 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps, env?:
   error.hidden = true;
   body.append(error);
 
+  let hintText: HTMLElement | null = null;
+  let scheduleBtn: HTMLButtonElement | null = null;
   if (isAlarm && props.iosHint) {
-    const hint = el('p', 'ev-hint', '아이폰 알림은 Scriptable 위젯 스크립트가 예약합니다. 위젯이 새로 그려질 때 예약되고, 바로 하려면 누르세요. ');
-    const now = el('button', 'ev-link ev-schedule', '지금 예약');
-    now.type = 'button';
+    hintText = el('span', 'ev-hint-text', '아이폰 알림은 Scriptable 위젯 스크립트가 예약합니다. 위젯이 새로 그려질 때 예약되고, 바로 하려면 누르세요. ');
+    scheduleBtn = el('button', 'ev-link ev-schedule', '지금 예약');
+    scheduleBtn.type = 'button';
+    const now = scheduleBtn;
     now.addEventListener('click', () => void scheduleNow(now));
-    hint.append(now);
+    const hint = el('p', 'ev-hint');
+    hint.append(hintText, now);
     body.append(hint);
   }
 
   const actions = el('div', 'ev-actions');
   let disarmDelete = (): void => {};
-  if (editing) {
+  let showDelete = (): void => {};
+  {
     const del = el('button', 'settings-btn danger ev-delete', '삭제');
     del.type = 'button';
+    showDelete = () => { if (!del.isConnected) actions.append(del); };
     // 반복하는 항목은 통째로 지워지므로 두 번 눌러야 지운다. 4초가 지나거나 다른 것을 하면 처음으로 돌아간다.
     let armed: ReturnType<typeof setTimeout> | null = null;
     disarmDelete = (): void => {
@@ -313,9 +317,9 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps, env?:
     };
     for (const type of ['pointerdown', 'keydown', 'input', 'change']) sheet.addEventListener(type, other, true);
     scrim.addEventListener('pointerdown', () => disarmDelete());
-    actions.append(del);
+    if (editing) actions.append(del);
   }
-  if (actions.childElementCount > 0) body.append(actions);
+  body.append(actions);
 
   sheet.append(bar, body);
 
@@ -369,14 +373,21 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps, env?:
     close();
   };
 
-  // 지금 예약: 저장과 똑같이 저장하고, 서버가 받은 것을 확인한 뒤 Scriptable을 연다(Scriptable은 서버의 문서를 읽어 예약한다).
-  // 받지 못하면(연결 없음, 4초 넘게 걸림) 시트를 두고 다시 누르게 한다. 저장한 알림은 이 기기에 남아 연결되면 올라간다.
+  // 지금 예약은 두 번 누른다. 첫 번째는 저장하고 서버가 받은 것을 확인한다(Scriptable은 서버의 문서를 읽어 예약한다).
+  // 확인되면 단추가 진짜 링크로 바뀐다. iOS는 서버를 기다린 뒤의 주소 이동을 사용자의 누르기로 보지 않아 막을 수 있어서, 링크를
+  // 눌러야 연다. 받지 못하면(연결 없음, 4초 넘게 걸림) 시트를 두고 다시 누르게 한다. 저장한 알림은 이 기기에 남아 연결되면 올라간다.
+  const markSaved = (): void => {
+    editing = true;
+    h3.textContent = isAlarm ? '알림 편집' : '카운트다운 편집';
+    showDelete();
+  };
   let scheduling = false;
   const scheduleNow = async (button: HTMLButtonElement): Promise<void> => {
     if (scheduling) return;
     const rec = build();
     if (!rec) return;
     props.onSave(id, rec);
+    markSaved();
     scheduling = true;
     error.hidden = true;
     button.disabled = true;
@@ -388,11 +399,15 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps, env?:
     button.disabled = false;
     button.textContent = '지금 예약';
     if (!ok) {
-      fail('연결된 뒤에 다시 누르세요');
+      fail('저장했습니다. 연결된 뒤에 다시 누르세요');
       return;
     }
-    close();
-    (props.openUrl ?? ((url: string) => { location.href = url; }))(SCRIPTABLE_SCHEDULE_URL);
+    // 진짜 링크: 기본 이동은 그대로 두고, 이동이 시작된 뒤 다음 틱에 시트를 닫는다.
+    const link = el('a', 'ev-link ev-schedule', 'Scriptable 열기');
+    link.href = SCRIPTABLE_SCHEDULE_URL;
+    link.addEventListener('click', () => { setTimeout(close, 0); });
+    button.replaceWith(link);
+    if (hintText) hintText.textContent = '저장했습니다. 눌러서 바로 예약하세요. ';
   };
   saveBtn.addEventListener('click', save);
   cancelBtn.addEventListener('click', () => close());

@@ -959,7 +959,7 @@ button { touch-action: manipulation; }
 .ev-error { margin: 6px 0 0; color: var(--sun); font-size: 14px; }
 .ev-error[hidden] { display: none; }
 .ev-hint { margin: 10px 0 0; font-size: 13px; line-height: 1.45; color: var(--muted); }
-.ev-link { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
+.ev-link { text-decoration: none; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
 .ev-link:disabled { color: var(--muted); cursor: default; }
 .ev-actions { display: flex; margin-top: 8px; }
 .ev-actions .settings-btn { flex: 1; }

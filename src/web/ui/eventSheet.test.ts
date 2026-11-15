@@ -222,68 +222,79 @@ it('아이폰 안내는 iosHint일 때만', () => {
   expect(mount({ type: 'countdown', iosHint: true }).root.querySelector('.ev-schedule')).toBeNull();
 });
 
-it('지금 예약은 저장처럼 저장하고, 서버가 받은 뒤에 Scriptable을 연다', async () => {
+it('지금 예약은 저장하고 서버가 받으면 Scriptable 링크로 바뀐다(한 번 더 눌러 연다)', async () => {
   let confirm!: () => void;
   const flush = vi.fn(() => new Promise<void>((r) => { confirm = r; }));
-  const openUrl = vi.fn();
-  const m = mount({ iosHint: true, defaultText: '회의', flush, openUrl });
+  const m = mount({ iosHint: true, defaultText: '회의', flush });
+  expect(m.root.querySelector('h3')!.textContent).toBe('새 알림');
+  expect(m.root.querySelector('.ev-delete')).toBeNull();
   m.q<HTMLButtonElement>('.ev-schedule').click();
   expect(m.onSave).toHaveBeenCalledTimes(1);
   expect(m.onSave.mock.calls[0][1]).toMatchObject({ type: 'alarm', text: '회의', time: '09:00', advance: [0] });
   await vi.waitFor(() => expect(flush).toHaveBeenCalledTimes(1));
-  expect([openUrl.mock.calls.length, m.q<HTMLButtonElement>('.ev-schedule').disabled]).toEqual([0, true]); // 기다리는 중
+  expect(m.q<HTMLButtonElement>('.ev-schedule').disabled).toBe(true); // 기다리는 중
   m.q<HTMLButtonElement>('.ev-schedule').click(); // 기다리는 동안 다시 눌러도 한 번
   confirm();
-  await vi.waitFor(() => expect(openUrl).toHaveBeenCalledWith(SCRIPTABLE_SCHEDULE_URL));
+  await vi.waitFor(() => expect(m.q<HTMLElement>('.ev-schedule').tagName).toBe('A'));
+  const link = m.q<HTMLAnchorElement>('a.ev-schedule');
+  expect([link.getAttribute('href'), link.textContent]).toEqual([SCRIPTABLE_SCHEDULE_URL, 'Scriptable 열기']);
+  expect(m.root.textContent).toContain('저장했습니다. 눌러서 바로 예약하세요.');
   expect(m.onSave).toHaveBeenCalledTimes(1);
-  expect(m.onClose).toHaveBeenCalledTimes(1);
-  expect(m.root.querySelector('.event-sheet')).toBeNull();
+  expect(m.onClose).not.toHaveBeenCalled(); // 아직 열려 있다. 링크를 눌러야 닫힌다
+  expect(m.root.querySelector('h3')!.textContent).toBe('알림 편집');
+  expect(m.root.querySelector('.ev-delete')).not.toBeNull();
   expect(m.onSave.mock.invocationCallOrder[0]).toBeLessThan(flush.mock.invocationCallOrder[0]);
+  link.addEventListener('click', (e) => e.preventDefault()); // happy-dom이 주소로 옮겨 가지 않게
+  link.click();
+  expect(m.onClose).not.toHaveBeenCalled(); // 이동이 먼저, 닫기는 다음 틱
+  await new Promise((r) => setTimeout(r, 5));
+  expect(m.onClose).toHaveBeenCalledTimes(1);
 });
 
-it('지금 예약: 틀린 곳이 있으면 저장과 같은 말을 보이고 저장하지도 열지도 않는다', async () => {
+it('지금 예약: 틀린 곳이 있으면 저장과 같은 말을 보이고 저장하지 않는다', async () => {
   const flush = vi.fn(() => Promise.resolve());
-  const openUrl = vi.fn();
-  const m = mount({ iosHint: true, flush, openUrl });
+  const m = mount({ iosHint: true, flush });
   m.q<HTMLButtonElement>('.ev-schedule').click();
   await Promise.resolve();
   expect(m.root.textContent).toContain('글을 적어 주세요');
-  expect([m.onSave.mock.calls.length, flush.mock.calls.length, openUrl.mock.calls.length, m.onClose.mock.calls.length]).toEqual([0, 0, 0, 0]);
+  expect([m.onSave.mock.calls.length, flush.mock.calls.length, m.onClose.mock.calls.length]).toEqual([0, 0, 0]);
+  expect(m.root.querySelector('h3')!.textContent).toBe('새 알림');
 });
 
-it('지금 예약: 서버가 받지 못하면(거절, 4초) 연결된 뒤에 다시 누르라고 하고 시트에 남는다', async () => {
-  const openUrl = vi.fn();
-  const refused = mount({ iosHint: true, defaultText: '회의', flush: () => Promise.reject(new Error('offline')), openUrl });
+it('지금 예약: 서버가 받지 못하면(거절, 4초) 저장했다고 알리고 시트에 남는다', async () => {
+  const refused = mount({ iosHint: true, defaultText: '회의', flush: () => Promise.reject(new Error('offline')) });
   refused.q<HTMLButtonElement>('.ev-schedule').click();
-  await vi.waitFor(() => expect(refused.root.querySelector('.ev-error')!.textContent).toBe('연결된 뒤에 다시 누르세요'));
+  await vi.waitFor(() => expect(refused.root.querySelector('.ev-error')!.textContent).toBe('저장했습니다. 연결된 뒤에 다시 누르세요'));
   expect(refused.root.querySelector<HTMLElement>('.ev-error')!.hidden).toBe(false);
-  expect([refused.onSave.mock.calls.length, refused.onClose.mock.calls.length, openUrl.mock.calls.length]).toEqual([1, 0, 0]);
+  expect([refused.onSave.mock.calls.length, refused.onClose.mock.calls.length]).toEqual([1, 0]);
   expect(refused.q<HTMLButtonElement>('.ev-schedule').disabled).toBe(false);
+  expect(refused.q<HTMLElement>('.ev-schedule').tagName).toBe('BUTTON');
+  expect(refused.root.querySelector('h3')!.textContent).toBe('알림 편집');
+  expect(refused.root.querySelector('.ev-delete')).not.toBeNull();
 
   vi.useFakeTimers();
   try {
-    const slow = mount({ iosHint: true, defaultText: '회의', flush: () => new Promise<void>(() => {}), openUrl });
+    const slow = mount({ iosHint: true, defaultText: '회의', flush: () => new Promise<void>(() => {}) });
     slow.q<HTMLButtonElement>('.ev-schedule').click();
     await vi.advanceTimersByTimeAsync(3900);
     expect(slow.root.querySelector<HTMLElement>('.ev-error')!.hidden).toBe(true);
     await vi.advanceTimersByTimeAsync(200);
-    expect(slow.root.querySelector('.ev-error')!.textContent).toBe('연결된 뒤에 다시 누르세요');
-    expect([slow.onClose.mock.calls.length, openUrl.mock.calls.length]).toEqual([0, 0]);
+    expect(slow.root.querySelector('.ev-error')!.textContent).toBe('저장했습니다. 연결된 뒤에 다시 누르세요');
+    expect(slow.onClose.mock.calls.length).toBe(0);
   } finally {
     vi.useRealTimers();
   }
 });
 
-it('지금 예약을 기다리는 동안 시트를 닫으면 Scriptable을 열지 않는다', async () => {
+it('지금 예약을 기다리는 동안 시트를 닫으면 링크를 만들지 않는다', async () => {
   let confirm!: () => void;
-  const openUrl = vi.fn();
-  const m = mount({ iosHint: true, defaultText: '회의', flush: () => new Promise<void>((r) => { confirm = r; }), openUrl });
+  const m = mount({ iosHint: true, defaultText: '회의', flush: () => new Promise<void>((r) => { confirm = r; }) });
   m.q<HTMLButtonElement>('.ev-schedule').click();
   m.button('취소').click();
   await vi.waitFor(() => expect(confirm).toBeTypeOf('function'));
   confirm();
   await new Promise((r) => setTimeout(r, 10));
-  expect(openUrl).not.toHaveBeenCalled();
+  expect(m.root.querySelector('a.ev-schedule')).toBeNull();
   expect(m.onClose).toHaveBeenCalledTimes(1);
 });
 
