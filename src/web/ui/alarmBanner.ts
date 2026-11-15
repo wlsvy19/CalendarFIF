@@ -31,18 +31,23 @@ export function showAlarmBanner(
     root.append(made);
     banner = made;
   }
-  const list = banner.querySelector('.alarm-list')!;
+  const shown = banner;
+  const list = shown.querySelector('.alarm-list')!;
   const added: HTMLElement[] = [];
   for (const t of triggers) {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'alarm-item';
     item.textContent = lineText(t);
-    item.addEventListener('click', () => onOpen(t.occurrence));
+    item.addEventListener('click', () => {
+      // 편집 화면이 열리므로 눌린 줄은 치우고, 남은 줄이 없으면 상자도 닫는다.
+      item.remove();
+      if (!list.querySelector('.alarm-item')) shown.remove();
+      onOpen(t.occurrence);
+    });
     list.append(item);
     added.push(item);
   }
-  const shown = banner;
   return {
     destroy(): void {
       for (const item of added) item.remove();

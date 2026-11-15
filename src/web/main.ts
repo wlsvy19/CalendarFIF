@@ -403,11 +403,12 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   }
   // 알림 시계: 시각이 된 알림을 화면 안 알림으로 띄우고 소리를 낸다(PC 앱의 별도 알림 창은 나중에 바꾼다).
   // 소리는 울리는 때의 설정을 읽는다(열려 있는 동안 설정이 바뀔 수 있다).
+  const banners: Array<{ destroy(): void }> = [];
   const alarmClock = startAlarmClock({
     view: events,
     storage: storage.store,
     onRing: (triggers) => {
-      showAlarmBanner(root, triggers, openDay);
+      banners.push(showAlarmBanner(root, triggers, openDay));
       const tone = prefs?.alarmTone ?? appearance?.alarmTone ?? 'none';
       if (tone !== 'none') playTone(tone);
     },
@@ -436,6 +437,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       closeUsers();
       calendar.destroy();
       alarmClock.stop();
+      for (const b of banners) b.destroy(); // 내려간 화면 위에 알림 상자가 남지 않게 한다
       document.removeEventListener('pointerdown', unlock, { capture: true });
       events.destroy();
       window.removeEventListener('storage', onStorage);

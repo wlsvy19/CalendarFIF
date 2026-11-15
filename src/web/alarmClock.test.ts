@@ -148,4 +148,41 @@ describe('startAlarmClock', () => {
     expect(onRing).toHaveBeenCalledTimes(1);
     clock.stop();
   });
+
+  it('울린 알림을 같은 날 늦은 시각으로 고치면 새 시각에 다시 울리고 두 번은 울리지 않는다', () => {
+    const { clock, onRing } = start(mem());
+    t = at('2026-11-20', 9, 0);
+    clock.check();
+    expect(onRing).toHaveBeenCalledTimes(1);
+    items = { a1: alarm('2026-11-20', '09:30') };
+    t = at('2026-11-20', 9, 10);
+    clock.check();
+    expect(onRing).toHaveBeenCalledTimes(1);
+    t = at('2026-11-20', 9, 30);
+    clock.check();
+    clock.check();
+    expect(onRing).toHaveBeenCalledTimes(2);
+    clock.stop();
+  });
+
+  it('now에 딱 맞는 것은 한 번 울린다', () => {
+    const { clock, onRing } = start(mem());
+    t = at('2026-11-20', 9, 0);
+    clock.check();
+    clock.check();
+    expect(onRing).toHaveBeenCalledTimes(1);
+    clock.stop();
+  });
+
+  it('now보다 1분 뒤인 것은 아직 울리지 않고 다음 check에 한 번 울린다', () => {
+    const { clock, onRing } = start(mem());
+    t = at('2026-11-20', 8, 59);
+    clock.check();
+    expect(onRing).not.toHaveBeenCalled();
+    t = at('2026-11-20', 9, 0);
+    clock.check();
+    clock.check();
+    expect(onRing).toHaveBeenCalledTimes(1);
+    clock.stop();
+  });
 });

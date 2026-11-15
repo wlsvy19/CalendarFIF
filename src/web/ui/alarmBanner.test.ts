@@ -40,3 +40,15 @@ it('글을 누르면 그 날짜로', () => {
   root.querySelector<HTMLElement>('.alarm-item')!.click();
   expect(onOpen).toHaveBeenCalledWith('2026-11-22');
 });
+
+it('누른 줄은 치우고 남은 줄이 없으면 상자도 닫힌다', () => {
+  const root = mount();
+  const onOpen = vi.fn();
+  showAlarmBanner(root, [trig({}), trig({ key: 'b', occurrence: '2026-11-21', text: '둘째' })], onOpen);
+  root.querySelectorAll<HTMLElement>('.alarm-item')[0].click();
+  expect(root.querySelectorAll('.alarm-item')).toHaveLength(1);
+  expect(root.querySelector('.alarm-banner')).not.toBeNull();
+  root.querySelector<HTMLElement>('.alarm-item')!.click();
+  expect(root.querySelector('.alarm-banner')).toBeNull();
+  expect(onOpen).toHaveBeenCalledTimes(2);
+});

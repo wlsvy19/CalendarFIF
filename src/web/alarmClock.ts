@@ -3,7 +3,7 @@ import type { KeyValueStore } from '../sync/outbox';
 import type { EventsView } from './eventsStore';
 
 // 알림을 울리는 시계. 화면이 열려 있는 동안 시각이 된 알림을 한 번만 울린다.
-// 울린 것은 저장소에 적어서 다시 열기, 잠자기 뒤, 여러 탭에서도 같은 알림이 두 번 울리지 않게 한다.
+// 울린 것은(열쇠 -> 그때 예정 시각) 저장소에 적어서 다시 열기, 잠자기 뒤, 여러 탭에서도 같은 알림이 두 번 울리지 않게 한다.
 
 export const FIRED_KEY = 'calfif.alarmsFired';
 const LATE_MS = 10 * 60_000; // 이보다 오래 지난 것은 울리지 않는다
@@ -74,9 +74,9 @@ export function startAlarmClock(deps: {
       if (t - at > KEEP_MS) { delete fired[k]; dirty = true; }
     }
     const due = allAlarmTriggers(deps.view.items(), new Date(t - LATE_MS), new Date(t + AHEAD_MS))
-      .filter((x) => x.at.getTime() <= t && fired[x.key] === undefined);
-    // 울리기 전에 적는다. 울리는 중에 던져도 다시 울리지 않는다.
-    for (const x of due) fired[x.key] = t;
+      .filter((x) => x.at.getTime() <= t && fired[x.key] !== x.at.getTime());
+    // 울리기 전에 예정 시각을 적는다. 울리는 중에 던져도 다시 울리지 않고, 시각을 바꾼 알림은 새 시각에 다시 울린다.
+    for (const x of due) fired[x.key] = x.at.getTime();
     if (dirty || due.length > 0) write(fired);
     else memory = fired;
     if (due.length > 0) deps.onRing(due);
