@@ -253,6 +253,67 @@ body {
   line-height: 1.5;
 }
 .memo-input:focus-visible { outline-offset: 0; }
+/* 고른 배경색: 칸(.cell[data-color])과 같은 섞기 */
+.memo-input[data-color] { background: color-mix(in srgb, var(--day-color) 38%, var(--surface)); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .memo-input[data-color] { background: color-mix(in srgb, var(--day-color) 45%, var(--surface)); }
+}
+:root[data-theme="dark"] .memo-input[data-color] { background: color-mix(in srgb, var(--day-color) 45%, var(--surface)); }
+.ev-strip[hidden] { display: none; }
+.ev-strip { flex: none; }
+/* 편집 화면 아래의 도구 줄 */
+.editor-tools { flex: none; display: flex; gap: 8px; }
+.tool {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px 2px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.tool[hidden] { display: none; }
+.tool:active { opacity: 0.6; }
+.tool .dot {
+  position: absolute;
+  top: 8px;
+  right: calc(50% - 22px);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--hairline);
+  background: var(--sw, var(--surface));
+}
+.tool .dot.none {
+  background:
+    linear-gradient(to top right, transparent calc(50% - 1px), var(--sun) calc(50% - 1px), var(--sun) calc(50% + 1px), transparent calc(50% + 1px)),
+    var(--surface);
+}
+/* 배경 색 상자: 시트 안에서 배경 단추 위에 뜬다 */
+.palette {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: repeat(6, 34px);
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 8px 28px -8px var(--shadow);
+}
 
 /* 로그인 */
 .login {

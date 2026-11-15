@@ -394,10 +394,15 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   const springing = await sheetNow();
   await sleep(400);
   const settledB = await sheetNow();
-  const swatch = "document.querySelectorAll('.sheet .swatch')[3]";
+  await tap(await center("document.querySelector('.sheet button.tool.color')")); // 배경 도구로 색 상자를 연다
+  await sleep(150);
+  const swatch = "document.querySelectorAll('.sheet .palette .swatch')[3]";
+  const swatchColor = await cdp.evaluate<string>(`(${swatch})?.dataset.color ?? ''`);
   await tap(await center(swatch));
   await sleep(150);
-  const picked = await cdp.evaluate<boolean>(`(${swatch})?.getAttribute('aria-checked') === 'true'`);
+  const picked = await cdp.evaluate<boolean>(
+    `document.querySelector('.sheet .palette') === null && document.querySelector('.sheet .memo-input')?.dataset.color === ${JSON.stringify(swatchColor)} && document.querySelector('.sheet .tool.color .dot')?.style.getPropertyValue('--sw') === ${JSON.stringify('#' + swatchColor)}`,
+  );
   record(
     '40px만 끌고 멈췄다 놓으면 닫히지 않고 제자리로 돌아가며, 그 뒤에도 색 단추가 눌린다',
     restB !== null && springing !== null && springing.moving && settledB !== null && Math.abs(settledB.top - restB) <= 1 && settledB.inline === '' && !settledB.moving && picked,

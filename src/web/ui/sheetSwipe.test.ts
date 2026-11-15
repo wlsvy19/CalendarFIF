@@ -446,7 +446,7 @@ describe('실제 시트에서의 누르기', () => {
     const settings = settingsSheet();
     return [
       ['저장', editor.querySelector('.textbtn.end')!],
-      ['색 단추', editor.querySelector('.swatch[data-color="009300"]')!],
+      ['배경 도구 단추', editor.querySelector('button.tool.color')!],
       ['메모 칸', editor.querySelector('textarea')!],
       ['설정 스위치', settings.querySelector('label.pref-row input.switch')!],
     ];

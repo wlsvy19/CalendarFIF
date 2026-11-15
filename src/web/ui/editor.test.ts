@@ -1,41 +1,106 @@
 import { expect, it, vi } from 'vitest';
+import { playTone } from '../tones';
 import type { DayValue } from '../../core/types';
 import { mountEditor } from './editor';
 import { swipeDown } from './fakeSwipe';
 
-function mount(value: DayValue) {
+vi.mock('../tones', () => ({ playTone: vi.fn() }));
+
+function mount(value: DayValue, extra: Record<string, unknown> = {}) {
   const root = document.createElement('div');
   document.body.append(root);
   const onSave = vi.fn();
   const onCancel = vi.fn();
-  mountEditor(root, { dateKey: '2026-11-13', value, onSave, onCancel });
+  mountEditor(root, { dateKey: '2026-11-13', value, onSave, onCancel, ...extra });
   const area = root.querySelector<HTMLTextAreaElement>('textarea')!;
   const button = (label: string) => [...root.querySelectorAll('button')].find((b) => b.textContent === label)!;
-  return { root, area, button, onSave, onCancel };
+  /** 배경 도구를 눌러 색 상자를 열고 color를 고른다. */
+  const pick = (color: string) => {
+    root.querySelector<HTMLElement>('button.tool.color')!.click();
+    root.querySelector<HTMLElement>(`[role="radio"][data-color="${color}"]`)!.click();
+  };
+  return { root, area, button, onSave, onCancel, pick };
 }
 
 it('날짜와 저장된 값을 보여 준다', () => {
   const { root, area } = mount({ text: 'a\n[+]b', color: 'F12424' });
   expect(root.textContent).toContain('11월 13일 금요일');
   expect(area.value).toBe('a\n[+]b');
+  expect(root.querySelector('.swatches, .donebtn')).toBeNull();
+  expect(root.querySelectorAll('[role="radio"]')).toHaveLength(0); // 색 상자는 누를 때 뜬다
+  root.querySelector<HTMLElement>('button.tool.color')!.click();
   expect(root.querySelectorAll('[role="radio"]')).toHaveLength(23);
   expect(root.querySelector('[role="radio"][aria-checked="true"]')!.getAttribute('data-color')).toBe('F12424');
 });
 it('팔레트에 없는 색은 단추를 하나 더 둔다', () => {
   const { root } = mount({ text: '', color: 'FF0000' });
+  root.querySelector<HTMLElement>('button.tool.color')!.click();
   expect(root.querySelectorAll('[role="radio"]')).toHaveLength(24);
   expect(root.querySelector('[role="radio"][aria-checked="true"]')!.getAttribute('data-color')).toBe('FF0000');
 });
 it('커서가 있는 줄의 완료 표시를 바꾼다', () => {
-  const { area, button } = mount({ text: 'a\n[+]b', color: '' });
+  const { area, root } = mount({ text: 'a\n[+]b', color: '' });
   area.setSelectionRange(0, 0);
-  button('완료 표시').click();
+  root.querySelector<HTMLElement>('button.tool.done')!.click();
   expect(area.value).toBe('[+]a\n[+]b');
 });
+it('완료는 지금 줄을 [+]로 바꾸고 doneTone이 short면 소리를 낸다', () => {
+  vi.mocked(playTone).mockClear();
+  const quiet = mount({ text: 'a', color: '' }, { doneTone: 'none' });
+  quiet.root.querySelector<HTMLElement>('button.tool.done')!.click();
+  expect(quiet.area.value).toBe('[+]a');
+  expect(playTone).not.toHaveBeenCalled();
+  const loud = mount({ text: 'a', color: '' }, { doneTone: 'short' });
+  loud.root.querySelector<HTMLElement>('button.tool.done')!.click();
+  expect(loud.area.value).toBe('[+]a');
+  expect(playTone).toHaveBeenCalledWith('done');
+});
+it('도구 단추 넷이 있고 알림과 카운트다운은 toolbar가 없으면 숨는다', () => {
+  const plain = mount({ text: '', color: '' });
+  const tools = plain.root.querySelector('.editor-tools')!;
+  expect(tools.getAttribute('role')).toBe('toolbar');
+  expect(tools.getAttribute('aria-label')).toBe('편집 도구');
+  expect([...tools.querySelectorAll('button.tool')].map((b) => b.textContent!.trim())).toEqual(['완료', '배경', '알림', '카운트다운']);
+  expect(tools.querySelector<HTMLElement>('.alarm')!.hidden).toBe(true);
+  expect(tools.querySelector<HTMLElement>('.countdown')!.hidden).toBe(true);
+  expect(tools.querySelector<HTMLElement>('.done')!.hidden).toBe(false);
+  const onAlarm = vi.fn();
+  const full = mount({ text: '', color: '' }, { toolbar: { onAlarm, onCountdown: vi.fn() } });
+  const alarm = full.root.querySelector<HTMLElement>('button.tool.alarm')!;
+  expect(alarm.hidden).toBe(false);
+  alarm.click();
+  expect(onAlarm).toHaveBeenCalledTimes(1);
+  expect(full.root.querySelector<HTMLElement>('button.tool.countdown')!.hidden).toBe(false);
+});
+it('배경을 눌러 색을 고르면 메모 칸 바탕과 점이 그 색이 되고 저장에 들어간다', () => {
+  const { root, area, pick, button, onSave } = mount({ text: 'x', color: '' });
+  const dot = root.querySelector<HTMLElement>('button.tool.color .dot')!;
+  expect(area.dataset.color).toBeUndefined();
+  pick('009300');
+  expect(root.querySelectorAll('[role="radio"]')).toHaveLength(0); // 고르면 상자가 닫힌다
+  expect(area.dataset.color).toBe('009300');
+  expect(area.style.getPropertyValue('--day-color')).toBe('#009300');
+  expect(dot.style.getPropertyValue('--sw')).toBe('#009300');
+  button('저장').click();
+  expect(onSave).toHaveBeenCalledWith({ text: 'x', color: '009300' });
+});
+it('색만 바꿔도 바깥 누르기로 닫히지 않는다', () => {
+  const { root, pick, onCancel } = mount({ text: 'a', color: '' });
+  pick('009300');
+  root.querySelector<HTMLElement>('.scrim')!.click();
+  expect(onCancel).not.toHaveBeenCalled();
+});
+it('색 상자가 열린 동안 Esc는 상자만 닫고 편집 화면은 닫지 않는다', () => {
+  const { root, onCancel } = mount({ text: 'a', color: '' });
+  root.querySelector<HTMLElement>('button.tool.color')!.click();
+  root.querySelector<HTMLElement>('[role="radio"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  expect(root.querySelectorAll('[role="radio"]')).toHaveLength(0);
+  expect(onCancel).not.toHaveBeenCalled();
+});
 it('저장하면 다듬은 글과 고른 색을 넘긴다', () => {
-  const { root, area, button, onSave, onCancel } = mount({ text: '', color: '' });
+  const { area, button, onSave, onCancel, pick } = mount({ text: '', color: '' });
   area.value = 'x  \r\n\r\n';
-  root.querySelector<HTMLElement>('[role="radio"][data-color="009300"]')!.click();
+  pick('009300');
   button('저장').click();
   expect(onSave).toHaveBeenCalledWith({ text: 'x', color: '009300' });
   expect(onCancel).not.toHaveBeenCalled();
@@ -77,7 +142,7 @@ it('바깥을 누르면 고친 것이 없을 때만 닫는다', () => {
   typed.root.querySelector<HTMLElement>('.scrim')!.click();
   expect(typed.onCancel).not.toHaveBeenCalled();
   const recoloured = mount({ text: 'a', color: '' });
-  recoloured.root.querySelector<HTMLElement>('[role="radio"][data-color="009300"]')!.click();
+  recoloured.pick('009300');
   recoloured.root.querySelector<HTMLElement>('.scrim')!.click();
   expect(recoloured.onCancel).not.toHaveBeenCalled();
   const untouched = mount({ text: 'a', color: 'F12424' });
@@ -95,7 +160,7 @@ it('폰 화면에서 아래로 끌어 닫으면 고친 것이 있을 때 저장�
   expect(typed.onSave).toHaveBeenCalledWith({ text: 'a\nb', color: '' });
   expect(typed.onCancel).not.toHaveBeenCalled();
   const recoloured = mount({ text: 'a', color: '' });
-  recoloured.root.querySelector<HTMLElement>('[role="radio"][data-color="009300"]')!.click();
+  recoloured.pick('009300');
   swipeDown(recoloured.area);
   expect(recoloured.onSave).toHaveBeenCalledWith({ text: 'a', color: '009300' });
 });

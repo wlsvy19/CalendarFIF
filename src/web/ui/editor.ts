@@ -1,8 +1,19 @@
 import { PALETTE } from '../../core/color';
 import { normalizeText, toggleDoneInRange } from '../../core/text';
 import type { DayValue } from '../../core/types';
+import { playTone } from '../tones';
+import { mountPalette } from './palette';
 import { dismiss } from './sheetMotion';
 import { attachSwipeToClose } from './sheetSwipe';
+
+const SVG = (body: string): string =>
+  `<svg class="tool-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+const ICONS = {
+  done: SVG('<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.5"/>'),
+  color: SVG('<path d="M12 3c4.5 5 6.5 8 6.5 11a6.5 6.5 0 0 1-13 0C5.5 11 7.5 8 12 3z"/>'),
+  alarm: SVG('<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 21h4"/>'),
+  countdown: SVG('<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2.5h6"/>'),
+};
 
 const WEEKDAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 const WIDE_PX = 880;
@@ -29,6 +40,10 @@ export function mountEditor(
     value: DayValue;
     /** 제목 아래에 적을 그날의 음력과 공휴일 이름. 빈 글은 적지 않는다. */
     note?: { lunar: string; holiday: string };
+    /** 완료를 누를 때 소리. */
+    doneTone?: 'none' | 'short';
+    /** 알림과 카운트다운 도구. 없는 것은 단추를 숨긴다. */
+    toolbar?: { onAlarm?(): void; onCountdown?(): void };
     onSave(next: DayValue): void;
     onCancel(): void;
   },
@@ -53,16 +68,15 @@ export function mountEditor(
       </div>
       <button type="button" class="textbtn end">저장</button>
     </div>
-    <div class="field">
-      <span class="field-label" id="colorLabel">배경색</span>
-      <div class="swatches" role="radiogroup" aria-labelledby="colorLabel"></div>
-    </div>
+    <div class="ev-strip" hidden></div>
     <div class="field grow">
-      <div class="field-head">
-        <label class="field-label" for="memoInput">메모</label>
-        <button type="button" class="donebtn">완료 표시</button>
-      </div>
-      <textarea class="memo-input" id="memoInput" placeholder="한 줄에 하나씩 적으세요"></textarea>
+      <textarea class="memo-input" id="memoInput" aria-label="메모" placeholder="한 줄에 하나씩 적으세요"></textarea>
+    </div>
+    <div class="editor-tools" role="toolbar" aria-label="편집 도구">
+      <button type="button" class="tool done">${ICONS.done}<span>완료</span></button>
+      <button type="button" class="tool color">${ICONS.color}<span>배경</span><span class="dot" aria-hidden="true"></span></button>
+      <button type="button" class="tool alarm" hidden>${ICONS.alarm}<span>알림</span></button>
+      <button type="button" class="tool countdown" hidden>${ICONS.countdown}<span>카운트다운</span></button>
     </div>`;
   sheet.querySelector('h3')!.textContent = titleOf(props.dateKey);
   const noteEl = sheet.querySelector<HTMLElement>('.sheet-note')!;
@@ -74,36 +88,65 @@ export function mountEditor(
     noteEl.append(span);
     noteEl.hidden = false;
   }
-  const swatches = sheet.querySelector<HTMLElement>('.swatches')!;
   const area = sheet.querySelector<HTMLTextAreaElement>('textarea')!;
   const cancelBtn = sheet.querySelector<HTMLButtonElement>('.textbtn.start')!;
   const saveBtn = sheet.querySelector<HTMLButtonElement>('.textbtn.end')!;
-  const doneBtn = sheet.querySelector<HTMLButtonElement>('.donebtn')!;
+  const doneBtn = sheet.querySelector<HTMLButtonElement>('.tool.done')!;
+  const colorBtn = sheet.querySelector<HTMLButtonElement>('.tool.color')!;
+  const alarmBtn = sheet.querySelector<HTMLButtonElement>('.tool.alarm')!;
+  const countdownBtn = sheet.querySelector<HTMLButtonElement>('.tool.countdown')!;
+  const dot = colorBtn.querySelector<HTMLElement>('.dot')!;
   area.value = props.value.text;
 
   let color = props.value.color;
-  const colors = ['', ...PALETTE];
-  if (color !== '' && !PALETTE.includes(color)) colors.push(color);
-  for (const c of colors) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = c === '' ? 'swatch none' : 'swatch';
-    b.setAttribute('role', 'radio');
-    b.setAttribute('aria-label', c === '' ? '없음' : `#${c}`);
-    b.title = c === '' ? '없음' : `#${c}`;
-    b.dataset.color = c;
-    if (c !== '') b.style.setProperty('--sw', `#${c}`);
-    swatches.append(b);
-  }
-  const swatchList = [...swatches.children] as HTMLElement[];
-  function paintSwatches(): void {
-    for (const b of swatchList) {
-      const on = b.dataset.color === color;
-      b.setAttribute('aria-checked', String(on));
-      b.tabIndex = on ? 0 : -1;
+  // 고른 색을 메모 칸 바탕(칸과 같은 --day-color 섞기)과 배경 단추의 점에 칠한다.
+  const paintColor = (): void => {
+    if (color === '') {
+      delete area.dataset.color;
+      area.style.removeProperty('--day-color');
+      dot.style.removeProperty('--sw');
+      dot.classList.add('none');
+    } else {
+      area.dataset.color = color;
+      area.style.setProperty('--day-color', `#${color}`);
+      dot.style.setProperty('--sw', `#${color}`);
+      dot.classList.remove('none');
     }
-  }
-  paintSwatches();
+  };
+  paintColor();
+  alarmBtn.hidden = !props.toolbar?.onAlarm;
+  countdownBtn.hidden = !props.toolbar?.onCountdown;
+  alarmBtn.addEventListener('click', () => props.toolbar?.onAlarm?.());
+  countdownBtn.addEventListener('click', () => props.toolbar?.onCountdown?.());
+
+  let palette: { destroy(): void } | null = null;
+  const closePalette = (focusBack: boolean): void => {
+    if (!palette) return;
+    palette.destroy();
+    palette = null;
+    colorBtn.setAttribute('aria-expanded', 'false');
+    if (focusBack) colorBtn.focus({ preventScroll: true });
+  };
+  colorBtn.setAttribute('aria-haspopup', 'true');
+  colorBtn.setAttribute('aria-expanded', 'false');
+  colorBtn.addEventListener('click', () => {
+    if (palette) {
+      closePalette(false);
+      return;
+    }
+    const colors = ['', ...PALETTE];
+    if (color !== '' && !PALETTE.includes(color)) colors.push(color);
+    colorBtn.setAttribute('aria-expanded', 'true');
+    palette = mountPalette(colorBtn, {
+      colors,
+      current: color,
+      onPick: (c) => {
+        color = c;
+        paintColor();
+      },
+      onClose: () => closePalette(true),
+    });
+  });
 
   // 저장과 취소는 합쳐서 한 번만 전달한다. 화면이 닫히기 전에 같은 입력이 다시 와도 무시한다.
   let finished = false;
@@ -118,27 +161,12 @@ export function mountEditor(
     props.onCancel();
   };
   const changed = (): boolean => area.value !== props.value.text || color !== props.value.color;
-  swatches.addEventListener('click', (e) => {
-    const b = (e.target as Element).closest<HTMLElement>('.swatch');
-    if (!b) return;
-    color = b.dataset.color ?? '';
-    paintSwatches();
-  });
-  swatches.addEventListener('keydown', (e) => {
-    const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
-    if (!step) return;
-    e.preventDefault();
-    const i = swatchList.findIndex((b) => b.dataset.color === color);
-    const next = swatchList[(i + step + swatchList.length) % swatchList.length];
-    color = next.dataset.color ?? '';
-    paintSwatches();
-    next.focus();
-  });
   doneBtn.addEventListener('click', () => {
     const r = toggleDoneInRange(area.value, area.selectionStart, area.selectionEnd);
     area.value = r.text;
     area.setSelectionRange(r.selStart, r.selEnd);
     area.focus();
+    if (props.doneTone === 'short') playTone('done');
   });
   saveBtn.addEventListener('click', save);
   cancelBtn.addEventListener('click', cancel);
@@ -159,7 +187,7 @@ export function mountEditor(
       return;
     }
     if (e.key !== 'Tab') return;
-    const stops = [...sheet.querySelectorAll<HTMLElement>('button, textarea')].filter((el) => el.tabIndex >= 0);
+    const stops = [...sheet.querySelectorAll<HTMLElement>('button, textarea')].filter((el) => el.tabIndex >= 0 && !el.closest('[hidden]'));
     const first = stops[0];
     const last = stops[stops.length - 1];
     if (e.shiftKey && (document.activeElement === first || document.activeElement === sheet)) {
@@ -196,6 +224,8 @@ export function mountEditor(
 
   return {
     destroy() {
+      palette?.destroy();
+      palette = null;
       viewport?.removeEventListener('resize', followViewport);
       viewport?.removeEventListener('scroll', followViewport);
       document.documentElement.classList.remove('sheet-open');

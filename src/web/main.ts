@@ -243,6 +243,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       dateKey,
       value: base,
       note: dayNote(dateKey),
+      doneTone: prefs?.doneTone ?? appearance?.doneTone,
       onSave: (next) => {
         closeEditor(); // 주소가 바뀌기를 기다리지 않고 바로 닫는다
         engine.saveEdit(monthId, day, base, next);
