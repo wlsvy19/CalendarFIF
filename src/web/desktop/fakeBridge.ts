@@ -1,4 +1,4 @@
-import type { CalfifDesktop, DesktopCommand, DragKind, Hotkey, HotkeyState, Point, SystemPatch, SystemState } from '../../desktop/api';
+import type { AlarmPopupItem, AlarmTone, CalfifDesktop, DesktopCommand, DragKind, Hotkey, HotkeyState, Point, SystemPatch, SystemState } from '../../desktop/api';
 
 /** 시험용 다리. 부른 함수는 calls에 [함수 이름, ...인자]로 쌓인다. */
 export class FakeBridge implements CalfifDesktop {
@@ -55,5 +55,8 @@ export class FakeBridge implements CalfifDesktop {
   }
   adjustDone(apply: boolean): void {
     this.calls.push(['adjustDone', apply]);
+  }
+  showAlarms(items: AlarmPopupItem[], tone: AlarmTone): void {
+    this.calls.push(['showAlarms', items, tone]);
   }
 }

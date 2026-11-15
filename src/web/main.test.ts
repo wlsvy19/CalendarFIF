@@ -518,17 +518,43 @@ it('확인 중에 연 설정은 사용자로 확인되면 사용자 관리를 �
   expect([root.querySelector('.sheet.settings') !== null, button('사용자 관리')]).toEqual([true, undefined]);
 });
 
-it('화면을 내리면 울린 알림 상자도 함께 지워진다', async () => {
+const dueAlarm = () => {
   const now = new Date();
   const pad = (n: number): string => String(n).padStart(2, '0');
-  eventsFeed.items = {
+  return {
     a1: {
       type: 'alarm', date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`, text: '약', done: false,
       repeat: { freq: 'none' }, time: `${pad(now.getHours())}:${pad(now.getMinutes())}`, advance: [0], editedAt: 1, editedBy: 'dev',
     },
-  };
+  } as typeof eventsFeed.items;
+};
+
+it('PC 앱은 울린 알림을 알림 창으로 보내고 화면 안 알림 상자는 띄우지 않는다', async () => {
+  eventsFeed.items = dueAlarm();
+  const before = bridge.calls.length;
   try {
     const mountMain = await loadMain();
+    const root = document.createElement('div');
+    document.body.append(root);
+    const app = mountMain(root, { uid: 'u', email: 'a@example.com' });
+    const sent = bridge.calls.slice(before).filter((c) => c[0] === 'showAlarms');
+    expect(sent).toHaveLength(1);
+    expect(sent[0][1]).toEqual([{ time: (eventsFeed.items.a1 as { time: string }).time, text: '약', date: (eventsFeed.items.a1 as { date: string }).date, advance: 0 }]);
+    expect(root.querySelector('.alarm-banner')).toBeNull();
+    app.destroy();
+  } finally {
+    eventsFeed.items = {};
+  }
+});
+
+it('웹앱은 화면을 내리면 울린 알림 상자도 함께 지워진다', async () => {
+  eventsFeed.items = dueAlarm();
+  try {
+    vi.resetModules();
+    vi.stubEnv('VITE_DESKTOP', '');
+    delete (window as { calfifDesktop?: unknown }).calfifDesktop;
+    await import('./main');
+    const mountMain = captured.mountMain!;
     const root = document.createElement('div');
     document.body.append(root);
     const app = mountMain(root, { uid: 'u', email: 'a@example.com' });

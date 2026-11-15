@@ -401,15 +401,20 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       signOut: () => (engine.status().pending === 0 ? signOutNow() : openSettingsFromCommand('account')),
     };
   }
-  // 알림 시계: 시각이 된 알림을 화면 안 알림으로 띄우고 소리를 낸다(PC 앱의 별도 알림 창은 나중에 바꾼다).
+  // 알림 시계: 시각이 된 알림을 화면 안 알림으로 띄우고 소리를 낸다(PC 앱은 별도 알림 창으로 보낸다).
   // 소리는 울리는 때의 설정을 읽는다(열려 있는 동안 설정이 바뀔 수 있다).
   const banners: Array<{ destroy(): void }> = [];
   const alarmClock = startAlarmClock({
     view: events,
     storage: storage.store,
     onRing: (triggers) => {
-      banners.push(showAlarmBanner(root, triggers, openDay));
       const tone = prefs?.alarmTone ?? appearance?.alarmTone ?? 'none';
+      if (bridge) {
+        // PC 앱: 맨 위의 별도 알림 창이 글을 보여 주고 소리도 낸다.
+        bridge.showAlarms(triggers.map((x) => ({ time: x.time, text: x.text, date: x.occurrence, advance: x.advance })), tone);
+        return;
+      }
+      banners.push(showAlarmBanner(root, triggers, openDay));
       if (tone !== 'none') playTone(tone);
     },
   });

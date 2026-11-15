@@ -16,6 +16,7 @@ const bridge: CalfifDesktop = {
   dragStart: () => ipcRenderer.send(CH.dragStart),
   drag: (kind, dx, dy) => ipcRenderer.send(CH.drag, kind, dx, dy),
   adjustDone: (apply) => ipcRenderer.send(CH.adjustDone, apply),
+  showAlarms: (items, tone) => ipcRenderer.send(CH.alarm, items, tone),
 };
 
 contextBridge.exposeInMainWorld('calfifDesktop', bridge);

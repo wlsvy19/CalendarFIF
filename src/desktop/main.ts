@@ -2,7 +2,8 @@ import { join } from 'node:path';
 import { Menu, app, dialog, globalShortcut, ipcMain, protocol } from 'electron';
 import { CH, type SystemPatch, type SystemState } from './api';
 import { HotkeyManager } from './hotkeys';
-import { parseBool, parseDrag, parsePoint, parseSystemPatch } from './ipc';
+import { showAlarmWindow } from './alarmWindow';
+import { handleAlarm, parseBool, parseDrag, parsePoint, parseSystemPatch } from './ipc';
 import type { MenuAction, MenuState } from './menu';
 import { resolveRuntime } from './runtime';
 import { guardLoginItem, runSmoke } from './smoke';
@@ -147,6 +148,7 @@ if (!app.requestSingleInstanceLock()) {
       const value = parseBool(apply);
       if (isFromWindow(e) && value !== null) finishAdjust(value);
     });
+    ipcMain.on(CH.alarm, (e, items: unknown, tone: unknown) => handleAlarm(isFromWindow(e), items, tone, showAlarmWindow));
     ipcMain.on(CH.menu, (e, at: unknown) => {
       const point = parsePoint(at);
       const win = getWindow();
