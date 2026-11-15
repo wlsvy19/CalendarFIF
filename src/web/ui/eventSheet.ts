@@ -81,7 +81,16 @@ function switchOf(className: string, checked: boolean): HTMLInputElement {
   return input;
 }
 
-export function mountEventSheet(root: HTMLElement, props: EventSheetProps): { destroy(): void } {
+/** window.visualViewport 가운데 쓰는 부분(편집 화면과 같다). */
+export type VisualViewportLike = {
+  height: number;
+  offsetTop: number;
+  addEventListener(type: string, fn: () => void): void;
+  removeEventListener(type: string, fn: () => void): void;
+};
+
+export function mountEventSheet(root: HTMLElement, props: EventSheetProps, env?: { visualViewport?: VisualViewportLike | null }): { destroy(): void } {
+  const viewport = env?.visualViewport === undefined ? (window.visualViewport ?? null) : env.visualViewport;
   const isAlarm = props.type === 'alarm';
   const rec = props.record;
   const id = props.id ?? newEventId();
@@ -276,8 +285,8 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps): { de
     let t = text.value.trim();
     if (t === '') t = props.defaultText.trim().slice(0, 200);
     if (t === '') return fail('글을 적어 주세요');
-    if (t.length > 200) return fail('글은 200자까지 적을 수 있습니다');
     const freq = repeat.value as RepeatFreq;
+    // 저장된 항목에 until과 count가 함께 있어도 화면의 끝은 하나뿐이라 고른 하나만 저장한다.
     const rule: RepeatRule = { freq };
     if (freq !== 'none') {
       if (endMode === 'until') {
@@ -345,6 +354,8 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps): { de
   const destroy = (): void => {
     if (destroyed) return;
     destroyed = true;
+    viewport?.removeEventListener('resize', followViewport);
+    viewport?.removeEventListener('scroll', followViewport);
     dismiss(scrim, sheet);
   };
   const close = (): void => {
@@ -353,10 +364,20 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps): { de
     props.onClose();
   };
 
+  // 아이폰 Safari는 글자판이 열려도 화면 단위가 바뀌지 않는다. 보이는 영역을 CSS 변수로 넘겨 시트가 글자판 위에 앉게 한다.
+  const followViewport = (): void => {
+    if (!viewport) return;
+    sheet.style.setProperty('--vv-height', `${viewport.height}px`);
+    sheet.style.setProperty('--vv-top', `${viewport.offsetTop}px`);
+    sheet.style.setProperty('--vv-bottom', `${Math.max(0, window.innerHeight - viewport.offsetTop - viewport.height)}px`);
+  };
+  followViewport();
+  viewport?.addEventListener('resize', followViewport);
+  viewport?.addEventListener('scroll', followViewport);
+
   root.append(scrim, sheet);
-  // 좁은 화면에서는 시트에 초점을 둔다(글자판이 저절로 뜨지 않게). 넓은 화면에서는 글 칸에 둔다.
-  if (window.innerWidth >= 880) text.focus();
-  else sheet.focus({ preventScroll: true });
+  // 시트 자신에 초점을 둔다. 뒤의 메모 칸에 초점이 남아 Tab이 시트 밖으로 새지 않게 하고, 글자판이 저절로 뜨지 않게 한다.
+  sheet.focus({ preventScroll: true });
 
   return { destroy };
 }

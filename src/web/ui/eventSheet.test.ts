@@ -191,3 +191,34 @@ it('Esc와 바깥 누르기로 닫히고, 고친 것이 있으면 바깥 누르�
   expect(edited.onClose).toHaveBeenCalledTimes(1);
   expect(edited.onSave).not.toHaveBeenCalled();
 });
+
+it('보이는 영역이 바뀌면 시트의 --vv 변수가 따라간다', () => {
+  const listeners = new Map<string, () => void>();
+  const vv = {
+    height: 500,
+    offsetTop: 0,
+    addEventListener: (t: string, fn: () => void) => listeners.set(t, fn),
+    removeEventListener: (t: string) => listeners.delete(t),
+  };
+  const root = document.createElement('div');
+  document.body.append(root);
+  const handle = mountEventSheet(root, {
+    type: 'alarm', dateKey: '2026-11-20', defaultText: '', now: () => new Date(2026, 10, 15, 10, 7), iosHint: false,
+    onSave: vi.fn(), onDelete: vi.fn(), onClose: vi.fn(),
+  }, { visualViewport: vv });
+  const sheet = root.querySelector<HTMLElement>('.event-sheet')!;
+  expect(sheet.style.getPropertyValue('--vv-height')).toBe('500px');
+  vv.height = 300;
+  vv.offsetTop = 40;
+  listeners.get('resize')!();
+  expect(sheet.style.getPropertyValue('--vv-height')).toBe('300px');
+  expect(sheet.style.getPropertyValue('--vv-top')).toBe('40px');
+  expect(sheet.style.getPropertyValue('--vv-bottom')).toBe(`${Math.max(0, window.innerHeight - 340)}px`);
+  handle.destroy();
+  expect(listeners.size).toBe(0);
+});
+
+it('열면 시트 자신에 초점이 간다', () => {
+  const m = mount();
+  expect(document.activeElement).toBe(m.q('.event-sheet'));
+});

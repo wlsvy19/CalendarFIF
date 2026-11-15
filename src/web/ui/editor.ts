@@ -139,9 +139,11 @@ export function mountEditor(
       onDelete: (eid) => events.remove(eid),
       onClose: () => {
         eventSheet = null;
-        area.focus({ preventScroll: true });
+        // 폰에서는 열 때와 같이 시트에 초점을 둔다. 메모 칸에 두면 닫을 때마다 글자판이 올라온다.
+        if (env?.focusText || window.innerWidth >= WIDE_PX) area.focus({ preventScroll: true });
+        else sheet.focus({ preventScroll: true });
       },
-    });
+    }, { visualViewport: viewport });
   };
   // 그날의 알림과 카운트다운을 칩으로 보인다. 칩을 누르면 그 항목의 시트가 열린다.
   const drawStrip = (): void => {

@@ -155,6 +155,24 @@ it('편집 화면을 취소해도 저장한 알림은 남는다(save가 이미 �
   expect(ev.save).toHaveBeenCalledTimes(1);
   expect(Object.keys(ev.view.items())).toHaveLength(1);
 });
+it('시트가 닫히면 넓은 창에서는 메모 칸에, 폰에서는 편집 화면 시트에 초점이 간다', () => {
+  const close = (root: HTMLElement) => {
+    root.querySelector<HTMLElement>('button.tool.alarm')!.click();
+    [...root.querySelectorAll<HTMLElement>('.event-sheet button')].find((b) => b.textContent === '취소')!.click();
+  };
+  const wide = mount({ text: '', color: '' }, { events: eventsProp() });
+  close(wide.root);
+  expect(document.activeElement).toBe(wide.area);
+  vi.stubGlobal('innerWidth', 600);
+  try {
+    const narrow = mount({ text: '', color: '' }, { events: eventsProp() });
+    close(narrow.root);
+    expect(document.activeElement).not.toBe(narrow.area);
+    expect(document.activeElement).toBe(narrow.root.querySelector('.sheet:not(.event-sheet)'));
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
 it('시트가 열려 있을 때 Esc는 시트만 닫고 편집 화면은 닫지 않는다', () => {
   const { root, onCancel } = mount({ text: '', color: '' }, { events: eventsProp() });
   root.querySelector<HTMLElement>('button.tool.alarm')!.click();
