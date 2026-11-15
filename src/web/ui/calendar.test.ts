@@ -5,6 +5,8 @@ import type { CalendarStore } from '../state';
 import { shiftMonth } from '../../core/dates';
 import { setOfficialHolidays } from '../../core/holidays';
 import { DEFAULT_APPEARANCE, WEB_APPEARANCE, type Appearance } from '../appearance';
+import type { AlarmRecord, CountdownRecord, EventMap } from '../../core/events';
+import type { EventsView } from '../eventsStore';
 import { displayLines, mountCalendar, visibleLines, type WebLook } from './calendar';
 
 function fakeStore(days: Record<string, DayValue>) {
@@ -640,5 +642,123 @@ describe('다시 그리기를 줄인다', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('알림과 카운트다운', () => {
+  const alarm = (text: string, date: string, time: string, extra: Partial<AlarmRecord> = {}): AlarmRecord => ({
+    type: 'alarm', date, text, done: false, repeat: { freq: 'none' }, time, advance: [0], editedAt: 1, editedBy: 'd', ...extra,
+  });
+  const countdown = (text: string, date: string, extra: Partial<CountdownRecord> = {}): CountdownRecord => ({
+    type: 'countdown', date, text, done: false, repeat: { freq: 'none' }, kind: 'basic', showBottom: true, editedAt: 1, editedBy: 'd', ...extra,
+  });
+  function evMount(items: EventMap, a: Partial<Appearance> = {}, web: WebLook = { memoSize: 'medium' }, desktop = false) {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(300);
+    let current = items;
+    let ver = 1;
+    const listeners = new Set<() => void>();
+    const events: EventsView = {
+      items: () => current,
+      version: () => ver,
+      onChange: (fn) => {
+        listeners.add(fn);
+        return () => listeners.delete(fn);
+      },
+    };
+    const store = {
+      current: () => '2026-11',
+      show: vi.fn(),
+      days: (m: string) => (m === '2026-11' ? { '13': { text: '메모1\n메모2', color: '' } } : {}),
+      onChange: () => () => {},
+      readProblem: () => null,
+    } as unknown as CalendarStore;
+    const root = document.createElement('div');
+    document.body.append(root);
+    const onOpenDay = vi.fn();
+    mountCalendar(
+      root,
+      {
+        store, events, today: () => '2026-11-13', onOpenDay, onOpenSettings: vi.fn(),
+        status: { status: () => ({ state: 'synced', pending: 0 }), subscribe: () => () => {} },
+        appearance: { ...WEB_APPEARANCE, ...a }, web,
+        ...(desktop ? { desktop: { onDayMenu: vi.fn(), onOpenMenu: vi.fn() } } : {}),
+      },
+      { pager: { width: () => 400 } },
+    );
+    const set = (next: EventMap) => {
+      current = next;
+      ver += 1;
+      listeners.forEach((fn) => fn());
+    };
+    return { root, set, onOpenDay, cal: root.querySelector<HTMLElement>('.calendar')! };
+  }
+  const lns = (root: HTMLElement) => [...cell(root, '2026-11-13').querySelectorAll<HTMLElement>('.ln')];
+  afterEach(() => vi.restoreAllMocks());
+
+  it('그날의 알림과 카운트다운이 메모 줄 앞에 나온다', () => {
+    const { root } = evMount({
+      a: countdown('시험', '2026-11-13', { kind: 'birthday' }),
+      b: alarm('회의', '2026-11-13', '09:30'),
+      c: alarm('약', '2026-11-13', '08:00'),
+    });
+    const l = lns(root);
+    expect(l.map((x) => x.textContent)).toEqual(['08:00 약', '09:30 회의', '시험', '메모1', '메모2']);
+    expect(l.map((x) => [x.classList.contains('ev'), x.classList.contains('alarm'), x.classList.contains('countdown'), x.classList.contains('birthday')])).toEqual([
+      [true, true, false, false], [true, true, false, false], [true, false, true, true], [false, false, false, false], [false, false, false, false],
+    ]);
+  });
+  it('알림 시각 표시를 끄면 시각 없이 글만', () => {
+    const { root } = evMount({ b: alarm('회의', '2026-11-13', '09:30') }, { showAlarmTime: false });
+    expect(lns(root).map((x) => x.textContent)).toEqual(['회의', '메모1', '메모2']);
+  });
+  it('완료한 알림은 취소선 클래스', () => {
+    const { root } = evMount({ b: alarm('회의', '2026-11-13', '09:30', { done: true }) });
+    expect(lns(root)[0].classList.contains('done')).toBe(true);
+  });
+  it('알림 자료가 바뀌면 그 쪽을 다시 그리고, 그대로면 다시 그리지 않는다', () => {
+    const { root, set } = evMount({});
+    const firsts = () => [...root.querySelectorAll<HTMLElement>('.grid')].map((g) => g.querySelector('.cell'));
+    const before = firsts();
+    window.dispatchEvent(new Event('online'));
+    expect(firsts()).toEqual(before);
+    set({ b: alarm('회의', '2026-11-13', '09:30') });
+    const after = firsts();
+    expect(after[1]).not.toBe(before[1]);
+    expect(lns(root)[0].textContent).toBe('09:30 회의');
+  });
+  it('달력 아래 줄은 다가오는 카운트다운을 가까운 순으로, 없으면 숨긴다', () => {
+    const { root, set } = evMount({});
+    const bar = root.querySelector<HTMLElement>('.cd-bar')!;
+    expect(bar.hidden).toBe(true);
+    set({
+      far: countdown('먼 일', '2026-12-25'),
+      near: countdown('생일', '1990-11-20', { kind: 'birthday', repeat: { freq: 'yearly' } }),
+      off: countdown('안 보임', '2026-11-18', { showBottom: false }),
+    });
+    expect(bar.hidden).toBe(false);
+    const chips = [...bar.querySelectorAll('.cd-chip')];
+    expect(chips.map((c) => c.textContent)).toEqual(['생일(36살)7일 남음', '먼 일42일 남음']);
+    set({});
+    expect(bar.hidden).toBe(true);
+  });
+  it('칩을 누르면 그 날짜를 연다', () => {
+    const { root, onOpenDay } = evMount({ far: countdown('먼 일', '2026-12-25') });
+    root.querySelector<HTMLElement>('.cd-chip')!.click();
+    expect(onOpenDay).toHaveBeenCalledWith('2026-12-25');
+  });
+  it('PC 앱은 칩을 두 번 눌러야 연다', () => {
+    const { root, onOpenDay } = evMount({ far: countdown('먼 일', '2026-12-25') }, {}, undefined, true);
+    const chip = root.querySelector<HTMLElement>('.cd-chip')!;
+    chip.click();
+    expect(onOpenDay).not.toHaveBeenCalled();
+    chip.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    expect(onOpenDay).toHaveBeenCalledWith('2026-12-25');
+  });
+  it('줄 간격 넓게는 메모 줄 높이를 1.15배로', () => {
+    const normal = evMount({}, {}, { memoSize: 'medium' });
+    const loose = evMount({}, {}, { memoSize: 'medium', lineSpacing: 'loose' });
+    const base = parseInt(normal.cal.style.getPropertyValue('--memo-line'), 10);
+    expect(loose.cal.style.getPropertyValue('--memo-line')).toBe(`${Math.round(base * 1.15)}px`);
+    expect(loose.cal.style.getPropertyValue('--memo-size')).toBe(normal.cal.style.getPropertyValue('--memo-size'));
   });
 });

@@ -182,7 +182,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   const changePrefs = (next: Prefs): void => {
     prefs = next;
     applyPrefs(document.documentElement, next);
-    calendar.setAppearance(prefsAppearance(next), { memoSize: next.memoSize });
+    calendar.setAppearance(prefsAppearance(next), { memoSize: next.memoSize, lineSpacing: next.lineSpacing });
     try {
       savePrefs(storage.store, next);
     } catch {
@@ -369,7 +369,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       location.hash = 'settings';
     },
     appearance: appearance ?? (prefs ? prefsAppearance(prefs) : undefined),
-    web: prefs ? { memoSize: prefs.memoSize } : undefined,
+    web: prefs ? { memoSize: prefs.memoSize, lineSpacing: prefs.lineSpacing } : undefined,
     desktop: DESKTOP ? { onDayMenu: openCellMenu, onOpenMenu: (at) => bridge?.showMenu(at) } : undefined,
   });
   // 앱 메뉴의 명령으로 여는 설정은 열려 있던 편집 화면을 먼저 닫고, 닫으면 늘 달력으로 간다(앞 기록의 날짜 주소로 돌아가지 않는다).

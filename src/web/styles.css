@@ -544,8 +544,59 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
 .ln.more { opacity: 0.65; font-weight: 600; }
 /* 줄 머리 기호(설정): 숫자 또는 점 */
 .calendar[data-bullet="number"] .memo { counter-reset: ln; }
-.calendar[data-bullet="number"] .ln:not(.more)::before { counter-increment: ln; content: counter(ln) ". "; }
-.calendar[data-bullet="dot"] .ln:not(.more)::before { content: "• "; }
+.calendar[data-bullet="number"] .ln:not(.more):not(.ev)::before { counter-increment: ln; content: counter(ln) ". "; }
+.calendar[data-bullet="dot"] .ln:not(.more):not(.ev)::before { content: "• "; }
+
+/* 알림과 카운트다운 줄: 메모 줄과 같은 줄이고 앞에 작은 그림(종, 모래시계, 케이크)이 붙는다. 그림은 글자색을 따른다. */
+.ln.ev::before {
+  content: "";
+  display: inline-block;
+  width: 0.95em;
+  height: 0.95em;
+  margin-right: 0.25em;
+  vertical-align: -0.12em;
+  background-color: currentColor;
+  -webkit-mask: var(--ev-icon) center / contain no-repeat;
+  mask: var(--ev-icon) center / contain no-repeat;
+}
+.ln.ev.alarm { --ev-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 17V11a6 6 0 0 1 12 0v6l2 2H4z'/%3E%3Cpath d='M10 21h4'/%3E%3C/svg%3E"); }
+.ln.ev.countdown { --ev-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 3h12M6 21h12M7 3c0 6 5 6 5 9s-5 3-5 9M17 3c0 6-5 6-5 9s5 3 5 9'/%3E%3C/svg%3E"); }
+.ln.ev.countdown.birthday { --ev-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 21h16v-7H4zM4 17c3 2 5-2 8 0s5-2 8 0M12 14V9M12 6v1'/%3E%3C/svg%3E"); }
+
+/* 달력 아래 줄: 다가오는 카운트다운. 폰에서는 한 줄로 옆으로 스크롤한다(스크롤바는 숨긴다). */
+.cd-bar {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.cd-bar::-webkit-scrollbar { display: none; }
+.cd-bar[hidden] { display: none; }
+.cd-bar > [role="listitem"] { flex: none; display: block; }
+.cd-chip {
+  -webkit-appearance: none;
+  appearance: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 70vw;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--hairline);
+  background: color-mix(in srgb, var(--muted) 18%, var(--surface));
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cd-chip .cd-text { overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.cd-chip .cd-days { color: var(--accent); font-weight: 600; }
 
 /* 좁은 화면은 화면 높이를 채우고, 주 줄들이 남는 높이를 똑같이 나눠 가진다 */
 @media (max-width: 879.98px) {

@@ -98,6 +98,10 @@
   color: var(--desk-memo-ink);
 }
 :root.desk .calendar.shadow { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85); }
+/* 달력 아래 줄 */
+:root.desk .cd-bar { padding: 6px 0 0; gap: 6px; }
+:root.desk .cd-chip { padding: 2px 8px; font-size: calc(var(--desk-cal-size) - 1px); background: rgba(255, 255, 255, 0.12); color: var(--desk-cal-ink); }
+:root.desk .cd-chip .cd-days { color: var(--desk-holiday-ink); }
 /* 줄 머리 기호(숫자, 점)는 styles.css에 있다(웹앱과 같이 쓴다). */
 :root.desk.content-hidden .memo { visibility: hidden; }
 

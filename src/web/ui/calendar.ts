@@ -1,4 +1,5 @@
 import { shiftMonth } from '../../core/dates';
+import { countdownChips, countdownLabel, eventsByDate, type CountdownChip, type CountdownKind } from '../../core/events';
 import { holidayDataVersion, holidayLabel } from '../../core/holidays';
 import { buildPage, pageMonths, stepPage, type Page } from '../../core/layout';
 import { lunarLabel, lunarShort } from '../../core/lunar';
@@ -6,7 +7,8 @@ import type { Point } from '../../desktop/api';
 import { parseLine, splitLines } from '../../core/text';
 import type { SyncStatus } from '../../sync/engine';
 import { applyAppearance, pageOptions, WEB_APPEARANCE, type Appearance } from '../appearance';
-import { MEMO_METRICS, type MemoSize } from '../prefs';
+import type { EventsView } from '../eventsStore';
+import { LINE_SPACING_FACTOR, MEMO_METRICS, type LineSpacing, type MemoSize } from '../prefs';
 import type { CalendarStore } from '../state';
 import { mountDatePick, type DatePickKind } from './datePick';
 import { createPager, type PagerEnv } from './pager';
@@ -52,14 +54,18 @@ export type CalendarDeps = {
   onOpenDay(dateKey: string): void;
   onOpenSettings(): void;
   appearance?: Appearance;
+  /** 알림과 카운트다운. 주면 칸에 그날의 줄을 적고 달력 아래에 남은 날 줄을 둔다. */
+  events?: EventsView;
   /** 웹앱이 준다. 주면 appearance는 동작(시작 요일, 음력, 공휴일, 완료 줄 등)만 정하고 모양은 웹의 것(styles.css)을 쓴다. */
   web?: WebLook;
   /** PC 앱에서만 준다. 두 번 눌러 열고, 오른쪽 클릭은 칸 메뉴, 설정 단추 대신 메뉴 단추를 둔다. */
   desktop?: { onDayMenu(dateKey: string, at: Point): void; onOpenMenu(at: Point): void };
 };
 
-/** 웹 모양에서 고를 수 있는 것: 칸 안 메모의 글자 크기. */
-export type WebLook = { memoSize: MemoSize };
+/** 웹 모양에서 고를 수 있는 것: 칸 안 메모의 글자 크기와 줄 간격. */
+export type WebLook = { memoSize: MemoSize; lineSpacing?: LineSpacing };
+
+type CellLine = { text: string; done: boolean; ev?: { type: 'alarm' | 'countdown'; kind: CountdownKind | null } };
 
 export type CalendarHandle = { destroy(): void; setAppearance(a: Appearance, web?: WebLook): void; goToday(): void; showMonth(monthId: string): void };
 
@@ -144,7 +150,11 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     const a = appearance;
     const lineOpts = { showDone: a.showDone, doneToBottom: a.doneToBottom };
 
-    const built: { button: HTMLButtonElement; lines: { text: string; done: boolean }[]; named: boolean }[] = [];
+    // 그 쪽의 알림과 카운트다운은 쪽마다 한 번만 계산한다.
+    const firstKey = page.rows[0]?.cells[0]?.dateKey;
+    const lastKey = page.rows.at(-1)?.cells.at(-1)?.dateKey;
+    const dayEvents = deps.events && firstKey && lastKey ? eventsByDate(deps.events.items(), firstKey, lastKey) : null;
+    const built: { button: HTMLButtonElement; lines: CellLine[]; named: boolean }[] = [];
     const children: HTMLElement[] = [];
     page.rows.forEach((row, rowIndex) => {
       if (a.weekNumbers) children.push(spanOf('wk', String(row.week)));
@@ -180,7 +190,12 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
         if (lunar !== '') header.append(spanOf('lunar', lunar));
         button.append(header);
         children.push(button);
-        built.push({ button, lines: displayLines(value?.text ?? '', lineOpts), named: holiday !== '' });
+        const evLines: CellLine[] = (dayEvents?.get(c.dateKey) ?? []).map((e) => ({
+          text: e.type === 'alarm' && a.showAlarmTime && e.time !== '' ? `${e.time} ${e.text}` : e.text,
+          done: e.done,
+          ev: { type: e.type, kind: e.kind },
+        }));
+        built.push({ button, lines: [...evLines, ...displayLines(value?.text ?? '', lineOpts)], named: holiday !== '' });
       });
     });
     target.replaceChildren(...children);
@@ -222,7 +237,12 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
       if (lines.length === 0) continue;
       const { shown, more } = visibleLines(lines, named ? maxNamedLines : maxLines);
       const memo = spanOf('memo', '');
-      for (const { done, text } of shown) memo.append(spanOf(done ? 'ln done' : 'ln', text));
+      for (const { done, text, ev } of shown) {
+        const cls = ['ln'];
+        if (ev) cls.push('ev', ev.type, ...(ev.kind === 'birthday' ? ['birthday'] : []));
+        if (done) cls.push('done');
+        memo.append(spanOf(cls.join(' '), text));
+      }
       if (more > 0) memo.append(spanOf('ln more', `+${more}`));
       button.append(memo);
     }
@@ -236,7 +256,8 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   // 메모 줄의 글자 크기와 높이(웹 모양). 폭이 넓은 화면은 크게.
   const memoMetrics = (): { size: number; line: number } => {
     const memo = MEMO_METRICS[web?.memoSize ?? 'medium'];
-    return wide ? memo.wide : memo.narrow;
+    const m = wide ? memo.wide : memo.narrow;
+    return { size: m.size, line: Math.round(m.line * LINE_SPACING_FACTOR[web?.lineSpacing ?? 'normal']) };
   };
   // 값이 바뀔 때만 쓴다. 같은 값을 쪽마다 다시 쓰면 그때마다 모양 계산이 다시 돈다.
   let memoVars = '';
@@ -271,7 +292,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     const page = buildPage(pageOptions(appearance), anchor);
     const today = deps.today();
     const daysByMonth = new Map(pageMonths(page).map((m) => [m, store.days(m)] as const));
-    const signature = [epoch, anchor, today, holidayDataVersion(), ...[...daysByMonth].map(([m, d]) => `${m}:${JSON.stringify(d)}`)].join('\u0001');
+    const signature = [epoch, anchor, today, holidayDataVersion(), deps.events?.version() ?? 0, ...[...daysByMonth].map(([m, d]) => `${m}:${JSON.stringify(d)}`)].join('\u0001');
     if (drawn.get(grid) === signature) return;
     if (fillGrid(grid, page, today, daysByMonth)) drawn.set(grid, signature);
     else drawn.delete(grid);
@@ -314,6 +335,39 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   );
   el.append(pager.el);
 
+  // 달력 아래 줄: 다가오는 카운트다운. 자료나 오늘이 바뀔 때 다시 그린다.
+  const cdBar = document.createElement('div');
+  cdBar.className = 'cd-bar';
+  cdBar.setAttribute('role', 'list');
+  cdBar.setAttribute('aria-label', '카운트다운');
+  cdBar.hidden = true;
+  el.append(cdBar);
+  let barKey = '';
+  function renderBar(): void {
+    const chips: CountdownChip[] = deps.events ? countdownChips(deps.events.items(), deps.today()) : [];
+    const key = JSON.stringify(chips);
+    if (key === barKey) return;
+    barKey = key;
+    cdBar.hidden = chips.length === 0;
+    cdBar.replaceChildren(
+      ...chips.map((chip) => {
+        const item = document.createElement('span');
+        item.setAttribute('role', 'listitem');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = chip.kind === 'birthday' ? 'cd-chip birthday' : 'cd-chip';
+        button.dataset.key = chip.date;
+        button.append(spanOf('cd-text', chip.age !== null ? `${chip.text}(${chip.age}살)` : chip.text), spanOf('cd-days', countdownLabel(chip.days)));
+        item.append(button);
+        return item;
+      }),
+    );
+  }
+  cdBar.addEventListener(deps.desktop ? 'dblclick' : 'click', (event) => {
+    const key = (event.target as Element).closest<HTMLElement>('.cd-chip')?.dataset.key;
+    if (key) deps.onOpenDay(key);
+  });
+
   let headHtml = '';
   function renderHead(): void {
     const page = buildPage(pageOptions(appearance), pager.anchor());
@@ -352,6 +406,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   function redraw(): void {
     renderedToday = deps.today();
     renderHead();
+    renderBar();
     pager.refresh();
   }
 
@@ -430,6 +485,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     redraw();
     renderStatus();
   });
+  const offEvents = deps.events?.onChange(redraw);
   renderStatus();
   const offStatus = deps.status.subscribe(renderStatus);
   const onConnection = (): void => renderStatus();
@@ -485,6 +541,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
   pager.place();
   // 붙인 뒤에 그려야 칸 높이를 잴 수 있다
   renderHead();
+  renderBar();
   subscribe();
   pager.refresh();
 
@@ -510,6 +567,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
       closePicker();
       heightWatch?.disconnect();
       offChange();
+      offEvents?.();
       offStatus();
       window.removeEventListener('online', onConnection);
       window.removeEventListener('offline', onConnection);
