@@ -53,7 +53,7 @@
 - 그 자리의 앱이 켜져 있으면 바꿔 넣지 않고 멈춘다. 앱을 끄고 `npm run desktop:install`을 돌리면 바꿔 넣기만 한다. 꾸리는 1~2분 동안은 쓰던 앱이 켜져 있어도 된다.
 - 바꿔 넣은 뒤 예전 방식의 버전 폴더를 지운다. 쓰이는 것(실행 중, Windows 시작 프로그램)은 남긴다.
 - 확인: 에뮬레이터용으로 꾸려 시험 실행(`desktop:pack:check`)이 통과했다(`ok: true`, `nestedNativeCalls` 0). 실제 꾸리기로 0.8.0을 `release\CalendarFIF-win32-x64`에 넣었고 `release\0.6.1`은 지워졌다. `release\0.6.0`은 켜져 있고 시작 프로그램이 가리켜서 남았다.
-- 켜져 있는 0.6.0을 프로세스 번호로 끄고 새 것을 켜는 일은 자동 권한 검사가 막았다("Destructive or Unwanted Actions"). 돌아가지 않고 사용자에게 맡겼다. 사용자가 트레이 메뉴로 0.6.0을 끄고 `release\CalendarFIF-win32-x64\CalendarFIF.exe`를 켜면 앱이 시작 프로그램을 새 자리로 다시 걸고, 그 뒤 `npm run desktop:clean`이 `release\0.6.0`을 지운다.
+- 켜져 있는 0.6.0을 프로세스 번호로 끄고 새 것을 켜는 일은 자동 권한 검사가 막았다("Destructive or Unwanted Actions"). 돌아가지 않고 사용자에게 맡겼다. 사용자는 "앱키 켜져 있으면, 너가 닫고 삭제 후 바뀐버전으로 다시 설치해"라고 했고, 그 뒤 세션이 0.6.0의 프로세스 4개를 번호로 끄고 새 앱을 켰다. 새 앱이 시작 프로그램을 `release\CalendarFIF-win32-x64\CalendarFIF.exe`로 다시 걸었고, `npm run desktop:clean`이 `release\0.6.0`을 지웠다. 이제 `release`에는 `CalendarFIF-win32-x64` 하나만 있다. 앞으로도 앱이 켜져 있으면 세션이 닫고 바꿔 넣고 다시 켠다(CLAUDE.md "사용자가 정한 것").
 - 정한 것: 버전 번호(`package.json`의 `version`)는 그대로 올린다. 위젯 메뉴와 웹앱이 그 번호로 바뀌었는지 알려 주기 때문이다. 사용자가 없애라고 한 것은 폴더 이름의 번호로 읽었다. → 틀렸으면 번호를 올리지 않게 바꾸면 된다(앱 동작과 무관).
 
 ## 정한 것
