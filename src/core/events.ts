@@ -268,6 +268,7 @@ export function countdownStatus(rec: CountdownRecord, today: string): CountdownS
       const b = lunarDate(rec.date);
       if (a && b) age = a.year - b.year;
     }
+    if (age !== null && age <= 0) age = null; // 태어난 해의 그날은 나이를 적지 않는다("(0살)"이 되지 않게)
   }
   return { date, days: dayNumber(date) - dayNumber(today), age };
 }

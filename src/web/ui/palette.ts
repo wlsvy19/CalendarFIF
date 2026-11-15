@@ -1,6 +1,36 @@
 /**
+ * pointerdown(down)이 뒤이어 만들 click 하나를 삼킨다: 그 click은 아무 데도 닿지 않는다. 그 click이 오거나, 다른 곳의 click이
+ * 먼저 오거나(키보드로 누른 단추 등), 새로 누르거나, 누르기가 취소되거나(스크롤), 키를 누르면 그만둔다.
+ * 그래서 다른 누르기의 click은 삼키지 않는다.
+ */
+function swallowClickOf(down: Event): void {
+  const target = down.target instanceof Node ? down.target : null;
+  const stop = (): void => {
+    document.removeEventListener('click', onClick, true);
+    document.removeEventListener('pointerdown', onDown, true);
+    document.removeEventListener('pointercancel', stop, true);
+    document.removeEventListener('keydown', stop, true);
+  };
+  function onClick(e: Event): void {
+    stop();
+    const t = e.target instanceof Node ? e.target : null;
+    if (!target || !t || !(t === target || t.contains(target))) return; // 다른 누르기의 click
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  function onDown(e: Event): void {
+    if (e !== down) stop();
+  }
+  document.addEventListener('click', onClick, true);
+  document.addEventListener('pointerdown', onDown, true);
+  document.addEventListener('pointercancel', stop, true);
+  document.addEventListener('keydown', stop, true);
+}
+
+/**
  * 배경 색 상자. 단추(anchor) 위에 뜨고(공간이 없으면 아래), 시트 안에 붙는다. 그래서 시트의 끌어 닫기와 가림막 누르기가
  * 이 상자와 섞이지 않는다. colors의 ''는 "없음"이다. 고르면 onPick 뒤 onClose, 바깥을 누르거나 Esc면 onClose만 부른다.
+ * 바깥을 처음 누르면 상자만 닫힌다: 그 누르기는 밑의 가림막(편집 화면 닫기)이나 다른 단추에 닿지 않는다.
  */
 export function mountPalette(
   anchor: HTMLElement,
@@ -66,10 +96,12 @@ export function mountPalette(
     next.focus();
   });
 
-  // 바깥을 누르면 닫는다. 단추(anchor)를 다시 누르는 것은 부른 쪽이 여닫기로 처리한다.
+  // 바깥을 누르면 닫는다. 그 누르기의 click은 삼킨다(아이폰에서 닫힌 상자 밑의 가림막이 편집 화면을 닫지 않게).
+  // 단추(anchor)를 다시 누르는 것은 부른 쪽이 여닫기로 처리한다.
   const onOutside = (e: Event): void => {
     const t = e.target as Node | null;
     if (t && (el.contains(t) || anchor.contains(t))) return;
+    swallowClickOf(e);
     opts.onClose('outside');
   };
   // Esc는 상자만 닫는다. 시트까지 가면 편집 화면이 닫히므로 여기서 멈춘다.

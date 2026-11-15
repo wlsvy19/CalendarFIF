@@ -154,6 +154,15 @@ it('반복 없는 카운트다운은 지난 날을 음수로, 매년 생일은 �
   expect(countdownStatus(countdown({ date: '2020-01-01', kind: 'anniversary', repeat: { freq: 'yearly' } }), '2026-11-15')?.age).toBeNull();
 });
 
+it('태어난 해의 생일(올해 태어난 아이)은 0살이 아니라 나이 없이', () => {
+  const baby = countdown({ date: '2026-11-20', kind: 'birthday', repeat: { freq: 'yearly' } });
+  expect(countdownStatus(baby, '2026-11-15')).toEqual({ date: '2026-11-20', days: 5, age: null });
+  expect(countdownStatus(baby, '2026-11-21')).toEqual({ date: '2027-11-20', days: 364, age: 1 });
+  const lunarBaby = countdown({ date: '2026-11-13', kind: 'birthday', repeat: { freq: 'lunarYearly' } });
+  expect(countdownStatus(lunarBaby, '2026-11-01')).toMatchObject({ date: '2026-11-13', age: null });
+  expect(countdownChips({ baby }, '2026-11-15')[0]).toMatchObject({ id: 'baby', days: 5, age: null });
+});
+
 it('달력 아래 줄은 다가오는 것 먼저 가까운 순, 지난 것은 최근 순, 숨김과 완료는 빠진다', () => {
   const items: EventMap = {
     far: countdown({ date: '2026-12-25', text: '먼' }),

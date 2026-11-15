@@ -365,6 +365,73 @@ it('Space로 색을 골라도 상자가 다시 열리지 않는다', () => {
   colorBtn.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }));
   expect(root.querySelectorAll('[role="radio"]')).toHaveLength(0);
 });
+it('색 상자가 열린 채 어두운 바깥을 누르면 상자만 닫히고, 한 번 더 누르면 (고친 것이 없으므로) 편집 화면이 닫힌다', () => {
+  const { root, onCancel } = mount({ text: 'a', color: '' });
+  root.querySelector<HTMLElement>('button.tool.color')!.click();
+  const scrim = root.querySelector<HTMLElement>('.scrim')!;
+  const tap = (el: HTMLElement) => {
+    el.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    el.click();
+  };
+  tap(scrim);
+  expect(root.querySelectorAll('[role="radio"]')).toHaveLength(0);
+  expect(onCancel).not.toHaveBeenCalled();
+  tap(scrim);
+  expect(onCancel).toHaveBeenCalledTimes(1);
+});
+it('색 상자가 열린 채 다른 도구 단추를 누르면 그 누르기는 상자만 닫는다', () => {
+  const { root, area } = mount({ text: 'a', color: '' });
+  area.setSelectionRange(0, 0);
+  root.querySelector<HTMLElement>('button.tool.color')!.click();
+  const done = root.querySelector<HTMLElement>('button.tool.done')!;
+  done.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+  done.click();
+  expect([root.querySelectorAll('[role="radio"]').length, area.value]).toEqual([0, 'a']);
+  done.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+  done.click();
+  expect(area.value).toBe('[+]a');
+});
+it('close는 끌어 닫기처럼 고친 것이 있으면 저장하고 없으면 취소한다', () => {
+  const untouched = document.createElement('div');
+  document.body.append(untouched);
+  const a = { onSave: vi.fn(), onCancel: vi.fn() };
+  mountEditor(untouched, { dateKey: '2026-11-13', value: { text: 'a', color: '' }, ...a }).close();
+  expect([a.onSave.mock.calls.length, a.onCancel.mock.calls.length]).toEqual([0, 1]);
+  const typed = document.createElement('div');
+  document.body.append(typed);
+  const b = { onSave: vi.fn(), onCancel: vi.fn() };
+  const handle = mountEditor(typed, { dateKey: '2026-11-13', value: { text: 'a', color: '' }, ...b });
+  typed.querySelector('textarea')!.value = 'a\nb  ';
+  handle.close();
+  handle.close(); // 한 번만 전달된다
+  expect(b.onSave.mock.calls).toEqual([[{ text: 'a\nb', color: '' }]]);
+  expect(b.onCancel).not.toHaveBeenCalled();
+});
+it('eventSheetOpen은 알림·카운트다운 시트가 열려 있는 동안만 참이다', () => {
+  const root = document.createElement('div');
+  document.body.append(root);
+  const handle = mountEditor(root, { dateKey: '2026-11-13', value: { text: '', color: '' }, events: eventsProp(), onSave: vi.fn(), onCancel: vi.fn() });
+  expect(handle.eventSheetOpen()).toBe(false);
+  root.querySelector<HTMLElement>('button.tool.alarm')!.click();
+  expect(handle.eventSheetOpen()).toBe(true);
+  [...root.querySelectorAll<HTMLElement>('.event-sheet button')].find((b) => b.textContent === '취소')!.click();
+  expect(handle.eventSheetOpen()).toBe(false);
+  handle.destroy();
+});
+it('아이폰의 지금 예약은 저장한 뒤 events.flush로 서버가 받기를 기다린다', async () => {
+  const ev = { ...eventsProp(), iosHint: true, flush: vi.fn(() => new Promise<void>(() => {})) };
+  const root = document.createElement('div');
+  document.body.append(root);
+  const handle = mountEditor(root, { dateKey: '2026-11-13', value: { text: '병원', color: '' }, events: ev, onSave: vi.fn(), onCancel: vi.fn() });
+  root.querySelector<HTMLElement>('button.tool.alarm')!.click();
+  root.querySelector<HTMLElement>('.event-sheet .ev-schedule')!.click();
+  expect(ev.save).toHaveBeenCalledTimes(1);
+  expect(ev.save.mock.calls[0][1]).toMatchObject({ type: 'alarm', text: '병원' });
+  await vi.waitFor(() => expect(ev.flush).toHaveBeenCalledTimes(1));
+  expect(ev.save.mock.invocationCallOrder[0]).toBeLessThan(ev.flush.mock.invocationCallOrder[0]);
+  expect(root.querySelector<HTMLButtonElement>('.event-sheet .ev-schedule')!.disabled).toBe(true); // 기다리는 중
+  handle.destroy(); // 닫히면 기다리던 것이 끝나도 아무것도 열지 않는다
+});
 it('바깥을 눌러 색 상자를 닫을 때는 초점을 배경 단추로 옮기지 않는다', () => {
   const { root, area } = mount({ text: 'a', color: '' });
   root.querySelector<HTMLElement>('button.tool.color')!.click();

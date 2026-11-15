@@ -13,7 +13,7 @@ import { startAutoFlush } from './autoFlush';
 import { deviceLabel, isIos } from './device';
 import { EventsStore } from './eventsStore';
 import { startAlarmClock } from './alarmClock';
-import { playTone, unlockAudio } from './tones';
+import { playTone, unlockAudioOnGesture } from './tones';
 import { showAlarmBanner } from './ui/alarmBanner';
 import { FirestoreEventsSource } from '../sync/firestoreEvents';
 import { loadAppearance, saveAppearance, applyAppearance, type Appearance } from './appearance';
@@ -27,7 +27,7 @@ import { Interactivity } from './desktop/interactive';
 import { playDoneTone } from './desktop/tone';
 import { mountBlocked, type BlockedKind } from './ui/blocked';
 import { mountCalendar } from './ui/calendar';
-import { mountEditor } from './ui/editor';
+import { mountEditor, type EditorHandle } from './ui/editor';
 import { mountSettings } from './ui/settings';
 import { mountUsers } from './ui/users';
 import type { WidgetInstallDeps } from './ui/widgetInstall';
@@ -128,7 +128,9 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   };
   window.addEventListener('storage', onStorage);
   let pushedByApp = false;
-  let editor: { dateKey: string; handle: { destroy(): void } } | null = null;
+  let editor: { dateKey: string; handle: EditorHandle } | null = null;
+  // 편집 화면을 닫은 뒤 갈 날짜. null이면 달력으로 돌아간다. 알림 상자에서 다른 날짜를 누르면 그 날짜다(openFromAlarm).
+  let nextDay: string | null = null;
   let waiting: { dateKey: string; off(): void; timer: ReturnType<typeof setTimeout> } | null = null;
 
   const closeEditor = (): void => {
@@ -242,6 +244,18 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     clearHash();
     syncRoute();
   };
+  // 편집 화면을 닫은 뒤: 보통은 달력으로 돌아가고, 갈 날짜가 있으면 뒤로 가기를 거치지 않고 지금 기록을 그 날짜로 바꿔 연다.
+  // 앱이 쌓은 기록이면 그대로 앱이 쌓은 것이라 그 편집 화면을 닫으면 달력으로 돌아간다.
+  const afterEditor = (): void => {
+    const dateKey = nextDay;
+    nextDay = null;
+    if (dateKey === null) {
+      backToCalendar();
+      return;
+    }
+    location.replace(`#${dateKey}`);
+    syncRoute();
+  };
   const openEditor = (dateKey: string): void => {
     const { monthId, day } = splitDateKey(dateKey)!;
     // 편집 화면이 처음 보여 준 값이 base다. 서버 문서를 따로 읽지 않는다.
@@ -251,17 +265,24 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       value: base,
       note: dayNote(dateKey),
       doneTone: prefs?.doneTone ?? appearance?.doneTone,
-      events: { view: events, save: (id, rec) => events.save(id, rec), remove: (id) => events.remove(id), iosHint: isIos(navigator.userAgent, navigator.maxTouchPoints), now: () => new Date() },
+      events: {
+        view: events,
+        save: (id, rec) => events.save(id, rec),
+        remove: (id) => events.remove(id),
+        flush: () => events.flush(),
+        iosHint: isIos(navigator.userAgent, navigator.maxTouchPoints),
+        now: () => new Date(),
+      },
       onSave: (next) => {
         closeEditor(); // 주소가 바뀌기를 기다리지 않고 바로 닫는다
         engine.saveEdit(monthId, day, base, next);
         store.refresh();
         if (appearance?.doneTone === 'short') playDoneTone();
-        backToCalendar();
+        afterEditor();
       },
       onCancel: () => {
         closeEditor();
-        backToCalendar();
+        afterEditor();
       },
     }, DESKTOP ? { focusText: true, attachDrag: (sheet, handle) => makeDraggable(sheet, handle, editorMemory) } : undefined);
     editor = { dateKey, handle };
@@ -347,6 +368,18 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     pushedByApp = true;
     location.hash = dateKey;
   };
+  // 알림 상자의 줄을 누르면 그 날짜의 편집 화면을 연다. 편집 화면이 열려 있으면 끌어 닫기처럼 닫고(고친 메모가 있으면 저장) 연다.
+  // 그 위에 알림·카운트다운 시트가 열려 있으면 적던 것을 잃지 않게 옮기지 않는다(상자는 누른 줄만 치운다). 같은 날짜면 그대로 둔다.
+  const openFromAlarm = (dateKey: string): void => {
+    if (!editor) {
+      openDay(dateKey);
+      return;
+    }
+    if (editor.dateKey === dateKey || editor.handle.eventSheetOpen()) return;
+    nextDay = dateKey;
+    editor.handle.close(); // onSave나 onCancel이 afterEditor로 그 날짜를 연다
+    nextDay = null; // 닫히지 않았으면 다음 닫기에 남기지 않는다
+  };
   let cellMenu: { destroy(): void } | null = null;
   const closeCellMenu = (): void => {
     cellMenu?.destroy();
@@ -414,13 +447,12 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
         bridge.showAlarms(triggers.map((x) => ({ time: x.time, text: x.text, date: x.occurrence, advance: x.advance })), tone);
         return;
       }
-      banners.push(showAlarmBanner(root, triggers, openDay));
+      banners.push(showAlarmBanner(root, triggers, openFromAlarm));
       if (tone !== 'none') playTone(tone);
     },
   });
-  // 아이폰은 사용자가 한 번 누른 뒤에야 소리를 낸다. 웹앱만 처음 누를 때 소리를 깨운다.
-  const unlock = (): void => unlockAudio();
-  if (!DESKTOP) document.addEventListener('pointerdown', unlock, { capture: true, passive: true, once: true });
+  // 아이폰은 사용자가 누른 뒤에야 소리를 낸다. 웹앱은 소리가 깨어날 때까지 누를 때마다(손을 뗄 때, 누름, 키) 깨운다.
+  const stopUnlock = DESKTOP ? () => {} : unlockAudioOnGesture(document);
   // 공휴일 자료가 바뀌면 달력(과 붙어 있는 쪽)을 다시 그린다.
   const redraw = (): void => store.refresh();
   redrawHolidays = redraw;
@@ -443,7 +475,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       calendar.destroy();
       alarmClock.stop();
       for (const b of banners) b.destroy(); // 내려간 화면 위에 알림 상자가 남지 않게 한다
-      document.removeEventListener('pointerdown', unlock, { capture: true });
+      stopUnlock();
       events.destroy();
       window.removeEventListener('storage', onStorage);
       offStatus();

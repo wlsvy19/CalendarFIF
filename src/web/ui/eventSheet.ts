@@ -31,6 +31,10 @@ export type EventSheetProps = {
   onSave(id: string, rec: EventRecord): void;
   onDelete(id: string): void;
   onClose(): void;
+  /** 저장한 것을 서버가 받을 때까지 기다린다(지금 예약). 받지 못하면 거절한다. 없으면 기다리지 않는다. */
+  flush?(): Promise<void>;
+  /** 주소를 연다(지금 예약). 기본은 그 주소로 옮겨 가기. */
+  openUrl?(url: string): void;
 };
 
 type EndMode = 'forever' | 'until' | 'count';
@@ -41,12 +45,32 @@ const COUNTDOWN_REPEATS: RepeatFreq[] = ['none', 'yearly', 'lunarYearly'];
 const KINDS = Object.keys(COUNTDOWN_KIND_LABELS) as CountdownKind[];
 const YEARLY_KINDS: CountdownKind[] = ['birthday', 'anniversary', 'holiday'];
 const MAX_ADVANCE = 5;
+/** 지금 예약: 서버가 받기를 이만큼 기다린다. */
+const SCHEDULE_WAIT_MS = 4000;
+/** 삭제를 한 번 누른 뒤 이만큼 안에 다시 누르면 지운다. */
+const DELETE_CONFIRM_MS = 4000;
 
-/** 새 알림의 기본 시각: 그날이 오늘이면 지금+15분을 15분 단위로 내린 시각(23:45가 끝), 아니면 09:00. */
+/**
+ * 새 알림의 기본 시각. 그날이 오늘이면 지금+15분을 15분 단위로 내린 시각(23:59가 끝)이고, 그것이 지금보다 늦지 않으면
+ * (밤 23:59) 09:00이다. 다른 날이면 09:00.
+ */
 function defaultTime(dateKey: string, now: Date): string {
   if (dateKey !== todayKey(now)) return '09:00';
-  const minutes = Math.min(23 * 60 + 45, Math.floor((now.getHours() * 60 + now.getMinutes() + 15) / 15) * 15);
+  const current = now.getHours() * 60 + now.getMinutes();
+  const minutes = Math.min(23 * 60 + 59, Math.floor((current + 15) / 15) * 15);
+  if (minutes <= current) return '09:00';
   return `${pad2(Math.floor(minutes / 60))}:${pad2(minutes % 60)}`;
+}
+
+/** 약속이 ms 안에 끝나면 true, 거절되거나 늦으면 false. */
+function settlesWithin(work: Promise<void>, ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms);
+    work.then(
+      () => { clearTimeout(timer); resolve(true); },
+      () => { clearTimeout(timer); resolve(false); },
+    );
+  });
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = ''): HTMLElementTagNameMap[K] {
@@ -252,20 +276,43 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps, env?:
 
   if (isAlarm && props.iosHint) {
     const hint = el('p', 'ev-hint', '아이폰 알림은 Scriptable 위젯 스크립트가 예약합니다. 위젯이 새로 그려질 때 예약되고, 바로 하려면 누르세요. ');
-    const link = el('a', 'ev-link', '지금 예약');
-    link.href = SCRIPTABLE_SCHEDULE_URL;
-    hint.append(link);
+    const now = el('button', 'ev-link ev-schedule', '지금 예약');
+    now.type = 'button';
+    now.addEventListener('click', () => void scheduleNow(now));
+    hint.append(now);
     body.append(hint);
   }
 
   const actions = el('div', 'ev-actions');
+  let disarmDelete = (): void => {};
   if (editing) {
     const del = el('button', 'settings-btn danger ev-delete', '삭제');
     del.type = 'button';
+    // 반복하는 항목은 통째로 지워지므로 두 번 눌러야 지운다. 4초가 지나거나 다른 것을 하면 처음으로 돌아간다.
+    let armed: ReturnType<typeof setTimeout> | null = null;
+    disarmDelete = (): void => {
+      if (armed === null) return;
+      clearTimeout(armed);
+      armed = null;
+      del.textContent = '삭제';
+      del.classList.remove('armed');
+    };
     del.addEventListener('click', () => {
+      if (armed === null) {
+        armed = setTimeout(disarmDelete, DELETE_CONFIRM_MS);
+        del.textContent = '한 번 더 누르면 삭제';
+        del.classList.add('armed');
+        return;
+      }
+      disarmDelete();
       props.onDelete(id);
       close();
     });
+    const other = (e: Event): void => {
+      if (!(e.target instanceof Node && del.contains(e.target))) disarmDelete();
+    };
+    for (const type of ['pointerdown', 'keydown', 'input', 'change']) sheet.addEventListener(type, other, true);
+    scrim.addEventListener('pointerdown', () => disarmDelete());
     actions.append(del);
   }
   if (actions.childElementCount > 0) body.append(actions);
@@ -276,12 +323,14 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps, env?:
     JSON.stringify([text.value, time?.value, [...advance].sort(), kind?.value, repeat.value, endMode, until.value, count.value, bottom?.checked, done.checked]);
   const initial = snapshot();
 
-  const fail = (message: string): void => {
+  const fail = (message: string): null => {
     error.textContent = message;
     error.hidden = false;
+    return null;
   };
 
-  const save = (): void => {
+  /** 화면의 값으로 기록을 만든다. 틀린 곳이 있으면 알리고 null. editedAt/editedBy는 받는 쪽이 채운다(0, ''). */
+  const build = (): EventRecord | null => {
     let t = text.value.trim();
     if (t === '') t = props.defaultText.trim().slice(0, 200);
     if (t === '') return fail('글을 적어 주세요');
@@ -302,17 +351,48 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps, env?:
     if (isAlarm) {
       if (!time || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time.value)) return fail('시각을 고르세요');
       if (advance.size < 1) return fail('미리 알림을 하나 이상 고르세요');
-      props.onSave(id, {
+      return {
         type: 'alarm', date: baseDate, text: t, done: done.checked, repeat: rule,
         time: time.value, advance: [...advance].sort((a, b) => a - b), editedAt: 0, editedBy: '',
-      });
-    } else {
-      props.onSave(id, {
-        type: 'countdown', date: baseDate, text: t, done: done.checked, repeat: rule,
-        kind: kind!.value as CountdownKind, showBottom: bottom!.checked, editedAt: 0, editedBy: '',
-      });
+      };
+    }
+    return {
+      type: 'countdown', date: baseDate, text: t, done: done.checked, repeat: rule,
+      kind: kind!.value as CountdownKind, showBottom: bottom!.checked, editedAt: 0, editedBy: '',
+    };
+  };
+
+  const save = (): void => {
+    const rec = build();
+    if (!rec) return;
+    props.onSave(id, rec);
+    close();
+  };
+
+  // 지금 예약: 저장과 똑같이 저장하고, 서버가 받은 것을 확인한 뒤 Scriptable을 연다(Scriptable은 서버의 문서를 읽어 예약한다).
+  // 받지 못하면(연결 없음, 4초 넘게 걸림) 시트를 두고 다시 누르게 한다. 저장한 알림은 이 기기에 남아 연결되면 올라간다.
+  let scheduling = false;
+  const scheduleNow = async (button: HTMLButtonElement): Promise<void> => {
+    if (scheduling) return;
+    const rec = build();
+    if (!rec) return;
+    props.onSave(id, rec);
+    scheduling = true;
+    error.hidden = true;
+    button.disabled = true;
+    button.textContent = '보내는 중…';
+    const flush = props.flush;
+    const ok = flush ? await settlesWithin(Promise.resolve().then(() => flush()), SCHEDULE_WAIT_MS) : true;
+    scheduling = false;
+    if (destroyed) return; // 기다리는 동안 닫혔다
+    button.disabled = false;
+    button.textContent = '지금 예약';
+    if (!ok) {
+      fail('연결된 뒤에 다시 누르세요');
+      return;
     }
     close();
+    (props.openUrl ?? ((url: string) => { location.href = url; }))(SCRIPTABLE_SCHEDULE_URL);
   };
   saveBtn.addEventListener('click', save);
   cancelBtn.addEventListener('click', () => close());
@@ -354,6 +434,7 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps, env?:
   const destroy = (): void => {
     if (destroyed) return;
     destroyed = true;
+    disarmDelete();
     viewport?.removeEventListener('resize', followViewport);
     viewport?.removeEventListener('scroll', followViewport);
     dismiss(scrim, sheet);

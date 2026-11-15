@@ -174,6 +174,28 @@ describe('startAlarmClock', () => {
     clock.stop();
   });
 
+  it('울리는 쪽이 던져도 다음 타이머를 걸고, 다음 알림도 울린다', () => {
+    items = { a1: alarm('2026-11-20', '09:00'), b1: alarm('2026-11-20', '09:30', '둘째') };
+    const onRing = vi.fn((triggers: { key: string }[]): void => {
+      throw new Error(`화면 오류 ${triggers[0].key}`);
+    });
+    const { clock } = start(mem(), onRing);
+    const first = timers[0];
+    t = at('2026-11-20', 9, 0);
+    expect(() => clock.check()).toThrow('화면 오류');
+    expect(onRing).toHaveBeenCalledTimes(1);
+    expect(timers).toHaveLength(1);
+    expect(timers[0].id).not.toBe(first.id); // 던진 뒤에도 새 타이머를 걸었다(멈추지 않았다)
+    const second = timers[0];
+    t = at('2026-11-20', 9, 30);
+    expect(() => second.fn()).toThrow('화면 오류');
+    expect(onRing).toHaveBeenCalledTimes(2);
+    expect(onRing.mock.calls[1][0][0].key).toBe('b1@2026-11-20@0');
+    expect(timers).toHaveLength(1);
+    expect(timers[0].id).not.toBe(second.id);
+    clock.stop();
+  });
+
   it('now보다 1분 뒤인 것은 아직 울리지 않고 다음 check에 한 번 울린다', () => {
     const { clock, onRing } = start(mem());
     t = at('2026-11-20', 8, 59);

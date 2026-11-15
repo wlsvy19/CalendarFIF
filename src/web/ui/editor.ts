@@ -29,6 +29,14 @@ function titleOf(dateKey: string): string {
   return `${month}월 ${day}일 ${WEEKDAY_NAMES[date.getDay()]}요일`;
 }
 
+export type EditorHandle = {
+  destroy(): void;
+  /** 아래로 끌어 닫기와 같이 닫는다: 고친 것이 있으면 저장(onSave)하고 없으면 취소(onCancel)한다. */
+  close(): void;
+  /** 편집 화면 위에 알림·카운트다운 시트가 열려 있는가(그 시트에 적던 것이 있을 수 있다). */
+  eventSheetOpen(): boolean;
+};
+
 /** The part of window.visualViewport the editor uses. */
 export type VisualViewportLike = {
   height: number;
@@ -46,13 +54,16 @@ export function mountEditor(
     note?: { lunar: string; holiday: string };
     /** 완료를 누를 때 소리. */
     doneTone?: 'none' | 'short';
-    /** 알림과 카운트다운. 없으면 그 도구 단추와 띠를 숨긴다. 시트의 저장과 삭제는 메모의 저장·취소와 따로 바로 끝난다. */
-    events?: { view: EventsView; save(id: string, rec: EventRecord): void; remove(id: string): void; iosHint: boolean; now?: () => Date };
+    /**
+     * 알림과 카운트다운. 없으면 그 도구 단추와 띠를 숨긴다. 시트의 저장과 삭제는 메모의 저장·취소와 따로 바로 끝난다.
+     * flush: 저장한 것을 서버가 받을 때까지 기다린다(아이폰의 지금 예약). 받지 못하면 거절한다.
+     */
+    events?: { view: EventsView; save(id: string, rec: EventRecord): void; remove(id: string): void; flush?(): Promise<void>; iosHint: boolean; now?: () => Date };
     onSave(next: DayValue): void;
     onCancel(): void;
   },
   env?: { visualViewport?: VisualViewportLike | null; focusText?: boolean; attachDrag?: (sheet: HTMLElement, handle: HTMLElement) => { destroy(): void } },
-): { destroy(): void } {
+): EditorHandle {
   const viewport = env?.visualViewport === undefined ? (window.visualViewport ?? null) : env.visualViewport;
   const previouslyFocused = document.activeElement as HTMLElement | null;
   const scrim = document.createElement('div');
@@ -137,6 +148,7 @@ export function mountEditor(
       iosHint: events.iosHint,
       onSave: (eid, rec) => events.save(eid, rec),
       onDelete: (eid) => events.remove(eid),
+      flush: events.flush ? () => events.flush!() : undefined,
       onClose: () => {
         eventSheet = null;
         // 폰에서는 열 때와 같이 시트에 초점을 둔다. 메모 칸에 두면 닫을 때마다 글자판이 올라온다.
@@ -269,7 +281,9 @@ export function mountEditor(
   document.documentElement.classList.add('sheet-open');
   const drag = env?.attachDrag?.(sheet, sheet.querySelector<HTMLElement>('.sheet-bar')!);
   // 폰 화면에서 아래로 끌어 닫으면 고친 것이 있을 때 저장한다. 적던 글을 잃는 것이 원치 않은 저장보다 나쁘다. 버리려면 취소를 누른다.
-  const swipe = attachSwipeToClose(sheet, scrim, { onClose: () => (changed() ? save() : cancel()) });
+  // 알림 상자에서 다른 날짜를 누를 때도(close) 같다.
+  const closeKeeping = (): void => (changed() ? save() : cancel());
+  const swipe = attachSwipeToClose(sheet, scrim, { onClose: closeKeeping });
   if (env?.focusText || window.innerWidth >= WIDE_PX) {
     area.focus();
     area.setSelectionRange(area.value.length, area.value.length);
@@ -278,6 +292,8 @@ export function mountEditor(
   }
 
   return {
+    close: closeKeeping,
+    eventSheetOpen: () => eventSheet !== null,
     destroy() {
       palette?.destroy();
       palette = null;

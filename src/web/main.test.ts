@@ -549,6 +549,87 @@ it('PC 앱은 울린 알림을 알림 창으로 보내고 화면 안 알림 상�
   }
 });
 
+// 아래는 웹앱 모드로 main을 다시 불러 시험한다. 앞의 PC 앱 시험들이 쓰는 모듈을 바꾸므로 이 파일의 끝에 둔다.
+async function startWeb(uid: string) {
+  vi.resetModules();
+  vi.stubEnv('VITE_DESKTOP', '');
+  delete (window as { calfifDesktop?: unknown }).calfifDesktop;
+  await import('./main');
+  const root = document.createElement('div');
+  document.body.append(root);
+  const app = captured.mountMain!(root, { uid, email: 'a@example.com' });
+  mounted.push(app);
+  const day = () => root.querySelector<HTMLElement>('.sheet:not(.settings):not(.users):not(.event-sheet)');
+  const title = (dateKey: string) => {
+    const [y, m, d] = dateKey.split('-').map(Number);
+    return `${m}월 ${d}일 ${'일월화수목금토'[new Date(y, m - 1, d).getDay()]}요일`;
+  };
+  return { root, app, day, title };
+}
+
+it('웹앱: 편집 화면이 열린 동안 알림 상자의 줄을 누르면 고친 메모를 저장하고 그 날짜를 연다', async () => {
+  eventsFeed.items = dueAlarm();
+  try {
+    const { root, day, title } = await startWeb('banner-save');
+    access.emit!(server(accessDoc()));
+    const due = (eventsFeed.items.a1 as { date: string }).date;
+    expect(root.querySelector('.alarm-banner .alarm-item')).not.toBeNull();
+    location.hash = '2000-01-03';
+    await vi.waitFor(() => expect(day()?.querySelector('h3')?.textContent).toBe(title('2000-01-03')));
+    day()!.querySelector('textarea')!.value = '적던 메모';
+    root.querySelector<HTMLElement>('.alarm-banner .alarm-item')!.click();
+    await vi.waitFor(() => expect(day()?.querySelector('h3')?.textContent).toBe(title(due)));
+    expect(location.hash).toBe(`#${due}`);
+    expect(root.querySelectorAll('.sheet')).toHaveLength(1);
+    expect(localStorage.getItem('calfif.outbox.banner-save')).toContain('적던 메모');
+    expect(root.querySelector('.alarm-banner')).toBeNull();
+    await tick();
+    expect(day()?.querySelector('h3')?.textContent).toBe(title(due)); // 늦게 오는 hashchange가 다시 닫지 않는다
+  } finally {
+    eventsFeed.items = {};
+  }
+});
+
+it('웹앱: 고친 것이 없으면 알림 상자의 줄을 눌러 그냥 닫고 그 날짜를 연다', async () => {
+  eventsFeed.items = dueAlarm();
+  try {
+    const { root, day, title } = await startWeb('banner-clean');
+    access.emit!(server(accessDoc()));
+    const due = (eventsFeed.items.a1 as { date: string }).date;
+    location.hash = '2000-01-03';
+    await vi.waitFor(() => expect(day()?.querySelector('h3')?.textContent).toBe(title('2000-01-03')));
+    root.querySelector<HTMLElement>('.alarm-banner .alarm-item')!.click();
+    await vi.waitFor(() => expect(day()?.querySelector('h3')?.textContent).toBe(title(due)));
+    expect(localStorage.getItem('calfif.outbox.banner-clean')).toBeNull();
+  } finally {
+    eventsFeed.items = {};
+  }
+});
+
+it('웹앱: 알림 시트가 열려 있으면 알림 상자의 줄을 눌러도 옮기지 않고 그 줄만 치운다', async () => {
+  eventsFeed.items = dueAlarm();
+  try {
+    const { root, day, title } = await startWeb('banner-sheet');
+    access.emit!(server(accessDoc()));
+    location.hash = '2000-01-03';
+    await vi.waitFor(() => expect(day()?.querySelector('h3')?.textContent).toBe(title('2000-01-03')));
+    day()!.querySelector('textarea')!.value = '적던 메모';
+    day()!.querySelector<HTMLElement>('button.tool.alarm')!.click();
+    const input = root.querySelector<HTMLInputElement>('.event-sheet input.ev-text')!;
+    input.value = '적던 알림';
+    root.querySelector<HTMLElement>('.alarm-banner .alarm-item')!.click();
+    await tick();
+    expect(root.querySelector('.alarm-banner')).toBeNull();
+    expect(location.hash).toBe('#2000-01-03');
+    expect(root.querySelector<HTMLInputElement>('.event-sheet input.ev-text')).toBe(input);
+    expect(input.value).toBe('적던 알림');
+    expect([day()?.querySelector('h3')?.textContent, day()?.querySelector('textarea')?.value]).toEqual([title('2000-01-03'), '적던 메모']);
+    expect(localStorage.getItem('calfif.outbox.banner-sheet')).toBeNull();
+  } finally {
+    eventsFeed.items = {};
+  }
+});
+
 it('웹앱은 화면을 내리면 울린 알림 상자도 함께 지워진다', async () => {
   eventsFeed.items = dueAlarm();
   try {

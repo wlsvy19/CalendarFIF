@@ -79,8 +79,11 @@ export function startAlarmClock(deps: {
     for (const x of due) fired[x.key] = x.at.getTime();
     if (dirty || due.length > 0) write(fired);
     else memory = fired;
-    if (due.length > 0) deps.onRing(due);
-    schedule(t);
+    try {
+      if (due.length > 0) deps.onRing(due);
+    } finally {
+      schedule(t); // 울리는 쪽이 던져도 다음 타이머는 건다(시계가 멈추지 않게)
+    }
   }
 
   const onVisible = (): void => {
