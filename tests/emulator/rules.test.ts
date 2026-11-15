@@ -178,3 +178,34 @@ it('로그인하지 않으면 사용 허가 문서를 읽지 못한다', async (
   await assertFails(getDoc(doc(db, `access/${USER}`)));
   await assertFails(getDocs(collection(db, 'access')));
 });
+
+const ev = { items: {}, updatedAt: 1 };
+it('소유자는 자기 events 문서를 읽고 쓴다', async () => {
+  const db = ownerDb(env);
+  await assertSucceeds(setDoc(doc(db, `users/${OWNER}/data/events`), ev));
+  await assertSucceeds(getDoc(doc(db, `users/${OWNER}/data/events`)));
+});
+it('events 말고 다른 data 문서는 못 쓴다', async () => {
+  const db = ownerDb(env);
+  await assertFails(setDoc(doc(db, `users/${OWNER}/data/other`), ev));
+  await assertFails(getDoc(doc(db, `users/${OWNER}/data/other`)));
+});
+it('허가된 사용자는 자기 events만, 중지된 사용자는 못 쓴다', async () => {
+  await seedDocs(env, {
+    [`access/${USER}`]: grant('user@example.com'),
+    'access/off-uid': grant('off@example.com', { disabled: true }),
+  });
+  const db = userDb(env);
+  await assertSucceeds(setDoc(doc(db, `users/${USER}/data/events`), ev));
+  await assertSucceeds(getDoc(doc(db, `users/${USER}/data/events`)));
+  await assertFails(setDoc(doc(db, `users/${OWNER}/data/events`), ev));
+  const off = env.authenticatedContext('off-uid').firestore() as unknown as Firestore;
+  await assertFails(setDoc(doc(off, 'users/off-uid/data/events'), ev));
+  await assertFails(getDoc(doc(off, 'users/off-uid/data/events')));
+});
+it('다른 계정의 events는 못 읽는다', async () => {
+  await seedDocs(env, { [`users/${OWNER}/data/events`]: ev });
+  await assertFails(getDoc(doc(otherDb(env), `users/${OWNER}/data/events`)));
+  await assertFails(getDoc(doc(anonDb(env), `users/${OWNER}/data/events`)));
+  await assertFails(getDoc(doc(otherDb(env), 'users/someone-else/data/events')));
+});
