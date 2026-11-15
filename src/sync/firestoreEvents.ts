@@ -1,7 +1,7 @@
-import { FieldPath, deleteField, doc, onSnapshot, serverTimestamp, setDoc, type Firestore } from 'firebase/firestore';
+import { FieldPath, deleteField, doc, onSnapshot, runTransaction, serverTimestamp, type Firestore } from 'firebase/firestore';
 import type { EventMap } from '../core/events';
 import type { EventsSource, SnapshotMeta } from '../web/eventsStore';
-import { buildEventsWrite, parseEventsDoc, type EventChange } from './eventsDoc';
+import { buildEventsWrite, decideEventsWrite, parseEventsDoc, type EventsWriteResult, type PendingChange } from './eventsDoc';
 
 const RETRY_FIRST_MS = 2000;
 const RETRY_MAX_MS = 60000;
@@ -53,9 +53,19 @@ export class FirestoreEventsSource implements EventsSource {
     };
   }
 
-  async write(changes: Record<string, EventChange>): Promise<void> {
-    const w = buildEventsWrite(changes, { deleteField, serverTimestamp });
-    if (!w) return;
-    await setDoc(this.ref(), w.data, { mergeFields: w.fields.map((p) => new FieldPath(...p)) });
+  /**
+   * 트랜잭션으로 쓴다(달 문서와 같다). 서버의 지금 값을 읽어 decideEventsWrite가 고른 것만 쓰므로 다른 기기의 더 새 편집과
+   * 다른 곳의 삭제가 이긴다. 항목은 mergeFields로 통째로 바꾼다. 트랜잭션은 SDK의 오프라인 대기열을 거치지 않아서
+   * 연결이 없으면 실패하고, 다시 보내기는 EventsStore의 보내지 않은 변경이 맡는다(SDK가 뒤늦게 옛 값을 다시 쓰지 않는다).
+   */
+  async write(pending: Record<string, PendingChange>): Promise<EventsWriteResult> {
+    const ref = this.ref();
+    return runTransaction(this.db, async (tx) => {
+      const snap = await tx.get(ref);
+      const { changes, result } = decideEventsWrite(snap.exists() ? parseEventsDoc(snap.data()) : {}, pending);
+      const w = buildEventsWrite(changes, { deleteField, serverTimestamp });
+      if (w) tx.set(ref, w.data, { mergeFields: w.fields.map((p) => new FieldPath(...p)) });
+      return result;
+    });
   }
 }

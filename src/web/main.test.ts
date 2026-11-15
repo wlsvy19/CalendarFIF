@@ -59,7 +59,9 @@ vi.mock('../sync/firestoreEvents', () => ({
       onData(eventsFeed.items);
       return () => {};
     }
-    async write(): Promise<void> {}
+    async write(pending: Record<string, unknown>): Promise<{ written: string[]; dropped: string[] }> {
+      return { written: Object.keys(pending), dropped: [] };
+    }
   },
 }));
 // 내 access 문서는 시험이 직접 보낸다. 관리자 표시 만들기는 늘 거부된다(관리자가 아닌 계정).
