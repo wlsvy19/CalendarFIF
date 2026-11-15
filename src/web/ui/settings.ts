@@ -17,6 +17,8 @@ export type AccountProps = {
   onManageUsers?(): void;
   /** 비밀번호 칸에 적은 글이 있거나 바꾸는 중이면 true, 그렇지 않게 되면 false. 바뀔 때만 부른다. */
   onPasswordBusy?(busy: boolean): void;
+  /** 주면 맨 아래에 앱 버전을 보인다(package.json의 version). */
+  version?: string;
 };
 
 const PASSWORD_DONE_MS = 1500;
@@ -190,6 +192,13 @@ export function accountSection(props: AccountProps, extra?: HTMLElement, onClean
   setManageUsers(props.onManageUsers);
   if (props.onChangePassword) signOutField.before(passwordField(props.onChangePassword, props.onPasswordBusy, onCleanup));
   if (extra) signOutField.before(extra);
+  if (props.version) {
+    const version = document.createElement('div');
+    version.className = 'field';
+    version.innerHTML = '<span class="field-label">앱 버전</span><p class="settings-version"></p>';
+    version.querySelector('.settings-version')!.textContent = `CalendarFIF ${props.version}`;
+    el.append(version);
+  }
   const signOutBtn = el.querySelector<HTMLButtonElement>('.signout')!;
   const forceBtn = el.querySelector<HTMLButtonElement>('.danger')!;
   const confirmText = el.querySelector<HTMLElement>('.settings-confirm')!;
@@ -220,6 +229,7 @@ export function mountSettings(
     onChangePassword?: AccountProps['onChangePassword'];
     onManageUsers?: AccountProps['onManageUsers'];
     onPasswordBusy?: AccountProps['onPasswordBusy'];
+    version?: AccountProps['version'];
     /** 주면 "위젯" 칸(스크립트 복사와 설치 방법)을 보인다. 웹앱의 설정 화면만 준다. */
     widget?: WidgetInstallDeps;
     /** 주면 맨 위에 화면·달력·메모 칸을 보인다. 고르면 바로 onChange에 새 설정을 준다. 웹앱의 설정 화면만 준다. */

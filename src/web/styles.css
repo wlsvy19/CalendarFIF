@@ -755,6 +755,7 @@ button { touch-action: manipulation; }
 /* 설정 화면 */
 .settings { overflow-y: auto; }
 .settings-email, .settings-pending, .settings-note { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.settings-version { margin: 0; font-size: 14px; color: var(--muted); }
 .settings-note { color: var(--muted); }
 .settings-warn { margin: 0; font-size: 14px; line-height: 1.45; color: var(--sun); }
 .settings-signout { margin-top: auto; }

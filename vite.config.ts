@@ -10,6 +10,9 @@ const pushImports = existsSync(PUSH_SW)
   ? [`push-sw.js?v=${createHash('sha256').update(readFileSync(PUSH_SW)).digest('hex').slice(0, 10)}`]
   : [];
 
+// 설정의 맨 아래에 보일 앱 버전(src/web/version.ts).
+const APP_VERSION = (JSON.parse(readFileSync('package.json', 'utf8')) as { version: string }).version;
+
 // PC 앱(desktop, desktop-emu 모드)은 앱 안의 파일을 읽으므로 서비스 워커와 매니페스트가 없다.
 const DESKTOP_OUT: Record<string, string> = { desktop: 'dist-desktop', 'desktop-emu': 'dist-desktop-emu' };
 
@@ -51,6 +54,7 @@ const pwa = VitePWA({
 export default defineConfig(({ mode }) => {
   const outDir = DESKTOP_OUT[mode];
   return {
+    define: { __APP_VERSION__: JSON.stringify(APP_VERSION) },
     server: { port: 5173, strictPort: true },
     ...(outDir ? { build: { outDir } } : {}),
     plugins: [outDir ? deskClass : pwa],

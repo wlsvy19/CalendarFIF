@@ -33,6 +33,7 @@ import { mountBlocked, type BlockedKind } from './ui/blocked';
 import { mountCalendar } from './ui/calendar';
 import { mountEditor, type EditorHandle } from './ui/editor';
 import { mountSettings } from './ui/settings';
+import { APP_VERSION } from './version';
 import { mountUsers } from './ui/users';
 import type { WidgetInstallDeps } from './ui/widgetInstall';
 import { isBusy, reloadOnUpdate } from './update';
@@ -255,6 +256,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       onChangePassword: changeMyPassword,
       // 여는 순간의 접근 상태로 정하고, 열려 있는 동안 바뀌면 accessChanged가 고친다.
       onManageUsers: getAccess() === 'admin' ? manageUsers : undefined,
+      version: APP_VERSION,
       onPasswordBusy: (busy: boolean) => {
         passwordBusy = busy;
         if (!busy) ctx.onRelease();

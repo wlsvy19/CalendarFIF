@@ -37,6 +37,16 @@ it('계정과 대기 건수를 보여 주고 로그아웃한다', () => {
   button('로그아웃').click();
   expect(onSignOut).toHaveBeenCalledTimes(1);
 });
+it('버전을 주면 맨 아래(로그아웃 뒤)에 앱 버전을 보이고, 주지 않으면 그 칸이 없다', () => {
+  const { root } = mount({ version: '0.8.0' });
+  const fields = [...root.querySelectorAll('.field')];
+  const last = fields[fields.length - 1];
+  expect(last.querySelector('.field-label')!.textContent).toBe('앱 버전');
+  expect(last.querySelector('.settings-version')!.textContent).toBe('CalendarFIF 0.8.0');
+  expect(fields.indexOf(root.querySelector('.settings-signout')!)).toBe(fields.length - 2);
+  document.body.replaceChildren();
+  expect(mount().root.querySelector('.settings-version')).toBeNull();
+});
 it('올리지 못한 편집이 있으면 한 번 더 묻는다', () => {
   const { root, button, onSignOut } = mount({ pending: 2 });
   button('로그아웃').click();

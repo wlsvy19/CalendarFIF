@@ -132,9 +132,10 @@ it('계정 쪽은 웹앱 설정 화면의 문구와 로그아웃 확인을 그�
   document.body.append(root);
   const onSignOut = vi.fn();
   mountDesktopSettings(root, { appearance: DEFAULT_APPEARANCE, onAppearance: vi.fn(), bridge: null, onClose: vi.fn(), page: 'account',
-    account: { email: 'a@example.com', pending: 2, storageOk: true, corruptFound: false, onSignOut } });
+    account: { email: 'a@example.com', pending: 2, storageOk: true, corruptFound: false, onSignOut, version: '0.8.0' } });
   expect(labels(root)).toEqual([]);
   expect(root.querySelector('[role="tabpanel"]:not([hidden])')!.textContent).toContain('a@example.com');
+  expect(root.querySelector('#settings-panel-account .settings-version')!.textContent).toBe('CalendarFIF 0.8.0');
   const button = (t: string) => [...root.querySelectorAll('button')].find((b) => b.textContent === t)!;
   button('로그아웃').click();
   expect(onSignOut).not.toHaveBeenCalled();
