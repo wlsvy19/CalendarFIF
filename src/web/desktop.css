@@ -309,3 +309,8 @@
 :root.desk .srow-picker .swatches { gap: 8px; }
 :root.desk .srow-picker .swatch { width: 28px; height: 28px; }
 :root.desk .srow-hex { display: flex; align-items: center; gap: 8px; }
+
+/* 알림 시트: 편집 화면 위에 같은 가운데 상자로 뜬다 */
+:root.desk .sheet.event-sheet { top: 50%; bottom: auto; height: auto; max-height: min(640px, calc(100vh - 48px)); }
+:root.desk .scrim.event-scrim { animation: none; }
+:root.desk .ev-chip { cursor: pointer; }

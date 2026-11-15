@@ -886,3 +886,84 @@ button { touch-action: manipulation; }
 .blocked-pending { margin: 0; font-size: 15px; line-height: 1.5; }
 .login-forgot { justify-self: center; font-weight: 500; }
 .login-error.ok { color: var(--muted); }
+
+/* 편집 화면의 알림·카운트다운 띠와 시트 */
+.ev-strip { display: flex; flex-wrap: wrap; gap: 6px; }
+.ev-chip {
+  max-width: 100%;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.ev-chip.countdown { color: var(--accent); }
+.ev-chip.done { text-decoration: line-through; color: var(--muted); }
+.ev-chip:active { opacity: 0.6; }
+/* 알림 시트는 편집 화면보다 위에 뜬다. 자기 덮개를 가져서 편집 화면의 끌어 닫기와 덮개가 이 시트의 터치를 보지 못한다. */
+.scrim.event-scrim { z-index: 40; animation: scrim-in 0.2s ease-out; }
+.sheet.event-sheet {
+  z-index: 41;
+  top: auto;
+  bottom: 0;
+  height: auto;
+  max-height: calc(100vh - env(safe-area-inset-top, 0px) - 24px);
+  max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  gap: 8px;
+}
+.ev-body { display: flex; flex-direction: column; gap: 2px; }
+.ev-row { min-height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 16px; }
+.ev-row.stack { flex-direction: column; align-items: stretch; justify-content: center; gap: 8px; padding: 8px 0; }
+.ev-row[hidden] { display: none; }
+.ev-name { flex: none; }
+.ev-input {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px; /* 16px 미만이면 아이폰이 입력할 때 화면을 확대한다 */
+}
+.ev-row > .ev-input { flex: 1 1 auto; max-width: 70%; text-align: right; }
+.ev-row.stack > .ev-input { max-width: none; text-align: left; }
+.ev-input[hidden] { display: none; }
+.ev-advance { display: flex; flex-wrap: wrap; gap: 6px; }
+.ev-check {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+.ev-check[aria-checked="true"] { border-color: var(--accent); background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.ev-end .segmented { align-self: flex-start; }
+.ev-error { margin: 6px 0 0; color: var(--sun); font-size: 14px; }
+.ev-error[hidden] { display: none; }
+.ev-hint { margin: 10px 0 0; font-size: 13px; line-height: 1.45; color: var(--muted); }
+.ev-link { color: var(--accent); font-weight: 600; }
+.ev-actions { display: flex; margin-top: 8px; }
+.ev-actions .settings-btn { flex: 1; }
+@media (max-width: 879.98px) {
+  :root .sheet.event-sheet::before { display: none; }
+}
+@media (min-width: 880px) {
+  .sheet.event-sheet { top: 50%; bottom: auto; height: auto; max-height: min(640px, calc(100vh - 48px)); max-height: min(640px, calc(100dvh - 48px)); }
+}

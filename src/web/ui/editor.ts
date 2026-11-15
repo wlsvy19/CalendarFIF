@@ -1,7 +1,11 @@
 import { PALETTE } from '../../core/color';
+import { todayKey } from '../../core/dates';
+import { countdownLabel, countdownStatus, eventsByDate, newEventId, type EventRecord } from '../../core/events';
 import { normalizeText, toggleDoneInRange } from '../../core/text';
 import type { DayValue } from '../../core/types';
+import type { EventsView } from '../eventsStore';
 import { playTone } from '../tones';
+import { mountEventSheet } from './eventSheet';
 import { mountPalette } from './palette';
 import { dismiss } from './sheetMotion';
 import { attachSwipeToClose } from './sheetSwipe';
@@ -42,8 +46,8 @@ export function mountEditor(
     note?: { lunar: string; holiday: string };
     /** 완료를 누를 때 소리. */
     doneTone?: 'none' | 'short';
-    /** 알림과 카운트다운 도구. 없는 것은 단추를 숨긴다. */
-    toolbar?: { onAlarm?(): void; onCountdown?(): void };
+    /** 알림과 카운트다운. 없으면 그 도구 단추와 띠를 숨긴다. 시트의 저장과 삭제는 메모의 저장·취소와 따로 바로 끝난다. */
+    events?: { view: EventsView; save(id: string, rec: EventRecord): void; remove(id: string): void; iosHint: boolean; now?: () => Date };
     onSave(next: DayValue): void;
     onCancel(): void;
   },
@@ -114,10 +118,59 @@ export function mountEditor(
     }
   };
   paintColor();
-  alarmBtn.hidden = !props.toolbar?.onAlarm;
-  countdownBtn.hidden = !props.toolbar?.onCountdown;
-  alarmBtn.addEventListener('click', () => props.toolbar?.onAlarm?.());
-  countdownBtn.addEventListener('click', () => props.toolbar?.onCountdown?.());
+  const events = props.events;
+  alarmBtn.hidden = !events;
+  countdownBtn.hidden = !events;
+  const strip = sheet.querySelector<HTMLElement>('.ev-strip')!;
+  const nowOf = (): Date => events?.now?.() ?? new Date();
+  let eventSheet: { destroy(): void } | null = null;
+  const openEventSheet = (type: 'alarm' | 'countdown', id?: string): void => {
+    if (!events || eventSheet) return;
+    const firstLine = area.value.split(/\r?\n/).map((l) => l.replace(/^\[\+\]/, '').trim()).find((l) => l !== '') ?? '';
+    eventSheet = mountEventSheet(root, {
+      type,
+      dateKey: props.dateKey,
+      id,
+      record: id ? events.view.items()[id] : undefined,
+      defaultText: id ? '' : firstLine,
+      now: nowOf,
+      iosHint: events.iosHint,
+      onSave: (eid, rec) => events.save(eid, rec),
+      onDelete: (eid) => events.remove(eid),
+      onClose: () => {
+        eventSheet = null;
+        area.focus({ preventScroll: true });
+      },
+    });
+  };
+  // 그날의 알림과 카운트다운을 칩으로 보인다. 칩을 누르면 그 항목의 시트가 열린다.
+  const drawStrip = (): void => {
+    if (!events) return;
+    const items = events.view.items();
+    const lines = eventsByDate(items, props.dateKey, props.dateKey).get(props.dateKey) ?? [];
+    strip.replaceChildren();
+    const today = todayKey(nowOf());
+    for (const line of lines) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = `ev-chip ${line.type}${line.done ? ' done' : ''}`;
+      chip.dataset.id = line.id;
+      let label = line.type === 'alarm' ? `${line.time} ${line.text}` : line.text;
+      const rec = items[line.id];
+      if (rec?.type === 'countdown') {
+        const st = countdownStatus(rec, today);
+        if (st) label += ` ${countdownLabel(st.days)}`;
+      }
+      chip.textContent = label;
+      chip.addEventListener('click', () => openEventSheet(line.type, line.id));
+      strip.append(chip);
+    }
+    strip.hidden = lines.length === 0;
+  };
+  drawStrip();
+  const stopEvents = events?.view.onChange(drawStrip);
+  alarmBtn.addEventListener('click', () => openEventSheet('alarm'));
+  countdownBtn.addEventListener('click', () => openEventSheet('countdown'));
 
   let palette: { destroy(): void } | null = null;
   const closePalette = (focusBack: boolean): void => {
@@ -226,6 +279,9 @@ export function mountEditor(
     destroy() {
       palette?.destroy();
       palette = null;
+      stopEvents?.();
+      eventSheet?.destroy();
+      eventSheet = null;
       viewport?.removeEventListener('resize', followViewport);
       viewport?.removeEventListener('scroll', followViewport);
       document.documentElement.classList.remove('sheet-open');
