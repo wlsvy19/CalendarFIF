@@ -255,6 +255,33 @@ const message = (env: Env, title: string, lines: string[]): View =>
   env.image ? { scene: messageScene({ theme: env.pictureTheme(), size: env.size, title, lines }) } : { tree: messageTree({ title, lines }) };
 const loginHint = (env: Env): View => message(env, '로그인이 필요합니다', ['Scriptable 앱에서', '이 스크립트를 한 번 실행해', '로그인하세요.']);
 
+/** 그리기 전에 알림 예약을 기다리는 가장 긴 시간. Scriptable의 알림 기능이 멈춰도(던지지 않고) 위젯은 그린다. */
+const ALARM_SYNC_WAIT_MS = 5000;
+
+/**
+ * work를 ms까지만 기다린다. 늦으면 fallback으로 끝낸다(work는 뒤에서 이어질 수 있다). 타이머를 걸지 못하면 끝까지 기다린다.
+ * 던지지 않는 work에만 쓴다.
+ */
+async function waitAtMost<T>(host: Host, work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: { invalidate(): void } | undefined;
+  const late = new Promise<T>((resolve) => {
+    try {
+      timer = host.Timer.schedule(ms, false, () => resolve(fallback));
+    } catch {
+      // 타이머가 없으면 work를 끝까지 기다린다.
+    }
+  });
+  try {
+    return await Promise.race([work, late]);
+  } finally {
+    try {
+      timer?.invalidate();
+    } catch {
+      // 이미 끝난 타이머
+    }
+  }
+}
+
 /** 이번 달 위젯에 놓을 것을 만든다. 읽지 못하는 까닭이 있으면 그 까닭을 알리는 것을 돌려준다. */
 /** alarmsDone: 이 실행에서 알림을 이미 예약했으면 다시 하지 않는다(앱). */
 async function load(host: Host, cfg: Config, env: Env, now: Date, alarmsDone = false): Promise<View> {
@@ -280,7 +307,8 @@ async function load(host: Host, cfg: Config, env: Env, now: Date, alarmsDone = f
     const days = await readMonth(host, cfg, session, monthId);
     const month: MonthData = { monthId, days };
     writeCache(host, month, now);
-    if (!alarmsDone) await syncAlarms(host, cfg, session, now); // 던지지 않는다
+    // 던지지 않는다. 알림 기능이 멈춰 끝나지 않아도 5초 뒤에는 그린다(예약은 다음 실행에 다시 한다).
+    if (!alarmsDone) await waitAtMost(host, syncAlarms(host, cfg, session, now), ALARM_SYNC_WAIT_MS, null);
     return await drawMonth(month, false);
   } catch (e) {
     if (!isApiError(e)) throw e;

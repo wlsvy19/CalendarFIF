@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setOfficialHolidays } from '../core/holidays';
 import type { Config } from './api';
 import { drawnTexts, makeFakeHost, nativeTexts, widgetRecord, type FakeAnswer, type FakeNode, type FakeHost, type FakeOptions, type FakeRequest, type FakeWidgetRecord } from './fakeHost';
@@ -936,5 +936,39 @@ describe('아이폰 알림 예약', () => {
     await run(host, cfg, now);
     expect(nativeTexts(host)).toContain('리뷰');
     expect(host.state.setWidgets).toHaveLength(1);
+  });
+
+  it('Scriptable의 알림 기능이 멈춰 예약이 끝나지 않아도 5초 뒤에는 위젯을 그린다', async () => {
+    vi.useFakeTimers();
+    try {
+      const host = makeNative({ keychain: loggedIn }, withEvents());
+      host.Notification.allPending = () => new Promise(() => {}); // 던지지 않고 멈췄다
+      const done = run(host, cfg, now);
+      await vi.advanceTimersByTimeAsync(4900);
+      expect(host.state.requests.some((r) => r.url.includes('/data/events'))).toBe(true); // 알림 문서는 읽었다
+      expect(host.state.setWidgets).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(200);
+      await done;
+      expect(host.state.setWidgets).toHaveLength(1);
+      expect(nativeTexts(host)).toContain('리뷰');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('예약이 제때 끝나면 기다리던 타이머를 거둔다', async () => {
+    vi.useFakeTimers();
+    try {
+      const host = makeNative({ keychain: loggedIn }, withEvents());
+      const done = run(host, cfg, now);
+      await vi.advanceTimersByTimeAsync(0);
+      await done;
+      expect(host.state.scheduled.map((n) => n.identifier)).toEqual([ID]);
+      expect(host.state.setWidgets).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

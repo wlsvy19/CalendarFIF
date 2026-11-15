@@ -90,6 +90,8 @@ export type Host = {
   config: { runsInWidget: boolean; runsInApp: boolean; widgetFamily: string | null };
   args: { widgetParameter: unknown; queryParameters?: Record<string, string> };
   Notification: { new (): NotificationLike; allPending(): Promise<NotificationLike[]>; removePending(identifiers: string[]): Promise<void> };
+  /** Scriptable의 Timer. timeInterval은 밀리초다. Scriptable에는 setTimeout이 없다. */
+  Timer: { schedule(timeInterval: number, repeats: boolean, callback: () => void): { invalidate(): void } };
   Device: { screenSize(): { width: number; height: number }; isUsingDarkAppearance(): boolean };
   Color: { new (hex: string, alpha?: number): unknown; dynamic(light: unknown, dark: unknown): unknown };
   Font: { systemFont(size: number): unknown; mediumSystemFont(size: number): unknown; semiboldSystemFont(size: number): unknown; boldSystemFont(size: number): unknown };

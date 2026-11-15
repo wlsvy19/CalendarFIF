@@ -301,6 +301,13 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
       remove: (k) => { state.keychain.delete(k); },
     },
     Request, Alert, DrawContext, ListWidget, Notification,
+    // Scriptable의 Timer를 setTimeout으로 흉내 낸다(시험이 가짜 시계로 움직일 수 있다).
+    Timer: {
+      schedule: (ms, repeats, callback) => {
+        const id = repeats ? setInterval(callback, ms) : setTimeout(callback, ms);
+        return { invalidate: () => { clearTimeout(id); clearInterval(id); } };
+      },
+    },
     FileManager: { local: () => local },
     Script: { setWidget: (w) => { state.setWidgets.push(w); }, complete: () => { state.completed += 1; } },
     config: { runsInWidget: !opts.runsInApp, runsInApp: opts.runsInApp ?? false, widgetFamily: opts.widgetFamily ?? null },
