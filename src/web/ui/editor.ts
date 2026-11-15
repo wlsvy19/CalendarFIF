@@ -137,13 +137,13 @@ export function mountEditor(
   let eventSheet: { destroy(): void } | null = null;
   const openEventSheet = (type: 'alarm' | 'countdown', id?: string): void => {
     if (!events || eventSheet) return;
-    const firstLine = area.value.split(/\r?\n/).map((l) => l.replace(/^\[\+\]/, '').trim()).find((l) => l !== '') ?? '';
     eventSheet = mountEventSheet(root, {
       type,
       dateKey: props.dateKey,
       id,
       record: id ? events.view.items()[id] : undefined,
-      defaultText: id ? '' : firstLine,
+      // 메모의 첫 줄을 미리 넣지 않는다(2026-11-15: 사용자가 지우라고 했다). 글은 직접 적는다.
+      defaultText: '',
       now: nowOf,
       iosHint: events.iosHint,
       onSave: (eid, rec) => events.save(eid, rec),

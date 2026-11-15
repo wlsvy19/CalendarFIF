@@ -130,9 +130,15 @@ it('알림을 저장하면 save가 불리고 띠가 다시 그려진다', () => 
   area.value = '병원' + String.fromCharCode(10) + '둘째 줄';
   root.querySelector<HTMLElement>('button.tool.alarm')!.click();
   const text = root.querySelector<HTMLInputElement>('.event-sheet input.ev-text')!;
+  // 메모의 첫 줄을 미리 넣거나 안내 글로 보이지 않는다. 비우고 저장하면 막는다.
   expect(text.value).toBe('');
+  expect(text.placeholder).toBe('무엇을 알릴까요');
   const save = [...root.querySelectorAll<HTMLElement>('.event-sheet button')].find((b) => b.textContent === '저장')!;
-  save.click(); // 비면 메모 첫 줄
+  save.click();
+  expect(ev.save).not.toHaveBeenCalled();
+  expect(root.querySelector('.event-sheet')!.textContent).toContain('글을 적어 주세요');
+  text.value = '병원';
+  save.click();
   expect(ev.save).toHaveBeenCalledTimes(1);
   expect(ev.save.mock.calls[0][1]).toMatchObject({ type: 'alarm', date: '2026-11-13', text: '병원' });
   expect(root.querySelector('.event-sheet')).toBeNull();
@@ -424,6 +430,7 @@ it('아이폰의 지금 예약은 저장한 뒤 events.flush로 서버가 받기
   document.body.append(root);
   const handle = mountEditor(root, { dateKey: '2026-11-13', value: { text: '병원', color: '' }, events: ev, onSave: vi.fn(), onCancel: vi.fn() });
   root.querySelector<HTMLElement>('button.tool.alarm')!.click();
+  root.querySelector<HTMLInputElement>('.event-sheet input.ev-text')!.value = '병원';
   root.querySelector<HTMLElement>('.event-sheet .ev-schedule')!.click();
   expect(ev.save).toHaveBeenCalledTimes(1);
   expect(ev.save.mock.calls[0][1]).toMatchObject({ type: 'alarm', text: '병원' });

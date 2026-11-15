@@ -145,7 +145,7 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps, env?:
   const text = el('input', 'ev-input ev-text');
   text.type = 'text';
   text.maxLength = 200;
-  text.placeholder = props.defaultText || '글';
+  text.placeholder = props.defaultText || (isAlarm ? '무엇을 알릴까요' : '무엇까지 셀까요');
   text.setAttribute('enterkeyhint', 'done');
   text.value = rec?.text ?? '';
   body.append(labelled('글', text));
