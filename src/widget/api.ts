@@ -1,4 +1,5 @@
 import { normalizeColor } from '../core/color';
+import { parseEventMap, type EventMap } from '../core/events';
 import type { DayValue } from '../core/types';
 import type { Host } from './host';
 
@@ -117,4 +118,41 @@ export function parseMonthDocument(json: unknown): Record<string, DayValue> {
     out[key] = { text: f.text.stringValue, color: normalizeColor(color) };
   }
   return out;
+}
+
+/** 알림 문서(users/{uid}/data/events)의 항목들. 문서가 없으면 빈 객체. */
+export async function readEvents(host: Host, cfg: Config, session: Session): Promise<EventMap> {
+  const base = cfg.firestoreBase ?? 'https://firestore.googleapis.com';
+  const url = `${base}/v1/projects/${cfg.projectId}/databases/(default)/documents/users/${encodeURIComponent(session.uid)}/data/events`;
+  const a = await send(host, url, 'GET', { Authorization: `Bearer ${session.idToken}` });
+  if (a.status === 200) return parseEventsDocument(a.json);
+  if (a.status === 404) return {};
+  const code = errorCode(a);
+  if (a.status === 403) throw { kind: 'denied', code } satisfies ApiError;
+  throw { kind: isClientError(a.status) ? 'failed' : 'network', code } satisfies ApiError;
+}
+
+/** Firestore REST의 값 하나를 보통 값으로 푼다. 모르는 모양은 undefined. */
+function decodeValue(v: unknown): unknown {
+  if (!isObject(v)) return undefined;
+  if (typeof v.stringValue === 'string') return v.stringValue;
+  if (typeof v.booleanValue === 'boolean') return v.booleanValue;
+  if ('nullValue' in v) return null;
+  if (typeof v.integerValue === 'string' || typeof v.integerValue === 'number') return Number(v.integerValue);
+  if (typeof v.doubleValue === 'number') return v.doubleValue;
+  if (typeof v.timestampValue === 'string') return v.timestampValue;
+  if (isObject(v.arrayValue)) return (Array.isArray(v.arrayValue.values) ? v.arrayValue.values : []).map(decodeValue);
+  if (isObject(v.mapValue)) {
+    const out: Record<string, unknown> = {};
+    const fields = isObject(v.mapValue.fields) ? v.mapValue.fields : {};
+    for (const [k, f] of Object.entries(fields)) out[k] = decodeValue(f);
+    return out;
+  }
+  return undefined;
+}
+
+/** 알림 문서의 REST 값을 풀어 항목들을 만든다. 틀린 항목은 버린다. */
+export function parseEventsDocument(doc: unknown): EventMap {
+  if (!isObject(doc) || !isObject(doc.fields)) return {};
+  return parseEventMap(decodeValue(doc.fields.items));
 }

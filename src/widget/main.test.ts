@@ -49,7 +49,7 @@ describe('위젯으로 실행', () => {
   it('토큰이 있으면 갱신하고, 읽고, 보관하고, 위젯을 둔다', async () => {
     const host = make({ keychain: loggedIn });
     await run(host, cfg, now);
-    expect(host.state.requests.map((r) => r.method)).toEqual(['POST', 'GET']);
+    expect(host.state.requests.map((r) => r.method)).toEqual(['POST', 'GET', 'GET']); // 갱신, 달, 알림 문서
     expect(host.state.requests[1].url).toContain('/users/owner-test-uid/months/2026-11');
     expect(host.state.requests[1].headers.Authorization).toBe('Bearer ID2');
     expect(JSON.parse(host.state.files.get(CACHE)!)).toMatchObject({ monthId: '2026-11', days: { '13': { text: '리뷰', color: 'F9BC0B' } } });
@@ -227,7 +227,7 @@ describe('앱에서 실행', () => {
   it('토큰이 있으면 메뉴를 보이고 미리 보기는 큰 위젯', async () => {
     const host = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: 0 }], widgetFamily: 'small' });
     await run(host, cfg, now);
-    expect(host.state.alerts[0]).toMatchObject({ title: 'CalendarFIF 위젯', actions: ['미리 보기', '로그아웃'], cancel: '닫기' });
+    expect(host.state.alerts[0]).toMatchObject({ title: 'CalendarFIF 위젯 · 알림 0개 예약됨', actions: ['미리 보기', '로그아웃'], cancel: '닫기' });
     expect(host.state.widgets.at(-1)!.presented).toBe('large');
     expect(host.state.contexts[0].size).toEqual({ width: 338, height: 354 });
   });
@@ -235,13 +235,14 @@ describe('앱에서 실행', () => {
   it('버전을 알면 메뉴 제목에 버전과 만든 날짜가 있다', async () => {
     const host = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }] });
     await run(host, { ...cfg, version: '0.4.0 (2026-11-14)' }, now);
-    expect(host.state.alerts[0].title).toBe('CalendarFIF 위젯 0.4.0 (2026-11-14)');
+    expect(host.state.alerts[0].title).toBe('CalendarFIF 위젯 0.4.0 (2026-11-14) · 알림 0개 예약됨');
   });
 
   it('닫기는 아무것도 하지 않는다', async () => {
     const host = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }] });
     await run(host, cfg, now);
-    expect(host.state.requests).toEqual([]);
+    expect(host.state.requests.some((r) => r.url.includes('/months/'))).toBe(false); // 알림 예약만 하고 달은 읽지 않는다
+    expect(host.state.widgets).toEqual([]);
     expect(host.state.keychain.size).toBe(2);
   });
 
@@ -251,7 +252,7 @@ describe('앱에서 실행', () => {
     expect(host.state.keychain.size).toBe(0);
     expect(host.state.files.has(CACHE)).toBe(false);
     expect(host.state.alerts[1].message).toBe('로그아웃했습니다.');
-    expect(host.state.requests).toEqual([]);
+    expect(host.state.requests.some((r) => r.url.includes('/months/'))).toBe(false);
   });
 
   it('앱에서 그리다 예외가 나도 오류 화면을 보여 준다', async () => {
@@ -272,9 +273,9 @@ describe('앱에서 미리 보기 중에 저장된 로그인이 거절되면', (
   };
 
   it('안내 대신 바로 로그인을 묻고, 로그인하면 미리 보기를 보여 준다', async () => {
-    const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [MENU, LOGIN] }, rejectFirst(1));
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [MENU, LOGIN] }, rejectFirst(2)); // 메뉴 앞의 알림 예약이 첫 갱신을 쓴다
     await run(host, cfg, now);
-    expect(host.state.alerts.map((a) => a.title)).toEqual(['CalendarFIF 위젯', '로그인']);
+    expect(host.state.alerts.map((a) => a.title)).toEqual(['CalendarFIF 위젯 · 알림 0개 예약됨', '로그인']);
     expect(host.state.keychain.get(REFRESH)).toBe('RT1');
     expect(presented(host)).toEqual(['large']);
     expect(textsOf(shownInApp(host))).toEqual(expect.arrayContaining(['2026년 11월', '리뷰']));
@@ -282,7 +283,7 @@ describe('앱에서 미리 보기 중에 저장된 로그인이 거절되면', (
   });
 
   it('로그인을 취소하면 조용히 끝난다', async () => {
-    const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [MENU, { button: -1 }] }, rejectFirst(1));
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [MENU, { button: -1 }] }, rejectFirst(2));
     await expect(run(host, cfg, now)).resolves.toBeUndefined();
     expect(host.state.alerts).toHaveLength(2);
     expect(host.state.widgets).toEqual([]);
@@ -292,7 +293,7 @@ describe('앱에서 미리 보기 중에 저장된 로그인이 거절되면', (
   it('다시 묻는 것은 한 번뿐이다: 새 로그인도 거절되면 안내를 보여 준다', async () => {
     const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [MENU, LOGIN] }, rejectFirst(99));
     await run(host, cfg, now);
-    expect(host.state.alerts.map((a) => a.title)).toEqual(['CalendarFIF 위젯', '로그인']);
+    expect(host.state.alerts.map((a) => a.title)).toEqual(['CalendarFIF 위젯 · 알림 0개 예약됨', '로그인']);
     expect(presented(host)).toEqual(['large']);
     expect(textsOf(shownInApp(host))[0]).toBe('로그인이 필요합니다');
   });
@@ -828,5 +829,59 @@ describe('공휴일 자료', () => {
     const h = host({ keychain: {} });
     await run(h, withUrl, now);
     expect(h.state.requests).toEqual([]);
+  });
+});
+
+describe('아이폰 알림 예약', () => {
+  // 지어낸 알림 문서: 2026-11-16 09:30 알림 하나(now는 2026-11-13 09:00).
+  const eventsDoc = { fields: { items: { mapValue: { fields: { abc123: { mapValue: { fields: {
+    type: { stringValue: 'alarm' }, date: { stringValue: '2026-11-16' }, text: { stringValue: '회의' }, time: { stringValue: '09:30' },
+    advance: { arrayValue: { values: [{ integerValue: '0' }] } },
+  } } } } } } } };
+  const withEvents = (events?: (req: FakeRequest) => FakeAnswer): Backend => ({
+    read: (req) => (req.url.includes('/data/events') ? (events ? events(req) : { body: eventsDoc }) : { body: memoDoc }),
+  });
+  const ID = 'calfif:abc123@2026-11-16@0';
+
+  it('위젯 실행 뒤 알림을 예약한다', async () => {
+    const host = makeNative({ keychain: loggedIn }, withEvents());
+    await run(host, cfg, now);
+    expect(host.state.requests.map((r) => r.url.split('/documents/')[1] ?? '')).toEqual(['', 'users/owner-test-uid/months/2026-11', 'users/owner-test-uid/data/events']);
+    expect(host.state.scheduled.map((n) => n.identifier)).toEqual([ID]);
+    expect(host.state.scheduled[0]).toMatchObject({ body: '09:30 회의', openURL: 'https://example.test/#2026-11-16' });
+    expect(JSON.parse(host.state.files.get(CACHE)!)).toMatchObject({ monthId: '2026-11', events: { abc123: { text: '회의' } } });
+    expect(host.state.setWidgets).toHaveLength(1);
+  });
+
+  it('schedule=1이면 예약만 하고 끝낸다', async () => {
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, queryParameters: { schedule: '1' } }, withEvents());
+    await run(host, cfg, now);
+    expect(host.state.alerts).toEqual([]);
+    expect(host.state.widgets).toEqual([]);
+    expect(host.state.scheduled.map((n) => n.identifier)).toEqual([ID, '']);
+    expect(host.state.scheduled[1]).toMatchObject({ body: '알림 1개를 예약했습니다', at: null });
+  });
+
+  it('앱 메뉴의 제목에 예약한 수가 보인다', async () => {
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }] }, withEvents());
+    await run(host, cfg, now);
+    expect(host.state.alerts[0].title).toBe('CalendarFIF 위젯 · 알림 1개 예약됨');
+  });
+
+  it('알림 읽기가 실패해도 위젯을 그리고, 보관한 알림으로 예약한다', async () => {
+    const files = { [CACHE]: JSON.stringify({ monthId: '2026-11', days: {}, savedAt: 1, events: { abc123: { type: 'alarm', date: '2026-11-16', text: '보관', time: '09:30', advance: [0] } } }) };
+    const host = makeNative({ keychain: loggedIn, files }, withEvents(() => ({ status: 503, body: {} })));
+    await run(host, cfg, now);
+    expect(nativeTexts(host)).toContain('리뷰');
+    expect(host.state.setWidgets).toHaveLength(1);
+    expect(host.state.scheduled.map((n) => n.body)).toEqual(['09:30 보관']);
+    expect(JSON.parse(host.state.files.get(CACHE)!).events.abc123.text).toBe('보관');
+  });
+
+  it('예약이 거절돼도 위젯을 그린다', async () => {
+    const host = makeNative({ keychain: loggedIn, failNotifications: true }, withEvents());
+    await run(host, cfg, now);
+    expect(nativeTexts(host)).toContain('리뷰');
+    expect(host.state.setWidgets).toHaveLength(1);
   });
 });

@@ -1,5 +1,5 @@
 // 시험용 가짜 Scriptable. 묶음(번들)에는 들어가지 않는다.
-import type { DrawContextLike, Host, ListWidgetLike, TextFieldLike, WidgetStackLike, WidgetTextLike } from './host';
+import type { DrawContextLike, Host, NotificationLike, ListWidgetLike, TextFieldLike, WidgetStackLike, WidgetTextLike } from './host';
 
 /** 묶음 파일에 이 파일의 코드가 섞여 들어가지 않았는지 찾아볼 표지. */
 export const FAKE_HOST_MARKER = 'calfif-fake-host-marker';
@@ -22,6 +22,12 @@ export type FakeOptions = {
   runsInApp?: boolean;
   widgetFamily?: string | null;
   widgetParameter?: unknown;
+  /** 주소 매개변수(Scriptable의 args.queryParameters). */
+  queryParameters?: Record<string, string>;
+  /** 이미 예약돼 있는 알림(식별자, 본문, 울릴 때). */
+  pending?: { identifier: string; body?: string; at?: Date }[];
+  /** true면 알림 읽기와 예약이 거절된다. */
+  failNotifications?: boolean;
   screen?: { width: number; height: number };
   dark?: boolean;
   keychain?: Record<string, string>;
@@ -34,6 +40,7 @@ export type FakeOptions = {
   failTexts?: number;
 };
 
+export type FakeNotice = { identifier: string; title: string; body: string; sound: string | null; threadIdentifier: string; openURL: string; at: Date | null };
 export type FakeState = {
   keychain: Map<string, string>;
   files: Map<string, string>;
@@ -43,6 +50,11 @@ export type FakeState = {
   widgets: FakeWidgetRecord[];
   setWidgets: unknown[];
   completed: number;
+  /** 예약한 알림을 부른 차례대로(시각이 없는 것은 바로 보인 것). */
+  scheduled: FakeNotice[];
+  /** 지금 예약돼 있는 알림. */
+  pending: FakeNotice[];
+  removed: string[];
 };
 export type FakeHost = Host & { state: FakeState };
 
@@ -53,7 +65,11 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
     keychain: new Map(Object.entries(opts.keychain ?? {})),
     files: new Map(Object.entries(opts.files ?? {})),
     requests: [], alerts: [], contexts: [], widgets: [], setWidgets: [], completed: 0,
+    scheduled: [], pending: [], removed: [],
   };
+  for (const p of opts.pending ?? []) {
+    state.pending.push({ identifier: p.identifier, title: '', body: p.body ?? '', sound: null, threadIdentifier: '', openURL: '', at: p.at ?? null });
+  }
   const answers = [...(opts.alerts ?? [])];
   let failures = opts.failDrawing ?? 0;
   let widgetFailures = opts.failWidgets ?? 0;
@@ -121,6 +137,36 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
       return next.button;
     }
     textFieldValue(index: number): string { return this.answer.fields?.[index] ?? ''; }
+  }
+
+  class Notification implements NotificationLike {
+    identifier = '';
+    title = '';
+    body = '';
+    sound: string | null = null;
+    threadIdentifier = '';
+    openURL = '';
+    nextTriggerDate: Date | null = null;
+    private at: Date | null = null;
+    setTriggerDate(date: Date): void { this.at = date; this.nextTriggerDate = date; }
+    async schedule(): Promise<void> {
+      if (opts.failNotifications) throw new Error('알림 시험 오류');
+      const n: FakeNotice = { identifier: this.identifier, title: this.title, body: this.body, sound: this.sound, threadIdentifier: this.threadIdentifier, openURL: this.openURL, at: this.at };
+      state.scheduled.push(n);
+      if (this.at) {
+        state.pending = state.pending.filter((p) => p.identifier !== n.identifier);
+        state.pending.push(n);
+      }
+    }
+    static async allPending(): Promise<NotificationLike[]> {
+      if (opts.failNotifications) throw new Error('알림 시험 오류');
+      return state.pending.map((p) => Object.assign(new Notification(), { identifier: p.identifier, body: p.body, nextTriggerDate: p.at }));
+    }
+    static async removePending(ids: string[]): Promise<void> {
+      if (opts.failNotifications) throw new Error('알림 시험 오류');
+      state.removed.push(...ids);
+      state.pending = state.pending.filter((p) => !ids.includes(p.identifier));
+    }
   }
 
   class DrawContext implements DrawContextLike {
@@ -254,11 +300,11 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
       set: (k, v) => { state.keychain.set(k, v); },
       remove: (k) => { state.keychain.delete(k); },
     },
-    Request, Alert, DrawContext, ListWidget,
+    Request, Alert, DrawContext, ListWidget, Notification,
     FileManager: { local: () => local },
     Script: { setWidget: (w) => { state.setWidgets.push(w); }, complete: () => { state.completed += 1; } },
     config: { runsInWidget: !opts.runsInApp, runsInApp: opts.runsInApp ?? false, widgetFamily: opts.widgetFamily ?? null },
-    args: { widgetParameter: opts.widgetParameter ?? null },
+    args: { widgetParameter: opts.widgetParameter ?? null, queryParameters: opts.queryParameters ?? {} },
     Device: { screenSize: () => opts.screen ?? { width: 390, height: 844 }, isUsingDarkAppearance: () => opts.dark ?? false },
     Color, Size, Rect, Point, Path,
     Font: { systemFont: font('system'), mediumSystemFont: font('medium'), semiboldSystemFont: font('semibold'), boldSystemFont: font('bold') },

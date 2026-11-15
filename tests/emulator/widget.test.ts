@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { readMonth, refreshSession, signIn, type ApiError, type Config } from '../../src/widget/api';
+import { readEvents, readMonth, refreshSession, signIn, type ApiError, type Config } from '../../src/widget/api';
 import { drawnTexts, makeFakeHost, nativeTexts, type FakeHost } from '../../src/widget/fakeHost';
 import { run } from '../../src/widget/main';
 import { OWNER } from './env';
@@ -34,6 +34,12 @@ beforeAll(async () => {
       '14': { mapValue: { fields: { text: { stringValue: '장보기' }, color: { stringValue: '' }, editedAt: { integerValue: '1' }, editedBy: { stringValue: 'import' } } } },
     } } },
   };
+  const events = { items: { mapValue: { fields: { abc123: { mapValue: { fields: {
+    type: { stringValue: 'alarm' }, date: { stringValue: '2031-02-03' }, text: { stringValue: '시험 알림' }, time: { stringValue: '09:30' },
+    advance: { arrayValue: { values: [{ integerValue: '0' }] } }, done: { booleanValue: false },
+  } } } } } } };
+  const putEvents = await fetch(`${cfg.firestoreBase}/v1/projects/demo-calfif/databases/(default)/documents/users/${OWNER}/data/events`, { method: 'PATCH', headers: owner, body: JSON.stringify({ fields: events }) });
+  if (!putEvents.ok) throw new Error(`알림을 쓰지 못했다: ${putEvents.status}`);
   const put = await fetch(`${cfg.firestoreBase}/v1/projects/demo-calfif/databases/(default)/documents/users/${OWNER}/months/${monthId}`, { method: 'PATCH', headers: owner, body: JSON.stringify({ fields }) });
   if (!put.ok) throw new Error(`메모를 쓰지 못했다: ${put.status}`);
 });
@@ -66,6 +72,12 @@ describe('위젯의 REST 호출 (에뮬레이터)', () => {
   it('문서가 없는 달은 빈 객체', async () => {
     const s = await signIn(host, cfg, account.email, account.password);
     expect(await readMonth(host, cfg, s, emptyMonthId)).toEqual({});
+  });
+
+  it('알림 문서를 읽는다', async () => {
+    const s = await signIn(host, cfg, account.email, account.password);
+    const items = await readEvents(host, cfg, s);
+    expect(items.abc123).toMatchObject({ type: 'alarm', date: '2031-02-03', text: '시험 알림', time: '09:30', advance: [0] });
   });
 
   it('틀린 비밀번호는 credentials', async () => {

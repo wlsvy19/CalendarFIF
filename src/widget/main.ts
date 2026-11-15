@@ -1,7 +1,9 @@
 import { isColor } from '../core/color';
 import { parseOfficialHolidays, setOfficialHolidays, type OfficialYear } from '../core/holidays';
 import type { DayValue } from '../core/types';
-import { isApiError, readMonth, refreshSession, signIn, type Config } from './api';
+import { parseEventMap, type EventMap } from '../core/events';
+import { scheduleAlarms } from './alarms';
+import { isApiError, readEvents, readMonth, refreshSession, signIn, type Config, type Session } from './api';
 import type { Host, ListWidgetLike } from './host';
 import { makeWidget } from './render';
 import { renderTree } from './renderTree';
@@ -68,11 +70,59 @@ const cachePath = (host: Host): string => {
   return fm.joinPath(fm.documentsDirectory(), CACHE_FILE);
 };
 
-function writeCache(host: Host, data: MonthData, now: Date): void {
+/** 보관 파일에 칸을 덮어쓴다. 다른 칸(달과 알림)은 그대로 둔다. 보관하지 못해도 위젯은 그린다. */
+function updateCache(host: Host, patch: Record<string, unknown>): void {
   try {
-    host.FileManager.local().writeString(cachePath(host), JSON.stringify({ monthId: data.monthId, days: data.days, savedAt: now.getTime() }));
+    const fm = host.FileManager.local();
+    const path = cachePath(host);
+    let current: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = fm.fileExists(path) ? JSON.parse(fm.readString(path)) : null;
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) current = parsed as Record<string, unknown>;
+    } catch {
+      // 깨진 보관본은 새로 쓴다.
+    }
+    fm.writeString(path, JSON.stringify({ ...current, ...patch }));
   } catch {
     // 보관하지 못해도 위젯은 그린다.
+  }
+}
+
+function writeCache(host: Host, data: MonthData, now: Date): void {
+  updateCache(host, { monthId: data.monthId, days: data.days, savedAt: now.getTime() });
+}
+
+/** 마지막으로 읽어 보관해 둔 알림 항목들. 없거나 깨졌으면 빈 것. */
+function readCachedEvents(host: Host): EventMap {
+  try {
+    const fm = host.FileManager.local();
+    const path = cachePath(host);
+    if (!fm.fileExists(path)) return {};
+    const parsed = JSON.parse(fm.readString(path)) as { events?: unknown } | null;
+    return parseEventMap(parsed?.events);
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 알림 문서를 읽어(못 읽으면 보관해 둔 것으로) 아이폰 알림을 예약한다. 돌려주는 값은 예약된 수, 알 수 없으면 null.
+ * 어떤 문제가 나도 던지지 않는다. 알림 글은 예약한 알림과 이 보관 파일에만 남긴다.
+ */
+async function syncAlarms(host: Host, cfg: Config, session: Session | null, now: Date): Promise<number | null> {
+  try {
+    let items: EventMap | null = null;
+    if (session) {
+      try {
+        items = await readEvents(host, cfg, session);
+        updateCache(host, { events: items });
+      } catch {
+        items = null;
+      }
+    }
+    return await scheduleAlarms(host, items ?? readCachedEvents(host), now, cfg.appUrl);
+  } catch {
+    return null;
   }
 }
 
@@ -205,6 +255,7 @@ async function load(host: Host, cfg: Config, env: Env, now: Date): Promise<View>
     const days = await readMonth(host, cfg, session, monthId);
     const month: MonthData = { monthId, days };
     writeCache(host, month, now);
+    await syncAlarms(host, cfg, session, now); // 던지지 않는다
     return await drawMonth(month, false);
   } catch (e) {
     if (!isApiError(e)) throw e;
@@ -273,6 +324,18 @@ async function notify(host: Host, title: string, text: string): Promise<void> {
   await alert.presentAlert();
 }
 
+/** 앱에서 열었을 때: 저장된 로그인으로 알림을 읽어 예약한다(안 되면 보관본으로). 로그인이 안 된 것은 여기서 다루지 않는다. 던지지 않는다. */
+async function scheduleFromSaved(host: Host, cfg: Config, now: Date): Promise<number | null> {
+  let session: Session | null = null;
+  try {
+    session = await refreshSession(host, cfg, host.Keychain.get(REFRESH_KEY));
+    storeLogin(host, session.refreshToken, session.uid);
+  } catch {
+    session = null; // 거절과 연결 문제는 미리 보기가 다룬다
+  }
+  return syncAlarms(host, cfg, session, now);
+}
+
 async function runInApp(host: Host, cfg: Config, now: () => Date): Promise<void> {
   let askedAgain = false;
   const show = async (): Promise<void> => {
@@ -291,8 +354,22 @@ async function runInApp(host: Host, cfg: Config, now: () => Date): Promise<void>
     if (await askLogin(host, cfg)) await show();
     return;
   }
+  const scheduled = await scheduleFromSaved(host, cfg, now());
+  if (host.args.queryParameters?.schedule === '1') {
+    // 알림 예약만 하고 끝낸다(단축어나 자동화가 이 주소로 연다).
+    try {
+      const done = new host.Notification();
+      done.title = 'CalendarFIF';
+      done.body = `알림 ${scheduled ?? 0}개를 예약했습니다`;
+      await done.schedule();
+    } catch {
+      // 알림을 못 보여도 예약은 끝났다.
+    }
+    return;
+  }
   const menu = new host.Alert();
-  menu.title = cfg.version ? `CalendarFIF 위젯 ${cfg.version}` : 'CalendarFIF 위젯';
+  const base = cfg.version ? `CalendarFIF 위젯 ${cfg.version}` : 'CalendarFIF 위젯';
+  menu.title = scheduled === null ? base : `${base} · 알림 ${scheduled}개 예약됨`;
   menu.addAction('미리 보기');
   menu.addAction('로그아웃');
   menu.addCancelAction('닫기');

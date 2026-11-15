@@ -58,6 +58,14 @@ export type ListWidgetLike = WidgetContainerLike & {
 /** Scriptable의 TextField 중 위젯이 쓰는 부분. 오래된 Scriptable은 addTextField가 아무것도 돌려주지 않을 수 있다. */
 export type TextFieldLike = { setEmailAddressKeyboard?(): void };
 
+/** Scriptable의 Notification 중 위젯이 쓰는 부분. nextTriggerDate는 예약돼 있는 것에서 읽는다. */
+export type NotificationLike = {
+  identifier: string; title: string; body: string; sound: string | null; threadIdentifier: string; openURL: string;
+  nextTriggerDate?: Date | null;
+  setTriggerDate(date: Date): void;
+  schedule(): Promise<void>;
+};
+
 /** Scriptable이 주는 것 중 위젯이 쓰는 부분. 실제 실행에서는 전역을 모아 넘기고, 시험에서는 가짜를 넘긴다. */
 export type Host = {
   Keychain: { contains(key: string): boolean; get(key: string): string; set(key: string, value: string): void; remove(key: string): void };
@@ -80,7 +88,8 @@ export type Host = {
   FileManager: { local(): { documentsDirectory(): string; joinPath(a: string, b: string): string; fileExists(path: string): boolean; readString(path: string): string; writeString(path: string, text: string): void; remove(path: string): void } };
   Script: { setWidget(widget: unknown): void; complete(): void };
   config: { runsInWidget: boolean; runsInApp: boolean; widgetFamily: string | null };
-  args: { widgetParameter: unknown };
+  args: { widgetParameter: unknown; queryParameters?: Record<string, string> };
+  Notification: { new (): NotificationLike; allPending(): Promise<NotificationLike[]>; removePending(identifiers: string[]): Promise<void> };
   Device: { screenSize(): { width: number; height: number }; isUsingDarkAppearance(): boolean };
   Color: { new (hex: string, alpha?: number): unknown; dynamic(light: unknown, dark: unknown): unknown };
   Font: { systemFont(size: number): unknown; mediumSystemFont(size: number): unknown; semiboldSystemFont(size: number): unknown; boldSystemFont(size: number): unknown };
