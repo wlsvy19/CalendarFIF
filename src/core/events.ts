@@ -92,6 +92,7 @@ function parseRepeat(raw: unknown): RepeatRule {
   const r = isObj(raw) ? raw : {};
   const freq = FREQS.includes(r.freq as RepeatFreq) ? (r.freq as RepeatFreq) : 'none';
   const out: RepeatRule = { freq };
+  if (freq === 'none') return out;
   if (isRealDate(r.until)) out.until = r.until;
   if (typeof r.count === 'number' && Number.isInteger(r.count) && r.count >= 1 && r.count <= 99999) out.count = r.count;
   return out;
@@ -239,11 +240,25 @@ export function allAlarmTriggers(items: EventMap, from: Date, to: Date): AlarmTr
 
 // ---- 카운트다운 ----
 
+/** today 이상인 첫 걸리는 날. 규칙이 끝났거나 찾는 한도(매년 9년, 그 밖 400일) 안에 없으면 undefined. */
+function firstOccurrence(rec: EventRecord, today: string): string | undefined {
+  const { freq, until, count } = rec.repeat;
+  const yearly = freq === 'yearly' || freq === 'lunarYearly';
+  const [y, m, d] = parts(today);
+  let cap = yearly ? keyOf(Math.min(9999, y + 9), m, Math.min(d, daysInMonth(Math.min(9999, y + 9), m))) : addDays(today, 400);
+  if (until && until < cap) cap = until;
+  const lo = today > rec.date ? today : rec.date;
+  if (lo > cap) return undefined;
+  if (count !== undefined) return occurrences(rec, lo, cap)[0];
+  for (const day of candidates(rec, lo, cap)) return day;
+  return undefined;
+}
+
 export type CountdownStatus = { date: string; days: number; age: number | null };
 
 export function countdownStatus(rec: CountdownRecord, today: string): CountdownStatus | null {
   if (rec.repeat.freq === 'none') return { date: rec.date, days: dayNumber(rec.date) - dayNumber(today), age: null };
-  const date = occurrences(rec, today, addDays(today, 800))[0];
+  const date = firstOccurrence(rec, today);
   if (!date) return null;
   let age: number | null = null;
   if (rec.kind === 'birthday') {

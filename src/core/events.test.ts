@@ -206,3 +206,24 @@ it('범위가 몇십 년이어도 빨리 끝난다', () => {
   expect(ly).toHaveLength(1);
   expect(wk.length).toBeGreaterThan(15);
 });
+
+it('매년 2월 29일 카운트다운은 다음 윤년의 날을 찾는다', () => {
+  const rec = countdown({ date: '2024-02-29', kind: 'birthday', repeat: { freq: 'yearly' } });
+  const st = countdownStatus(rec, '2025-03-01')!;
+  expect(st.date).toBe('2028-02-29');
+  expect(st.days).toBeGreaterThan(1000);
+  expect(st.age).toBe(4);
+  expect(countdownStatus(countdown({ date: '2024-02-29', repeat: { freq: 'yearly', until: '2026-12-31' } }), '2025-03-01')).toBeNull();
+  expect(countdownStatus(countdown({ date: '2024-02-29', repeat: { freq: 'yearly', count: 1 } }), '2025-03-01')).toBeNull();
+});
+
+it('매달 29일·30일은 그날이 없는 달을 건너뛴다', () => {
+  const rec = alarm({ date: '2027-01-30', repeat: { freq: 'monthly' } });
+  expect(occurrences(rec, '2027-01-01', '2027-04-30')).toEqual(['2027-01-30', '2027-03-30', '2027-04-30']);
+});
+
+it('반복 없음이면 until과 count를 버린다', () => {
+  const r = parseEventRecord({ type: 'alarm', date: '2026-11-20', text: 'a', time: '09:00', repeat: { freq: 'none', until: '2026-11-01', count: 3 } }) as AlarmRecord;
+  expect(r.repeat).toEqual({ freq: 'none' });
+  expect(occurrences(r, '2026-11-01', '2026-12-01')).toEqual(['2026-11-20']);
+});
