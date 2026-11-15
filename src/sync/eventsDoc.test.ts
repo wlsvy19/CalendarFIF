@@ -23,6 +23,12 @@ describe('eventsDoc', () => {
   it('바꿀 것이 없으면 null', () => {
     expect(buildEventsWrite({}, sentinels)).toBeNull();
   });
+  it('undefined 칸은 뺀다(repeat 안쪽도)', () => {
+    const rec = { ...alarm('가'), repeat: { freq: 'daily', until: undefined } } as unknown as AlarmRecord;
+    const w = buildEventsWrite({ a1: rec }, sentinels);
+    expect(w!.data.items.a1).toEqual({ ...alarm('가'), repeat: { freq: 'daily' } });
+    expect('until' in (w!.data.items.a1 as AlarmRecord).repeat).toBe(false);
+  });
   it('parseEventsDoc은 형식이 틀린 항목을 버린다', () => {
     const out = parseEventsDoc({ items: { good: alarm('좋음'), bad: { type: 'alarm' }, 'no good': alarm('x') }, updatedAt: 5 });
     expect(Object.keys(out)).toEqual(['good']);

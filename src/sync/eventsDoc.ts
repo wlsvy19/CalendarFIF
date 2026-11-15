@@ -23,9 +23,20 @@ export function buildEventsWrite(
   const fields: string[][] = [];
   for (const id of ids) {
     const c = changes[id];
-    items[id] = c === 'delete' ? sentinels.deleteField() : c;
+    items[id] = c === 'delete' ? sentinels.deleteField() : stripUndefined(c);
     fields.push(['items', id]);
   }
   fields.push(['updatedAt']);
   return { data: { items, updatedAt: sentinels.serverTimestamp() }, fields };
+}
+
+/** undefined 칸을 뺀다(Firestore가 거절한다). 안쪽 객체와 배열도 같다. */
+function stripUndefined(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(stripUndefined);
+  if (typeof v === 'object' && v !== null) {
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v)) if (x !== undefined) out[k] = stripUndefined(x);
+    return out;
+  }
+  return v;
 }
