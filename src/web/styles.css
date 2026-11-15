@@ -209,6 +209,8 @@ body {
 .textbtn.end { justify-self: end; font-weight: 700; }
 .field { flex: none; display: grid; gap: 8px; min-height: 0; }
 .field.grow { flex: 1; grid-template-rows: auto minmax(0, 1fr); }
+/* 편집 화면의 메모 칸은 머리 줄이 없으니 칸 하나가 남는 높이를 모두 채운다 */
+.field.grow:has(> .memo-input:only-child) { grid-template-rows: minmax(0, 1fr); }
 .field-head { display: flex; align-items: center; justify-content: space-between; }
 .field-label { font-size: 12px; font-weight: 600; color: var(--muted); }
 .donebtn {

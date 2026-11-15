@@ -48,3 +48,14 @@ it('바깥을 누르거나 Esc면 닫기만', () => {
   expect(b.onClose).toHaveBeenCalledTimes(1);
   expect(b.onPick).not.toHaveBeenCalled();
 });
+it('Space는 뗄 때 고르고, 그 뒤 click이 와도 다시 고르지 않는다', () => {
+  const { p, swatch, onPick, onClose } = open('');
+  swatch('009300').dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+  expect(onPick).not.toHaveBeenCalled();
+  swatch('009300').dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }));
+  expect(onPick).toHaveBeenCalledWith('009300');
+  p.destroy();
+  swatch('009300').click();
+  expect(onPick).toHaveBeenCalledTimes(1);
+  expect(onClose).toHaveBeenCalledTimes(1);
+});

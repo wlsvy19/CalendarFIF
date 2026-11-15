@@ -4,7 +4,7 @@
  */
 export function mountPalette(
   anchor: HTMLElement,
-  opts: { colors: string[]; current: string; onPick(color: string): void; onClose(): void },
+  opts: { colors: string[]; current: string; onPick(color: string): void; onClose(by?: 'outside'): void },
 ): { el: HTMLElement; destroy(): void } {
   const el = document.createElement('div');
   el.className = 'palette';
@@ -36,12 +36,26 @@ export function mountPalette(
     const b = (e.target as Element).closest<HTMLElement>('.swatch');
     if (b) pick(b.dataset.color ?? '');
   });
+  let spaceOn: HTMLElement | null = null;
+  el.addEventListener('keyup', (e) => {
+    if (e.key !== ' ') return;
+    e.preventDefault(); // 뒤따르는 click을 막는다
+    const b = spaceOn;
+    spaceOn = null;
+    if (b && e.target === b) pick(b.dataset.color ?? '');
+  });
   el.addEventListener('keydown', (e) => {
     const b = (e.target as Element).closest<HTMLElement>('.swatch');
     if (!b) return;
-    if (e.key === 'Enter' || e.key === ' ') {
+    if (e.key === 'Enter') {
       e.preventDefault();
       pick(b.dataset.color ?? '');
+      return;
+    }
+    // Space는 뗄 때 고른다. 누를 때 고르면 초점이 옮겨간 뒤 브라우저가 만드는 click(Safari)이 상자를 다시 열 수 있다.
+    if (e.key === ' ') {
+      e.preventDefault();
+      spaceOn = b;
       return;
     }
     const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
@@ -56,7 +70,7 @@ export function mountPalette(
   const onOutside = (e: Event): void => {
     const t = e.target as Node | null;
     if (t && (el.contains(t) || anchor.contains(t))) return;
-    opts.onClose();
+    opts.onClose('outside');
   };
   // Esc는 상자만 닫는다. 시트까지 가면 편집 화면이 닫히므로 여기서 멈춘다.
   const onKey = (e: KeyboardEvent): void => {

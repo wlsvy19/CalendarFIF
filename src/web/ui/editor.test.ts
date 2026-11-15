@@ -246,3 +246,22 @@ it('제목 아래에 그날의 음력과 공휴일 이름을 적는다. 둘 다 
   expect(noteOf({ lunar: '', holiday: '' })).toEqual([true, []]);
   expect(noteOf()).toEqual([true, []]);
 });
+it('Space로 색을 골라도 상자가 다시 열리지 않는다', () => {
+  const { root, area } = mount({ text: 'a', color: '' });
+  const colorBtn = root.querySelector<HTMLElement>('button.tool.color')!;
+  colorBtn.click();
+  const sw = root.querySelector<HTMLElement>('[role="radio"][data-color="009300"]')!;
+  sw.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+  sw.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }));
+  expect(area.dataset.color).toBe('009300');
+  colorBtn.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }));
+  expect(root.querySelectorAll('[role="radio"]')).toHaveLength(0);
+});
+it('바깥을 눌러 색 상자를 닫을 때는 초점을 배경 단추로 옮기지 않는다', () => {
+  const { root, area } = mount({ text: 'a', color: '' });
+  root.querySelector<HTMLElement>('button.tool.color')!.click();
+  area.focus();
+  document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+  expect(root.querySelectorAll('[role="radio"]')).toHaveLength(0);
+  expect(document.activeElement).toBe(area);
+});

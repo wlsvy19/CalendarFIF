@@ -144,7 +144,7 @@ export function mountEditor(
         color = c;
         paintColor();
       },
-      onClose: () => closePalette(true),
+      onClose: (by) => closePalette(by !== 'outside'),
     });
   });
 
