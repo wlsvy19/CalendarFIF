@@ -2,7 +2,7 @@ import { isColor } from '../core/color';
 import { parseOfficialHolidays, setOfficialHolidays, type OfficialYear } from '../core/holidays';
 import type { DayValue } from '../core/types';
 import { parseEventMap, type EventMap } from '../core/events';
-import { clearAlarms, scheduleAlarms } from './alarms';
+import { clearAlarms, pendingStatus, scheduleAlarms, scheduleTest, type AlarmStatus, type TestResult } from './alarms';
 import { isApiError, readEvents, readMonth, refreshSession, signIn, type Config, type Session } from './api';
 import type { Host, ListWidgetLike } from './host';
 import { makeWidget } from './render';
@@ -106,10 +106,17 @@ function readCachedEvents(host: Host): EventMap {
 }
 
 /**
- * 알림 문서를 읽어(못 읽으면 보관해 둔 것으로) 아이폰 알림을 예약한다. 돌려주는 값은 예약된 수, 알 수 없으면 null.
+ * 알림 예약의 결과. scheduled: 예약된 수(알 수 없으면 null).
+ * source: 서버의 알림 문서로 했다 / 서버를 읽지 못해 보관본으로 했다 / 읽을 권한이 없어 지웠다 / 알림 기능이 제때 끝나지 않았다.
+ */
+export type SyncResult = { scheduled: number | null; source: 'server' | 'cache' | 'denied' | 'stuck' };
+const SYNC_UNKNOWN: SyncResult = { scheduled: null, source: 'cache' };
+
+/**
+ * 알림 문서를 읽어(못 읽으면 보관해 둔 것으로) 아이폰 알림을 예약한다. notifyCapMs를 주면 아이폰 알림 기능(예약)만 그만큼 기다린다(네트워크는 제 시간 제한을 따른다).
  * 어떤 문제가 나도 던지지 않는다. 알림 글은 예약한 알림과 이 보관 파일에만 남긴다.
  */
-async function syncAlarms(host: Host, cfg: Config, session: Session | null, now: Date): Promise<number | null> {
+async function syncAlarms(host: Host, cfg: Config, session: Session | null, now: Date, notifyCapMs?: number): Promise<SyncResult> {
   try {
     let items: EventMap | null = null;
     if (session) {
@@ -121,13 +128,16 @@ async function syncAlarms(host: Host, cfg: Config, session: Session | null, now:
         if (isApiError(e) && e.kind === 'denied') {
           // 읽을 권한이 없다: 보관해 둔 알림도 예약해 둔 알림도 남기지 않는다.
           await dropAlarmData(host);
-          return 0;
+          return { scheduled: 0, source: 'denied' };
         }
       }
     }
-    return await scheduleAlarms(host, items ?? readCachedEvents(host), now, cfg.appUrl);
+    const source = items !== null ? 'server' : 'cache';
+    const work = scheduleAlarms(host, items ?? readCachedEvents(host), now, cfg.appUrl).then((scheduled) => ({ scheduled }));
+    const done = notifyCapMs === undefined ? await work : await waitAtMost(host, work, notifyCapMs, null);
+    return done === null ? { scheduled: null, source: 'stuck' } : { scheduled: done.scheduled, source };
   } catch {
-    return null;
+    return SYNC_UNKNOWN;
   }
 }
 
@@ -308,7 +318,7 @@ async function load(host: Host, cfg: Config, env: Env, now: Date, alarmsDone = f
     const month: MonthData = { monthId, days };
     writeCache(host, month, now);
     // 던지지 않는다. 알림 기능이 멈춰 끝나지 않아도 5초 뒤에는 그린다(예약은 다음 실행에 다시 한다).
-    if (!alarmsDone) await waitAtMost(host, syncAlarms(host, cfg, session, now), ALARM_SYNC_WAIT_MS, null);
+    if (!alarmsDone) await waitAtMost(host, syncAlarms(host, cfg, session, now), ALARM_SYNC_WAIT_MS, SYNC_UNKNOWN);
     return await drawMonth(month, false);
   } catch (e) {
     if (!isApiError(e)) throw e;
@@ -378,7 +388,7 @@ async function notify(host: Host, title: string, text: string): Promise<void> {
 }
 
 /** 앱에서 열었을 때: 저장된 로그인으로 알림을 읽어 예약한다(안 되면 보관본으로). 로그인이 안 된 것은 여기서 다루지 않는다. 던지지 않는다. */
-async function scheduleFromSaved(host: Host, cfg: Config, now: Date): Promise<number | null> {
+async function scheduleFromSaved(host: Host, cfg: Config, now: Date): Promise<SyncResult> {
   let session: Session | null = null;
   try {
     session = await refreshSession(host, cfg, host.Keychain.get(REFRESH_KEY));
@@ -386,22 +396,53 @@ async function scheduleFromSaved(host: Host, cfg: Config, now: Date): Promise<nu
   } catch {
     session = null; // 거절과 연결 문제는 미리 보기가 다룬다
   }
-  return syncAlarms(host, cfg, session, now);
+  return syncAlarms(host, cfg, session, now, APP_ALARM_WAIT_MS);
 }
+
+/** 앱에서 아이폰 알림 기능(예약, 다시 읽기)을 기다리는 가장 긴 시간. 그 기능이 멈춰도 메뉴는 뜬다. 네트워크는 여기에 들지 않는다. */
+const APP_ALARM_WAIT_MS = 15_000;
+const PERMISSION_HINT = "아이폰 설정 → 앱 → Scriptable → 알림에서 '알림 허용'과 '잠금 화면'을 켜 주세요.";
+const LOCK_HINT = "잠금 화면에 뜨지 않으면 설정 → 앱 → Scriptable → 알림의 '잠금 화면', 집중 모드, 알림 요약을 확인하세요.";
+const dateText = (d: Date): string => `${d.getMonth() + 1}월 ${d.getDate()}일`;
+
+/** 예약한 뒤 아이폰에 남은 수. 예약하지 못했으면 null, 다시 읽지 못했으면 예약한 수. */
+const verifiedCount = (scheduled: number | null, status: AlarmStatus | null): number | null =>
+  scheduled === null ? null : status ? status.count : scheduled;
+
+/** 예약 결과를 사람이 읽을 글로. result는 예약한 결과, status는 그 뒤에 아이폰에서 다시 읽은 것(못 읽었으면 null). */
+export function alarmReport(result: SyncResult, status: AlarmStatus | null): string {
+  const { scheduled, source } = result;
+  if (source === 'stuck') return '아이폰 알림 예약이 제때 끝나지 않았습니다. 잠시 뒤 다시 실행해 주세요.';
+  if (source === 'denied') return '이 계정은 알림을 읽을 권한이 없어 예약한 알림을 지웠습니다. 관리자에게 문의하세요.';
+  if (scheduled === null) return `알림을 예약하지 못했습니다. ${PERMISSION_HINT}`;
+  const lines: string[] = [];
+  const count = status ? status.count : scheduled;
+  if (status && status.count === 0 && scheduled > 0) {
+    // 예약은 오류 없이 끝났는데 남지 않았다: 아이폰이 Scriptable의 알림을 받지 않는다.
+    lines.push(`알림을 예약했지만 아이폰에 남지 않았습니다. ${PERMISSION_HINT}`);
+  } else if (count === 0) {
+    lines.push('앞으로 7일 안에 울릴 알림이 없습니다.');
+  } else {
+    lines.push(status ? `예약된 알림 ${count}개` : `알림 ${count}개를 예약했습니다.`);
+    if (status && status.count < scheduled) lines.push(`예약한 ${scheduled}개 중 ${status.count}개만 아이폰에 남았습니다.`);
+    if (status?.next) lines.push(`다음: ${dateText(status.next.at)} · ${status.next.body}`);
+  }
+  if (source === 'cache') lines.push('서버에서 알림을 읽지 못해 마지막으로 받아 둔 것으로 예약했습니다. 방금 만든 알림은 빠졌을 수 있습니다.');
+  return lines.join('\n');
+}
+
+/** 시험 알림의 결과 글. stuck: 아이폰 알림 기능이 제때 끝나지 않았다. */
+const TEST_REPORT: Record<TestResult | 'stuck', string> = {
+  ok: `1분 뒤에 시험 알림이 옵니다. 지금 화면을 잠그고 기다려 보세요.\n${LOCK_HINT}`,
+  missing: `시험 알림을 예약하지 못했습니다. ${PERMISSION_HINT}`,
+  unknown: `시험 알림을 예약했지만 남았는지 확인하지 못했습니다. 화면을 잠그고 1분 기다려 보세요.\n${LOCK_HINT}`,
+  stuck: '시험 알림 예약이 제때 끝나지 않았습니다. 잠시 뒤 다시 해 보세요.',
+};
 
 async function runInApp(host: Host, cfg: Config, now: () => Date): Promise<void> {
   let askedAgain = false;
   let alarmsDone = false; // 메뉴 앞에서 예약했으면 미리 보기에서 다시 하지 않는다
-  const notice = async (body: string): Promise<void> => {
-    try {
-      const n = new host.Notification();
-      n.title = 'CalendarFIF';
-      n.body = body;
-      await n.schedule();
-    } catch {
-      // 알림을 못 보여도 할 수 있는 일이 없다.
-    }
-  };
+  // 앱이 열려 있을 때 바로 보이는 알림은 iOS가 띄우지 않을 수 있어 결과는 상자로 보인다.
   const scheduleOnly = host.args.queryParameters?.schedule === '1';
   const show = async (): Promise<void> => {
     const at = now();
@@ -419,28 +460,36 @@ async function runInApp(host: Host, cfg: Config, now: () => Date): Promise<void>
   };
   if (!host.Keychain.contains(REFRESH_KEY)) {
     if (scheduleOnly) {
-      await notice('CalendarFIF 위젯에 먼저 로그인하세요'); // 단축어 등에서는 로그인 창을 띄우지 않는다
+      // 예약만 하러 왔다(웹앱의 'Scriptable 열기'): 로그인 창 대신 안내만 한다.
+      await notify(host, 'CalendarFIF 알림 예약', 'CalendarFIF 위젯에 먼저 로그인하세요. Scriptable에서 CalendarFIF를 실행하면 로그인 창이 나옵니다.');
       return;
     }
     if (await askLogin(host, cfg)) await show();
     return;
   }
-  const scheduled = await scheduleFromSaved(host, cfg, now());
+  const result = await scheduleFromSaved(host, cfg, now());
+  const status = result.scheduled === null ? null : await waitAtMost(host, pendingStatus(host), APP_ALARM_WAIT_MS, null);
   alarmsDone = true;
   if (scheduleOnly) {
-    // 알림 예약만 하고 끝낸다(단축어나 자동화가 이 주소로 연다).
-    await notice(scheduled === null ? '알림을 예약하지 못했습니다' : `알림 ${scheduled}개를 예약했습니다`);
+    // 알림 예약만 하고 끝낸다(웹앱의 'Scriptable 열기'가 이 주소로 연다).
+    await notify(host, 'CalendarFIF 알림 예약', alarmReport(result, status));
     return;
   }
   const menu = new host.Alert();
   const base = cfg.version ? `CalendarFIF 위젯 ${cfg.version}` : 'CalendarFIF 위젯';
-  menu.title = scheduled === null ? base : `${base} · 알림 ${scheduled}개 예약됨`;
+  const count = verifiedCount(result.scheduled, status);
+  menu.title = count === null ? base : `${base} · 알림 ${count}개 예약됨`;
+  menu.message = alarmReport(result, status);
   menu.addAction('미리 보기');
+  menu.addAction('시험 알림 (1분 뒤)');
   menu.addAction('로그아웃');
   menu.addCancelAction('닫기');
   const choice = await menu.presentAlert();
   if (choice === 0) await show();
   else if (choice === 1) {
+    const test = await waitAtMost<TestResult | 'stuck'>(host, scheduleTest(host, now()), APP_ALARM_WAIT_MS, 'stuck');
+    await notify(host, 'CalendarFIF 시험 알림', TEST_REPORT[test]);
+  } else if (choice === 2) {
     await clearAll(host);
     await notify(host, 'CalendarFIF 위젯', '로그아웃했습니다.');
   }

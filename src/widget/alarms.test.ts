@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AlarmRecord, EventMap } from '../core/events';
-import { NOTIFY_PREFIX, clearAlarms, planNotices, reconcile, scheduleAlarms } from './alarms';
+import { NOTIFY_PREFIX, TEST_ID, clearAlarms, pendingStatus, planNotices, reconcile, scheduleAlarms, scheduleTest } from './alarms';
 import { makeFakeHost } from './fakeHost';
 
 const URL = 'https://example.test';
@@ -72,5 +72,37 @@ describe('clearAlarms', () => {
     await clearAlarms(host);
     expect(host.state.pending.map((n) => n.identifier)).toEqual(['other:keep']);
     await expect(clearAlarms(makeFakeHost({ failNotifications: true }))).resolves.toBeUndefined();
+  });
+});
+
+describe('pendingStatus', () => {
+  it('우리 예약의 수와 가장 먼저 울릴 것을 돌려주고, 다른 것과 시험 알림은 세지 않는다', async () => {
+    const host = makeFakeHost({ pending: [
+      { identifier: `${NOTIFY_PREFIX}b@2026-11-17@0`, body: '09:30 나중', at: new Date(2026, 10, 17, 9, 30) },
+      { identifier: `${NOTIFY_PREFIX}a@2026-11-16@0`, body: '08:00 먼저', at: new Date(2026, 10, 16, 8, 0) },
+      { identifier: 'other:keep', body: '남의 것', at: new Date(2026, 10, 15, 10, 0) },
+      { identifier: TEST_ID, body: '시험', at: new Date(2026, 10, 15, 9, 1) },
+    ] });
+    await expect(pendingStatus(host)).resolves.toEqual({ count: 2, next: { at: new Date(2026, 10, 16, 8, 0), body: '08:00 먼저' } });
+  });
+
+  it('없으면 0개, 읽지 못하면 null', async () => {
+    await expect(pendingStatus(makeFakeHost())).resolves.toEqual({ count: 0, next: null });
+    await expect(pendingStatus(makeFakeHost({ failNotifications: true }))).resolves.toBeNull();
+  });
+});
+
+describe('scheduleTest', () => {
+  it('1분 뒤의 시험 알림을 예약하고 남았는지 본다', async () => {
+    const host = makeFakeHost();
+    await expect(scheduleTest(host, now)).resolves.toBe('ok');
+    expect(host.state.pending.map((n) => [n.identifier, n.at])).toEqual([[TEST_ID, new Date(now.getTime() + 60_000)]]);
+    await expect(scheduleTest(makeFakeHost({ silentNotifications: true }), now)).resolves.toBe('missing');
+    await expect(scheduleTest(makeFakeHost({ failNotifications: true }), now)).resolves.toBe('missing');
+    // 예약은 됐는데 다시 읽지 못했다: 못 했다고 하지 않는다.
+    const unread = makeFakeHost();
+    unread.Notification.allPending = async () => { throw new Error('시험 오류'); };
+    await expect(scheduleTest(unread, now)).resolves.toBe('unknown');
+    expect(unread.state.pending.map((n) => n.identifier)).toEqual([TEST_ID]);
   });
 });

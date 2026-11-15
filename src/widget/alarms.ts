@@ -41,6 +41,52 @@ function sameAsPlanned(n: NotificationLike, p: PlannedNotice): boolean {
   return n.body === p.body || n.body === undefined;
 }
 
+/** 지금 아이폰에 예약돼 있는 우리 알림의 수와 가장 먼저 울릴 것. */
+export type AlarmStatus = { count: number; next: { at: Date; body: string } | null };
+
+/** 예약한 뒤 실제로 아이폰에 남았는지 다시 읽는다. 알림이 꺼져 있으면 예약이 오류 없이 사라질 수 있어서다. 읽지 못하면 null. 던지지 않는다. */
+export async function pendingStatus(host: Host): Promise<AlarmStatus | null> {
+  try {
+    const ours = (await host.Notification.allPending()).filter((n) => n.identifier.startsWith(NOTIFY_PREFIX));
+    let next: AlarmStatus['next'] = null;
+    for (const n of ours) {
+      const at = n.nextTriggerDate;
+      if (at instanceof Date && (next === null || at.getTime() < next.at.getTime())) next = { at, body: n.body ?? '' };
+    }
+    return { count: ours.length, next };
+  } catch {
+    return null;
+  }
+}
+
+/** 시험 알림의 이름. NOTIFY_PREFIX로 시작하지 않아 예약 고르기가 지우지 않는다. */
+export const TEST_ID = 'calfif-test';
+export const TEST_DELAY_MS = 60_000;
+
+/** 시험 알림의 결과: 아이폰에 남았다 / 남지 않았다(또는 예약이 거절됐다) / 예약은 됐는데 남았는지 읽지 못했다. */
+export type TestResult = 'ok' | 'missing' | 'unknown';
+
+/** 1분 뒤에 울리는 시험 알림을 예약하고, 아이폰에 남았는지 확인한다. 던지지 않는다. */
+export async function scheduleTest(host: Host, now: Date): Promise<TestResult> {
+  try {
+    const n = new host.Notification();
+    n.identifier = TEST_ID;
+    n.title = 'CalendarFIF 시험 알림';
+    n.body = '이 알림이 보이면 아이폰 알림이 제대로 옵니다.';
+    n.sound = 'alert';
+    n.threadIdentifier = THREAD;
+    n.setTriggerDate(new Date(now.getTime() + TEST_DELAY_MS));
+    await n.schedule();
+  } catch {
+    return 'missing';
+  }
+  try {
+    return (await host.Notification.allPending()).some((p) => p.identifier === TEST_ID) ? 'ok' : 'missing';
+  } catch {
+    return 'unknown';
+  }
+}
+
 /** 우리가 예약한 알림(NOTIFY_PREFIX)을 모두 지운다. 로그아웃하거나 읽기 권한이 없어졌을 때 쓴다. 던지지 않는다. */
 export async function clearAlarms(host: Host): Promise<void> {
   try {

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { setOfficialHolidays } from '../core/holidays';
 import type { Config } from './api';
 import { drawnTexts, makeFakeHost, nativeTexts, widgetRecord, type FakeAnswer, type FakeNode, type FakeHost, type FakeOptions, type FakeRequest, type FakeWidgetRecord } from './fakeHost';
-import { readCache, run } from './main';
+import { alarmReport, readCache, run } from './main';
 import { PALETTES } from './theme';
 
 const cfg: Config = { projectId: 'demo-calfif', apiKey: 'demo-key', appUrl: 'https://example.test/' };
@@ -227,7 +227,7 @@ describe('앱에서 실행', () => {
   it('토큰이 있으면 메뉴를 보이고 미리 보기는 큰 위젯', async () => {
     const host = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: 0 }], widgetFamily: 'small' });
     await run(host, cfg, now);
-    expect(host.state.alerts[0]).toMatchObject({ title: 'CalendarFIF 위젯 · 알림 0개 예약됨', actions: ['미리 보기', '로그아웃'], cancel: '닫기' });
+    expect(host.state.alerts[0]).toMatchObject({ title: 'CalendarFIF 위젯 · 알림 0개 예약됨', actions: ['미리 보기', '시험 알림 (1분 뒤)', '로그아웃'], cancel: '닫기', message: '앞으로 7일 안에 울릴 알림이 없습니다.' });
     expect(host.state.widgets.at(-1)!.presented).toBe('large');
     expect(host.state.contexts[0].size).toEqual({ width: 338, height: 354 });
   });
@@ -247,7 +247,7 @@ describe('앱에서 실행', () => {
   });
 
   it('로그아웃은 키체인과 보관 파일을 지운다', async () => {
-    const host = make({ runsInApp: true, keychain: loggedIn, files: { [CACHE]: '{}' }, alerts: [{ button: 1 }, { button: 0 }] });
+    const host = make({ runsInApp: true, keychain: loggedIn, files: { [CACHE]: '{}' }, alerts: [{ button: 2 }, { button: 0 }] });
     await run(host, cfg, now);
     expect(host.state.keychain.size).toBe(0);
     expect(host.state.files.has(CACHE)).toBe(false);
@@ -853,19 +853,74 @@ describe('아이폰 알림 예약', () => {
     expect(host.state.setWidgets).toHaveLength(1);
   });
 
-  it('schedule=1이면 예약만 하고 끝낸다', async () => {
-    const host = makeNative({ runsInApp: true, keychain: loggedIn, queryParameters: { schedule: '1' } }, withEvents());
+  it('schedule=1이면 예약만 하고 결과를 상자로 보인다', async () => {
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, queryParameters: { schedule: '1' }, alerts: [{ button: 0 }] }, withEvents());
     await run(host, cfg, now);
-    expect(host.state.alerts).toEqual([]);
     expect(host.state.widgets).toEqual([]);
-    expect(host.state.scheduled.map((n) => n.identifier)).toEqual([ID, '']);
-    expect(host.state.scheduled[1]).toMatchObject({ body: '알림 1개를 예약했습니다', at: null });
+    expect(host.state.scheduled.map((n) => n.identifier)).toEqual([ID]);
+    expect(host.state.alerts).toHaveLength(1);
+    expect(host.state.alerts[0]).toMatchObject({ title: 'CalendarFIF 알림 예약', message: '예약된 알림 1개\n다음: 11월 16일 · 09:30 회의', actions: ['확인'] });
   });
 
-  it('앱 메뉴의 제목에 예약한 수가 보인다', async () => {
+  it('앱 메뉴의 제목에 예약한 수가, 글에 다음 알림이 보인다', async () => {
     const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }] }, withEvents());
     await run(host, cfg, now);
     expect(host.state.alerts[0].title).toBe('CalendarFIF 위젯 · 알림 1개 예약됨');
+    expect(host.state.alerts[0].message).toBe('예약된 알림 1개\n다음: 11월 16일 · 09:30 회의');
+  });
+
+  it('예약이 오류 없이 끝났는데 아이폰에 남지 않으면 알림 허용을 켜라고 한다', async () => {
+    const menu = makeNative({ runsInApp: true, keychain: loggedIn, silentNotifications: true, alerts: [{ button: -1 }] }, withEvents());
+    await run(menu, cfg, now);
+    expect(menu.state.alerts[0].title).toBe('CalendarFIF 위젯 · 알림 0개 예약됨');
+    expect(menu.state.alerts[0].message).toContain('아이폰에 남지 않았습니다');
+    expect(menu.state.alerts[0].message).toContain("'알림 허용'");
+    const once = makeNative({ runsInApp: true, keychain: loggedIn, silentNotifications: true, queryParameters: { schedule: '1' }, alerts: [{ button: 0 }] }, withEvents());
+    await run(once, cfg, now);
+    expect(once.state.alerts[0].message).toContain('아이폰에 남지 않았습니다');
+  });
+
+  it('시험 알림은 1분 뒤에 울리게 예약하고, 예약 고르기가 지우지 않는다', async () => {
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [{ button: 1 }, { button: 0 }] }, withEvents());
+    await run(host, cfg, now);
+    const test = host.state.scheduled.find((n) => n.identifier === 'calfif-test');
+    expect(test).toMatchObject({ title: 'CalendarFIF 시험 알림', sound: 'alert', at: new Date(now().getTime() + 60_000) });
+    expect(host.state.alerts[1]).toMatchObject({ title: 'CalendarFIF 시험 알림', message: expect.stringContaining('1분 뒤에 시험 알림이 옵니다') });
+    expect(host.state.widgets).toEqual([]);
+    // 다음 위젯 실행의 예약 고르기는 시험 알림을 그대로 둔다.
+    const again = makeNative({ keychain: loggedIn, pending: host.state.pending.map((n) => ({ identifier: n.identifier, body: n.body, at: n.at ?? undefined })) }, withEvents());
+    await run(again, cfg, now);
+    expect(again.state.removed).toEqual([]);
+    expect(again.state.pending.map((n) => n.identifier)).toContain('calfif-test');
+  });
+
+  it('예약은 됐는데 다시 읽지 못하면 예약한 수를 그대로 보인다', async () => {
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }] }, withEvents());
+    const real = host.Notification.allPending.bind(host.Notification);
+    let reads = 0;
+    host.Notification.allPending = async () => {
+      reads += 1;
+      if (reads > 1) throw new Error('시험 오류'); // 예약 고르기의 읽기는 되고, 확인 읽기는 안 된다
+      return real();
+    };
+    await run(host, cfg, now);
+    expect(host.state.alerts[0].title).toBe('CalendarFIF 위젯 · 알림 1개 예약됨');
+    expect(host.state.alerts[0].message).toBe('알림 1개를 예약했습니다.');
+  });
+
+  it('서버에서 알림을 읽지 못해 보관본으로 예약했으면 그렇다고 알린다', async () => {
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, files: cached, queryParameters: { schedule: '1' }, alerts: [{ button: 0 }] }, withEvents(() => ({ status: 503, body: {} })));
+    await run(host, cfg, now);
+    expect(host.state.alerts[0].message).toBe('예약된 알림 1개\n다음: 11월 16일 · 09:30 비밀\n서버에서 알림을 읽지 못해 마지막으로 받아 둔 것으로 예약했습니다. 방금 만든 알림은 빠졌을 수 있습니다.');
+  });
+
+  it('시험 알림이 아이폰에 남지 않으면 알림 허용을 켜라고 한다', async () => {
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, silentNotifications: true, alerts: [{ button: 1 }, { button: 0 }] }, withEvents());
+    await run(host, cfg, now);
+    expect(host.state.alerts[1].message).toContain('시험 알림을 예약하지 못했습니다');
+    const failing = makeNative({ runsInApp: true, keychain: loggedIn, failNotifications: true, alerts: [{ button: 1 }, { button: 0 }] }, withEvents());
+    await run(failing, cfg, now);
+    expect(failing.state.alerts[1].message).toContain('시험 알림을 예약하지 못했습니다');
   });
 
   it('알림 읽기가 실패해도 위젯을 그리고, 보관한 알림으로 예약한다', async () => {
@@ -882,7 +937,7 @@ describe('아이폰 알림 예약', () => {
   const cached = { [CACHE]: JSON.stringify({ monthId: '2026-11', days: {}, savedAt: 1, events: { abc123: { type: 'alarm', date: '2026-11-16', text: '비밀', time: '09:30', advance: [0] } } }) };
 
   it('로그아웃하면 예약한 알림과 보관한 알림 글을 지운다', async () => {
-    const host = makeNative({ runsInApp: true, keychain: loggedIn, files: cached, pending: ours, alerts: [{ button: 1 }, { button: 0 }] }, withEvents());
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, files: cached, pending: ours, alerts: [{ button: 2 }, { button: 0 }] }, withEvents());
     await run(host, cfg, now);
     expect(host.state.pending.map((n) => n.identifier)).toEqual(['other:keep']);
     expect(host.state.files.has(CACHE)).toBe(false);
@@ -917,18 +972,22 @@ describe('아이폰 알림 예약', () => {
     await run(menu, cfg, now);
     expect(menu.state.alerts[0].title).toBe('CalendarFIF 위젯');
     // 알림 보이기도 거절되므로 보이는 알림은 없다. 예약하지 못한 쪽의 글은 가짜가 거절하지 않는 경우로 본다.
-    const host = makeNative({ runsInApp: true, keychain: loggedIn, queryParameters: { schedule: '1' }, pending: [] }, withEvents());
+    expect(menu.state.alerts[0].message).toContain('알림을 예약하지 못했습니다');
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, queryParameters: { schedule: '1' }, pending: [], alerts: [{ button: 0 }] }, withEvents());
     host.Notification.allPending = async () => { throw new Error('시험 오류'); };
     await run(host, cfg, now);
-    expect(host.state.scheduled.map((n) => n.body)).toEqual(['알림을 예약하지 못했습니다']);
+    expect(host.state.alerts[0].message).toContain('알림을 예약하지 못했습니다');
+    expect(host.state.alerts[0].message).toContain('Scriptable → 알림');
   });
 
-  it('schedule=1에 로그인이 없으면 로그인 창 없이 안내 알림만 보인다', async () => {
-    const host = makeNative({ runsInApp: true, queryParameters: { schedule: '1' } }, withEvents());
+  it('schedule=1에 로그인이 없으면 로그인 창 없이 안내만 보인다', async () => {
+    const host = makeNative({ runsInApp: true, queryParameters: { schedule: '1' }, alerts: [{ button: 0 }] }, withEvents());
     await run(host, cfg, now);
-    expect(host.state.alerts).toEqual([]);
+    expect(host.state.alerts).toHaveLength(1);
+    expect(host.state.alerts[0].fields).toEqual([]);
+    expect(host.state.alerts[0].message).toContain('먼저 로그인하세요');
     expect(host.state.requests).toEqual([]);
-    expect(host.state.scheduled.map((n) => n.body)).toEqual(['CalendarFIF 위젯에 먼저 로그인하세요']);
+    expect(host.state.scheduled).toEqual([]);
   });
 
   it('예약이 거절돼도 위젯을 그린다', async () => {
@@ -936,6 +995,30 @@ describe('아이폰 알림 예약', () => {
     await run(host, cfg, now);
     expect(nativeTexts(host)).toContain('리뷰');
     expect(host.state.setWidgets).toHaveLength(1);
+  });
+
+  it('앱에서 알림 기능이 멈추면 15초 뒤에 메뉴를 띄우고 알림 허용 탓으로 돌리지 않는다', async () => {
+    vi.useFakeTimers();
+    try {
+      const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }] }, withEvents());
+      host.Notification.allPending = () => new Promise(() => {}); // 던지지 않고 멈췄다
+      const done = run(host, cfg, now);
+      await vi.advanceTimersByTimeAsync(14_900);
+      expect(host.state.alerts).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(200);
+      await done;
+      expect(host.state.alerts[0].title).toBe('CalendarFIF 위젯');
+      expect(host.state.alerts[0].message).toBe('아이폰 알림 예약이 제때 끝나지 않았습니다. 잠시 뒤 다시 실행해 주세요.');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('알림 문서를 읽을 권한이 없으면 메뉴가 그렇다고 말한다', async () => {
+    const host = makeNative({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }] }, withEvents(() => err(403, 'PERMISSION_DENIED')));
+    await run(host, cfg, now);
+    expect(host.state.alerts[0].message).toContain('권한이 없어');
   });
 
   it('Scriptable의 알림 기능이 멈춰 예약이 끝나지 않아도 5초 뒤에는 위젯을 그린다', async () => {
@@ -970,5 +1053,47 @@ describe('아이폰 알림 예약', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('alarmReport', () => {
+  const server = (scheduled: number | null) => ({ scheduled, source: 'server' as const });
+  const next = { at: new Date(2026, 10, 16, 9, 30), body: '09:30 회의' };
+
+  it('예약하지 못했으면 알림 허용을 켜라고 한다', () => {
+    expect(alarmReport(server(null), null)).toContain("'알림 허용'");
+  });
+
+  it('다시 읽지 못했으면 예약한 수를 그대로 말한다', () => {
+    expect(alarmReport(server(2), null)).toBe('알림 2개를 예약했습니다.');
+    expect(alarmReport(server(0), null)).toBe('앞으로 7일 안에 울릴 알림이 없습니다.');
+  });
+
+  it('예약할 것이 없으면 없다고 한다', () => {
+    expect(alarmReport(server(0), { count: 0, next: null })).toBe('앞으로 7일 안에 울릴 알림이 없습니다.');
+  });
+
+  it('예약했는데 하나도 남지 않았으면 알림 허용을 켜라고 한다', () => {
+    const text = alarmReport(server(3), { count: 0, next: null });
+    expect(text).toContain('아이폰에 남지 않았습니다');
+    expect(text).toContain("'잠금 화면'");
+  });
+
+  it('남은 수와 다음 알림을 보이고, 덜 남았으면 그것도 말한다', () => {
+    expect(alarmReport(server(2), { count: 2, next })).toBe('예약된 알림 2개\n다음: 11월 16일 · 09:30 회의');
+    expect(alarmReport(server(3), { count: 2, next })).toBe('예약된 알림 2개\n예약한 3개 중 2개만 아이폰에 남았습니다.\n다음: 11월 16일 · 09:30 회의');
+  });
+
+  it('서버에서 읽지 못했으면 보관본으로 했다고 덧붙인다', () => {
+    expect(alarmReport({ scheduled: 0, source: 'cache' }, { count: 0, next: null })).toBe('앞으로 7일 안에 울릴 알림이 없습니다.\n서버에서 알림을 읽지 못해 마지막으로 받아 둔 것으로 예약했습니다. 방금 만든 알림은 빠졌을 수 있습니다.');
+  });
+});
+
+describe('alarmReport의 특별한 경우', () => {
+  it('읽을 권한이 없으면 권한을 말하고, 알림 기능이 멈췄으면 다시 하라고 한다(알림 허용 탓으로 돌리지 않는다)', () => {
+    expect(alarmReport({ scheduled: 0, source: 'denied' }, { count: 0, next: null })).toContain('권한이 없어');
+    const stuck = alarmReport({ scheduled: null, source: 'stuck' }, null);
+    expect(stuck).toContain('제때 끝나지 않았습니다');
+    expect(stuck).not.toContain('알림 허용');
   });
 });

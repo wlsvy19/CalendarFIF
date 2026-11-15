@@ -28,6 +28,8 @@ export type FakeOptions = {
   pending?: { identifier: string; body?: string; at?: Date }[];
   /** true면 알림 읽기와 예약이 거절된다. */
   failNotifications?: boolean;
+  /** true면 예약이 오류 없이 끝나지만 아이폰에 남지 않는다(알림이 꺼진 아이폰). */
+  silentNotifications?: boolean;
   screen?: { width: number; height: number };
   dark?: boolean;
   keychain?: Record<string, string>;
@@ -153,7 +155,7 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
       if (opts.failNotifications) throw new Error('알림 시험 오류');
       const n: FakeNotice = { identifier: this.identifier, title: this.title, body: this.body, sound: this.sound, threadIdentifier: this.threadIdentifier, openURL: this.openURL, at: this.at };
       state.scheduled.push(n);
-      if (this.at) {
+      if (this.at && !opts.silentNotifications) {
         state.pending = state.pending.filter((p) => p.identifier !== n.identifier);
         state.pending.push(n);
       }
