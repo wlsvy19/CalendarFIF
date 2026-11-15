@@ -47,6 +47,15 @@
 
 사용자가 `release`에 `CalendarFIF.exe` 파일 하나만 두라고 했다. 하려던 일: `electron-builder`(무료 빌드 도구, 개발용 의존성)로 지금의 앱 폴더를 한 파일짜리 실행 파일(portable)로 묶어 `release\CalendarFIF.exe`에 두고, 새 버전마다 그 파일을 바꾸고 옛 폴더를 지우며, Windows 시작 프로그램이 그 파일을 가리키게 한다. 한 파일짜리는 켤 때마다 안의 파일을 풀어서 몇 초 늦게 켜진다. 이 일을 맡긴 에이전트를 이 환경의 자동 권한 검사가 두 번 막았다("Unauthorized Access", 그다음 "Undermining Oversight"). 새 도구를 내려받아 설치하는 것, 사용자의 앱을 바꾸는 절차를 자동으로 만드는 것 중 어느 것이 걸렸는지는 모른다. 더 돌아가지 않고 사용자에게 묻는다. 작업 지시서는 git 밖의 `.superpowers/sdd/2026-11-15-memo-tools/task-13-brief.md`에 있었다(작업 공간을 지우기 전에 이 문서에 옮겨 적었다).
 
+2026-11-16 아침 사용자가 "release 아래 CalendarFIF-win32-x64 이거 바로 놔서 0.0.1씩 증가하는거 없애라니까"라고 했다. 한 파일짜리가 아니라 지금의 앱 폴더를 버전 폴더 없이 `release` 바로 아래에 두라는 뜻으로 읽었다. 새 도구 없이 `scripts/pack-desktop.ts`만 고쳤다.
+
+- `npm run desktop:pack`은 `build\pack-out\`에 꾸린 뒤 `release\CalendarFIF-win32-x64\`에 바꿔 넣는다. 쓰던 폴더는 `build\pack-replaced`로 옮겨 두었다가 새 것을 넣은 뒤 지운다. 새 것을 넣지 못하면 쓰던 것을 되돌린다(`swapDir`, 시험 2개). 백신이 막 만든 파일을 쥐고 있을 수 있어 폴더 옮기기는 1초 간격으로 다섯 번까지 한다.
+- 그 자리의 앱이 켜져 있으면 바꿔 넣지 않고 멈춘다. 앱을 끄고 `npm run desktop:install`을 돌리면 바꿔 넣기만 한다. 꾸리는 1~2분 동안은 쓰던 앱이 켜져 있어도 된다.
+- 바꿔 넣은 뒤 예전 방식의 버전 폴더를 지운다. 쓰이는 것(실행 중, Windows 시작 프로그램)은 남긴다.
+- 확인: 에뮬레이터용으로 꾸려 시험 실행(`desktop:pack:check`)이 통과했다(`ok: true`, `nestedNativeCalls` 0). 실제 꾸리기로 0.8.0을 `release\CalendarFIF-win32-x64`에 넣었고 `release\0.6.1`은 지워졌다. `release\0.6.0`은 켜져 있고 시작 프로그램이 가리켜서 남았다.
+- 켜져 있는 0.6.0을 프로세스 번호로 끄고 새 것을 켜는 일은 자동 권한 검사가 막았다("Destructive or Unwanted Actions"). 돌아가지 않고 사용자에게 맡겼다. 사용자가 트레이 메뉴로 0.6.0을 끄고 `release\CalendarFIF-win32-x64\CalendarFIF.exe`를 켜면 앱이 시작 프로그램을 새 자리로 다시 걸고, 그 뒤 `npm run desktop:clean`이 `release\0.6.0`을 지운다.
+- 정한 것: 버전 번호(`package.json`의 `version`)는 그대로 올린다. 위젯 메뉴와 웹앱이 그 번호로 바뀌었는지 알려 주기 때문이다. 사용자가 없애라고 한 것은 폴더 이름의 번호로 읽었다. → 틀렸으면 번호를 올리지 않게 바꾸면 된다(앱 동작과 무관).
+
 ## 정한 것
 
 설계 11절의 1~10에 더해 진행하면서 정한 것:

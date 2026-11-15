@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { bundleProblem, guardDecision, hasTopLevelKoffiRequire, inUsePaths, runningInside, staleReleases, startupTarget } from './pack-check';
+import { bundleProblem, guardDecision, hasTopLevelKoffiRequire, inUsePaths, runningInside, staleReleases, startupTarget, swapDir, type SwapFs } from './pack-check';
 
 it('실제 프로젝트용 꾸리기에 에뮬레이터 프로젝트 ID가 있거나 에뮬레이터용에 없으면 문제를 알린다', () => {
   expect(bundleProblem(false, 'const id = "my-project"')).toBeNull();
@@ -60,6 +60,10 @@ it('새 버전만 남긴다: 쓰이지 않는 옛 버전 폴더를 모두 지울
   // 새 버전은 쓰이고 있지 않아도 남는다.
   expect(staleReleases(FOLDERS, '0.5.0', [], RELEASE)).toEqual({ remove: ['0.4.0', 'CalendarFIF-win32-x64'], busy: [] });
 });
+it('버전 폴더 없이 꾸린 뒤에는 release/CalendarFIF-win32-x64만 남기고 버전 폴더를 지운다(쓰이는 것은 남긴다)', () => {
+  expect(staleReleases(FOLDERS, 'CalendarFIF-win32-x64', [LEGACY_EXE], RELEASE)).toEqual({ remove: ['0.4.0', '0.5.0'], busy: [] });
+  expect(staleReleases(FOLDERS, 'CalendarFIF-win32-x64', [LEGACY_EXE, exeIn('0.5.0')], RELEASE)).toEqual({ remove: ['0.4.0'], busy: ['0.5.0'] });
+});
 it('실행 중이거나 Windows 시작 프로그램이 가리키는 옛 버전은 지우지 않고 알린다', () => {
   expect(staleReleases(FOLDERS, '0.5.0', [LEGACY_EXE], RELEASE)).toEqual({ remove: ['0.4.0'], busy: ['CalendarFIF-win32-x64'] });
   expect(staleReleases(FOLDERS, '0.5.0', [exeIn('0.5.0'), exeIn('0.4.0').toLowerCase()], RELEASE)).toEqual({ remove: ['CalendarFIF-win32-x64'], busy: ['0.4.0'] });
@@ -82,4 +86,44 @@ it('시작 프로그램의 명령에서 실행 파일의 경로만 뽑는다', (
   expect(startupTarget(`"${exeIn('0.5.0')}" --hidden`)).toBe(exeIn('0.5.0'));
   expect(startupTarget(`${LEGACY_EXE} --hidden`)).toBe(LEGACY_EXE);
   expect(startupTarget('')).toBeNull();
+});
+
+function fakeFs(dirs: string[], fail: { rename?: (from: string, to: string) => boolean; remove?: boolean } = {}) {
+  const set = new Set(dirs);
+  const fs: SwapFs = {
+    exists: (p) => set.has(p),
+    rename: (from, to) => {
+      if (fail.rename?.(from, to) || !set.has(from) || set.has(to)) throw new Error(`EPERM ${from}`);
+      set.delete(from);
+      set.add(to);
+    },
+    remove: (p) => {
+      if (fail.remove) throw new Error('EBUSY');
+      set.delete(p);
+    },
+  };
+  return { fs, set };
+}
+
+it('꾸린 앱을 release의 정해진 자리에 바꿔 넣고, 쓰던 것은 옮겨 두었다가 지운다', () => {
+  const f = fakeFs(['staged', 'target']);
+  expect(swapDir(f.fs, 'staged', 'target', 'aside')).toBeNull();
+  expect([...f.set]).toEqual(['target']);
+  // 처음 넣을 때(쓰던 것이 없다)
+  const first = fakeFs(['staged']);
+  expect(swapDir(first.fs, 'staged', 'target', 'aside')).toBeNull();
+  expect([...first.set]).toEqual(['target']);
+  // 옮겨 둔 것을 지우지 못해도 넣은 것은 성공이다.
+  const busyAside = fakeFs(['staged', 'target'], { remove: true });
+  expect(swapDir(busyAside.fs, 'staged', 'target', 'aside')).toBeNull();
+  expect([...busyAside.set].sort()).toEqual(['aside', 'target']);
+});
+
+it('쓰던 앱 폴더를 옮기지 못하면 아무것도 바꾸지 않고, 새 것을 넣지 못하면 쓰던 것을 되돌린다', () => {
+  const locked = fakeFs(['staged', 'target'], { rename: (from) => from === 'target' });
+  expect(swapDir(locked.fs, 'staged', 'target', 'aside')).toContain('쓰던 앱 폴더를 옮기지 못해');
+  expect([...locked.set].sort()).toEqual(['staged', 'target']);
+  const stuck = fakeFs(['staged', 'target'], { rename: (from) => from === 'staged' });
+  expect(swapDir(stuck.fs, 'staged', 'target', 'aside')).toContain('쓰던 앱은 그대로다');
+  expect([...stuck.set].sort()).toEqual(['staged', 'target']);
 });

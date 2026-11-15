@@ -289,7 +289,7 @@ Safari에서 주소를 열고 로그인한 뒤 공유 버튼으로 홈 화면에
 - 아이폰이면 Safari에서 주소를 열고 공유 버튼으로 홈 화면에 추가할 것([아이폰에서 쓰기](#아이폰에서-쓰기))
 - 앱에서는 관리자도 그 사람의 메모를 볼 수 없지만, Firebase 프로젝트의 주인은 Firebase 콘솔에서 모든 데이터를 볼 수 있다는 것([메모를 볼 수 있는 사람](#메모를-볼-수-있는-사람))
 
-Windows PC에서도 쓰는 사용자에게는 꾸린 폴더(`release\<버전>\CalendarFIF-win32-x64`)를 통째로 건네면 된다. 받은 사람은 그 폴더를 원하는 곳에 두고 `CalendarFIF.exe`를 실행해 자기 이메일과 비밀번호로 로그인한다([꾸리기](#꾸리기)).
+Windows PC에서도 쓰는 사용자에게는 꾸린 폴더(`release\CalendarFIF-win32-x64`)를 통째로 건네면 된다. 받은 사람은 그 폴더를 원하는 곳에 두고 `CalendarFIF.exe`를 실행해 자기 이메일과 비밀번호로 로그인한다([꾸리기](#꾸리기)).
 
 ### 목록의 단추
 
@@ -333,9 +333,11 @@ Windows PC에서도 쓰는 사용자에게는 꾸린 폴더(`release\<버전>\Ca
 
 ### 꾸리기
 
-`npm run desktop:pack`은 `release/<버전>/CalendarFIF-win32-x64/` 폴더를 만든다(버전은 `package.json`의 `version`, 예: `release/0.6.0/`). 서명은 하지 않고 설치 프로그램도 없다. 새 버전을 꾸리면 새 폴더에 만들어진다. 쓰던 앱을 끄고 새 폴더의 `CalendarFIF.exe`를 실행하면 설정과 로그인은 그대로 이어진다(둘 다 `%APPDATA%\CalendarFIF`에 있다). 같은 버전 폴더의 앱이 실행 중이면 아무것도 지우지 않고 멈춘다.
+`npm run desktop:pack`은 앱을 `build/pack-out/`에 꾸린 뒤 `release/CalendarFIF-win32-x64/`에 바꿔 넣는다. 버전 폴더는 만들지 않는다. 버전이 바뀌어도 앱은 늘 `release\CalendarFIF-win32-x64\CalendarFIF.exe`에 있고, 그래서 Windows 시작 프로그램도 그대로 맞는다. 서명은 하지 않고 설치 프로그램도 없다. 설정과 로그인은 `%APPDATA%\CalendarFIF`에 있어서 바꿔 넣어도 이어진다.
 
-`release`에는 새 버전만 둔다. 꾸리기가 끝나면 옛 버전의 폴더를 지운다. 다만 실행 중이거나 Windows 시작 프로그램이 가리키고 있는 옛 버전은 지우지 않고 알려 준다(켜져 있는 앱의 폴더를 지우면 앱이 깨지고, 시작 프로그램이 가리키는 폴더를 지우면 다음 로그인 때 달력이 뜨지 않는다). 그때는 쓰던 앱을 끄고 새 폴더의 `CalendarFIF.exe`를 한 번 실행한 뒤 `npm run desktop:clean`을 돌린다. 이 명령은 꾸리지 않고 옛 버전만 지운다. 쓰이고 있는지 확인하지 못하면 아무것도 지우지 않는다.
+`release`의 앱이 켜져 있으면 바꿔 넣지 않고 멈춘다(꾸린 것은 `build/pack-out/`에 남는다). 그때는 트레이 아이콘의 메뉴로 앱을 끄고 `npm run desktop:install`을 돌린 뒤 `release\CalendarFIF-win32-x64\CalendarFIF.exe`를 다시 실행한다. `desktop:install`은 꾸리지 않고 바꿔 넣기만 한다. 바꿔 넣을 때 쓰던 폴더는 잠깐 옮겨 두었다가 새 것을 넣고 나서 지운다. 새 것을 넣지 못하면 쓰던 것을 되돌린다.
+
+예전 방식의 버전 폴더(`release\0.6.0` 같은 것)는 바꿔 넣은 뒤에 지운다. 다만 실행 중이거나 Windows 시작 프로그램이 가리키고 있는 것은 지우지 않고 알려 준다(켜져 있는 앱의 폴더를 지우면 앱이 깨지고, 시작 프로그램이 가리키는 폴더를 지우면 다음 로그인 때 달력이 뜨지 않는다). 그때는 쓰던 앱을 끄고 `release\CalendarFIF-win32-x64\CalendarFIF.exe`를 한 번 실행한 뒤 `npm run desktop:clean`을 돌린다. 이 명령은 꾸리지 않고 버전 폴더만 지운다. 쓰이고 있는지 확인하지 못하면 아무것도 지우지 않는다.
 
 1. 이 폴더를 원하는 곳(예: `C:\Apps\CalendarFIF`)에 통째로 옮긴다.
 2. 그 안의 `CalendarFIF.exe`를 실행한다. 앱은 브라우저와 따로 자기 로그인 화면에서 [docs/firebase-setup.md](docs/firebase-setup.md) 3단계에서 만든 계정의 이메일과 비밀번호로 로그인한다.

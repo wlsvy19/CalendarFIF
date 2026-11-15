@@ -56,6 +56,42 @@ export function staleReleases(entries: { name: string; hasApp: boolean }[], keep
   return { remove: old.filter((name) => !busy.includes(name)), busy };
 }
 
+export type SwapFs = { exists(p: string): boolean; rename(from: string, to: string): void; remove(p: string): void };
+
+/**
+ * 꾸린 앱 폴더(staged)를 release의 정해진 자리(target)에 넣는다. 있던 target은 aside로 옮겨 두었다가 넣고 나면 지운다.
+ * 새 것을 넣지 못하면 옮겨 둔 것을 되돌린다(쓰던 앱이 없어지지 않게). 넣었으면 null, 못 넣었으면 까닭을 돌려준다.
+ */
+export function swapDir(fs: SwapFs, staged: string, target: string, aside: string): string | null {
+  const had = fs.exists(target);
+  if (had) {
+    try {
+      fs.rename(target, aside);
+    } catch (e) {
+      return `쓰던 앱 폴더를 옮기지 못해 바꿔 넣지 않았다(앱이나 탐색기가 그 폴더를 쓰고 있을 수 있다): ${String(e)}`;
+    }
+  }
+  try {
+    fs.rename(staged, target);
+  } catch (e) {
+    if (!had) return `새 앱을 넣지 못했다: ${String(e)}`;
+    try {
+      fs.rename(aside, target);
+    } catch {
+      return `새 앱을 넣지 못했고 쓰던 앱도 되돌리지 못했다. 쓰던 앱은 ${aside}에 있다: ${String(e)}`;
+    }
+    return `새 앱을 넣지 못했다(쓰던 앱은 그대로다): ${String(e)}`;
+  }
+  if (had) {
+    try {
+      fs.remove(aside);
+    } catch {
+      // 다음 꾸리기가 지운다.
+    }
+  }
+  return null;
+}
+
 export type GuardDecision = { ok: true } | { ok: false; message: string };
 
 // 꾸리기 전에 실행 중인 앱을 본 결과(PowerShell 실행 결과)로 계속할지 정한다. 확인하지 못했으면 멈춘다(열린 채로 지우지 않기 위해).
