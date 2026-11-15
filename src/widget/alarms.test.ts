@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AlarmRecord, EventMap } from '../core/events';
-import { NOTIFY_PREFIX, planNotices, reconcile, scheduleAlarms } from './alarms';
+import { NOTIFY_PREFIX, clearAlarms, planNotices, reconcile, scheduleAlarms } from './alarms';
 import { makeFakeHost } from './fakeHost';
 
 const URL = 'https://example.test';
@@ -62,6 +62,15 @@ describe('scheduleAlarms', () => {
 
   it('예약이 던져도 던지지 않는다', async () => {
     const host = makeFakeHost({ failNotifications: true });
-    await expect(scheduleAlarms(host, { x: alarm({ date: '2026-11-16' }) }, now, URL)).resolves.toBe(0);
+    await expect(scheduleAlarms(host, { x: alarm({ date: '2026-11-16' }) }, now, URL)).resolves.toBeNull();
+  });
+});
+
+describe('clearAlarms', () => {
+  it('우리 예약만 모두 지우고 던지지 않는다', async () => {
+    const host = makeFakeHost({ pending: [{ identifier: `${NOTIFY_PREFIX}a@2026-11-16@0` }, { identifier: `${NOTIFY_PREFIX}b@2026-11-17@1` }, { identifier: 'other:keep' }] });
+    await clearAlarms(host);
+    expect(host.state.pending.map((n) => n.identifier)).toEqual(['other:keep']);
+    await expect(clearAlarms(makeFakeHost({ failNotifications: true }))).resolves.toBeUndefined();
   });
 });

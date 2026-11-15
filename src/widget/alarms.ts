@@ -41,11 +41,22 @@ function sameAsPlanned(n: NotificationLike, p: PlannedNotice): boolean {
   return n.body === p.body || n.body === undefined;
 }
 
+/** 우리가 예약한 알림(NOTIFY_PREFIX)을 모두 지운다. 로그아웃하거나 읽기 권한이 없어졌을 때 쓴다. 던지지 않는다. */
+export async function clearAlarms(host: Host): Promise<void> {
+  try {
+    const pending = await host.Notification.allPending();
+    const ours = pending.map((n) => n.identifier).filter((id) => id.startsWith(NOTIFY_PREFIX));
+    if (ours.length > 0) await host.Notification.removePending(ours);
+  } catch {
+    // 못 지워도 로그아웃은 끝난다.
+  }
+}
+
 /**
  * 계획에 맞춰 예약을 고른다: 계획에서 빠진 우리 예약은 지우고, 없는 것은 더한다. 시각이나 글이 바뀐 것은 같은 이름으로 다시 예약한다.
- * 돌려주는 값은 그 뒤의 우리 예약 수. 어떤 문제가 나도 던지지 않는다(위젯 그리기를 막지 않는다).
+ * 돌려주는 값은 그 뒤의 우리 예약 수, 예약하지 못했으면 null(0개로 속이지 않는다). 어떤 문제가 나도 던지지 않는다(위젯 그리기를 막지 않는다).
  */
-export async function scheduleAlarms(host: Host, items: EventMap, now: Date, appUrl: string): Promise<number> {
+export async function scheduleAlarms(host: Host, items: EventMap, now: Date, appUrl: string): Promise<number | null> {
   try {
     const planned = planNotices(items, now, appUrl);
     const byId = new Map(planned.map((p) => [p.id, p]));
@@ -80,8 +91,8 @@ export async function scheduleAlarms(host: Host, items: EventMap, now: Date, app
         // 하나가 안 돼도 나머지는 예약한다.
       }
     }
-    return kept;
+    return add.length > 0 && kept === pendingIds.filter((id) => byId.has(id)).length ? null : kept;
   } catch {
-    return 0;
+    return null;
   }
 }
