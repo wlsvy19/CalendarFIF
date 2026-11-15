@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AlarmRecord } from '../core/events';
-import { classify, setup, tick, type GasHost, type GasRequest, type GasResponse } from './gas';
+import { classify, fieldSegment, setup, tick, writeSent, type GasHost, type GasRequest, type GasResponse } from './gas';
 
 // 가짜 Apps Script: 시계는 sleep으로만 흐르고, 요청은 route가 답한다.
 type Route = (req: GasRequest) => { code: number; body: unknown };
@@ -23,7 +23,7 @@ const alarm = (over: Partial<AlarmRecord> = {}): AlarmRecord => ({
   type: 'alarm', date: '2026-11-15', text: '회의', done: false, repeat: { freq: 'none' }, time: '17:48', advance: [0], editedAt: 1, editedBy: 'u', ...over,
 });
 
-function makeHost(opts: { start: Date; key?: string | null; tz?: string; events?: () => Record<string, AlarmRecord>; push?: () => Record<string, unknown> | null; fcm?: (body: unknown) => { code: number; body: unknown } }) {
+function makeHost(opts: { start: Date; key?: string | null; tz?: string; events?: () => Record<string, AlarmRecord>; push?: () => Record<string, unknown> | null; fcm?: (body: unknown) => { code: number; body: unknown }; fetchAllThrows?: () => boolean }) {
   let clock = opts.start.getTime();
   const props = new Map<string, string>();
   if (opts.key !== null) props.set('SERVICE_ACCOUNT', opts.key ?? KEY);
@@ -40,7 +40,7 @@ function makeHost(opts: { start: Date; key?: string | null; tz?: string; events?
     if (req.url === `${DOCS}:batchGet`) {
       const out: unknown[] = [{ found: { name: `projects/${P}/databases/(default)/documents/users/u1/data/events`, fields: fieldsOf({ items: opts.events ? opts.events() : {} }) } }];
       const p = opts.push ? opts.push() : { devices: { [D1]: { token: 'tok1', label: '아이폰', at: 1 } } };
-      out.push(p ? { found: { name: `projects/${P}/databases/(default)/documents/users/u1/data/push`, fields: fieldsOf(p) } } : { missing: 'x' });
+      out.push(p ? { found: { name: `projects/${P}/databases/(default)/documents/users/u1/data/push`, fields: fieldsOf(p), updateTime: '2026-11-15T08:00:00.123456Z' } } : { missing: 'x' });
       return { code: 200, body: out };
     }
     if (req.url.includes('fcm.googleapis.com')) {
@@ -60,7 +60,13 @@ function makeHost(opts: { start: Date; key?: string | null; tz?: string; events?
     return { getResponseCode: () => r.code, getContentText: () => JSON.stringify(r.body) };
   };
   const host: GasHost = {
-    UrlFetchApp: { fetch: (url, params) => answer({ url, ...params }), fetchAll: (reqs) => reqs.map(answer) },
+    UrlFetchApp: {
+      fetch: (url, params) => answer({ url, ...params }),
+      fetchAll: (reqs) => {
+        if (opts.fetchAllThrows?.()) throw new Error('Address unavailable');
+        return reqs.map(answer);
+      },
+    },
     PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => props.get(k) ?? null, setProperty: (k, v) => props.set(k, v) }) },
     CacheService: { getScriptCache: () => ({ get: (k) => cache.get(k) ?? null, put: (k, v) => void cache.set(k, v), remove: (k) => void cache.delete(k) }) },
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock: () => undefined }) },
@@ -162,10 +168,63 @@ describe('tick', () => {
     expect(f.fcmSent.map((s) => s.at)).toEqual([at(17, 48).getTime(), at(17, 50).getTime()]);
   });
 
-  it('쓸 수 없게 된 토큰의 기기는 지운다', () => {
+  it('쓸 수 없게 된 토큰의 기기는 읽은 뒤 문서가 바뀌지 않았을 때만 지우고, 그다음 상태를 적는다', () => {
     const f = makeHost({ start: at(17, 47, 59), events: () => ({ a: alarm() }), fcm: () => ({ code: 404, body: { error: { status: 'NOT_FOUND', details: [{ errorCode: 'UNREGISTERED' }] } } }) });
     tick(f.host);
     expect(f.patches[0].url).toContain(`updateMask.fieldPaths=devices.${D1}`);
+    expect(f.patches[0].url).toContain(`currentDocument.updateTime=${encodeURIComponent('2026-11-15T08:00:00.123456Z')}`);
+    expect(f.patches[0].body).toEqual({ fields: {} });
+    expect(f.patches[1].url).toContain('updateMask.fieldPaths=sender');
+  });
+
+  it('숫자로 시작하는 기기 이름은 필드 경로에서 백틱으로 감싼다', () => {
+    const digit = '9AAAAAAAAAAAAAAAAAAA';
+    const f = makeHost({ start: at(17, 47, 59), events: () => ({ a: alarm() }), push: () => ({ devices: { [digit]: { token: 'tok1', label: '', at: 1 } } }), fcm: () => ({ code: 404, body: {} }) });
+    tick(f.host);
+    expect(f.patches[0].url).toContain(`updateMask.fieldPaths=${encodeURIComponent('devices.`9AAAAAAAAAAAAAAAAAAA`')}`);
+    expect(fieldSegment('abc_1')).toBe('abc_1');
+    expect(fieldSegment('9a')).toBe('`9a`');
+  });
+
+  it('30초보다 뒤에 울릴 것은 다음 실행에 맡긴다(기다리는 시간을 줄인다)', () => {
+    const f = makeHost({ start: at(17, 47, 10), events: () => ({ a: alarm() }) });
+    tick(f.host);
+    expect(f.fcmSent).toHaveLength(0);
+    expect(f.clock()).toBe(at(17, 47, 10).getTime()); // 기다리지 않았다
+    f.advance(30_000); // 17:47:40
+    tick(f.host);
+    expect(f.fcmSent.map((s) => s.at)).toEqual([at(17, 48).getTime()]);
+  });
+
+  it('보내다 던지면(연결 끊김) 문제를 적고 풀어서 다음 실행이 다시 보낸다', () => {
+    let fail = true;
+    const f = makeHost({ start: at(17, 47, 59), events: () => ({ a: alarm() }), fetchAllThrows: () => fail });
+    tick(f.host);
+    expect(f.fcmSent).toHaveLength(0);
+    expect(JSON.stringify(f.patches.at(-1)!.body)).toContain('Address unavailable');
+    fail = false;
+    f.advance(60_000);
+    tick(f.host);
+    expect(f.fcmSent).toHaveLength(1);
+  });
+
+  it('실행이 도중에 죽어 맡음으로 남은 것은 3분 뒤에 다시 보낸다', () => {
+    const f = makeHost({ start: at(17, 48, 30), events: () => ({ a: alarm() }) });
+    // 1분 전에 맡고 끝내지 못한 기록(울릴 때 17:48)
+    const key = `u1|${D1.slice(0, 8)}|calfif:a@2026-11-15@0|${Math.round(at(17, 48).getTime() / 1000).toString(36)}`;
+    f.props.set('sent', JSON.stringify({ [key]: { a: at(17, 48).getTime(), c: at(17, 47, 30).getTime(), d: 0 } }));
+    tick(f.host);
+    expect(f.fcmSent).toHaveLength(0); // 아직 다른 실행이 맡고 있을 수 있다
+    f.advance(150_000); // 17:51:00, 맡은 지 3분 30초
+    tick(f.host);
+    expect(f.fcmSent).toHaveLength(1);
+    expect(JSON.parse(f.props.get('sent')!)[key]).toMatchObject({ d: 1 });
+  });
+
+  it('토큰이 거절되면(401) 캐시에서 지운다', () => {
+    const f = makeHost({ start: at(17, 47, 59), events: () => ({ a: alarm() }), fcm: () => ({ code: 401, body: { error: { status: 'UNAUTHENTICATED' } } }) });
+    tick(f.host);
+    expect(f.cache.has('calfif.token')).toBe(false);
   });
 
   it('보내지 못하면 문제를 적고 다음 실행이 다시 보낸다', () => {
@@ -207,6 +266,19 @@ describe('tick', () => {
     const f = makeHost({ start: at(17, 47, 59), tz: 'UTC', events: () => ({ a: alarm() }) });
     expect(() => tick(f.host)).toThrow('(GMT+09:00) 서울');
     expect(f.fcmSent).toEqual([]);
+  });
+});
+
+describe('writeSent', () => {
+  it('한도를 넘으면 끝낸 것 가운데 이른 것부터 버린다', () => {
+    const f = makeHost({ start: at(17, 0) });
+    const sent = new Map<string, { a: number; c: number; d: 0 | 1 }>();
+    for (let i = 0; i < 200; i += 1) sent.set(`key-${String(i).padStart(4, '0')}-${'x'.repeat(40)}`, { a: i, c: i, d: i % 2 === 0 ? 1 : 0 });
+    writeSent(f.host, sent);
+    const kept = JSON.parse(f.props.get('sent')!) as Record<string, { a: number; d: number }>;
+    expect(JSON.stringify(kept).length).toBeLessThanOrEqual(8_500);
+    expect(Object.values(kept).filter((v) => v.d === 0)).toHaveLength(100); // 맡은 것은 남긴다
+    expect(Math.min(...Object.values(kept).filter((v) => v.d === 1).map((v) => v.a))).toBeGreaterThan(0);
   });
 });
 

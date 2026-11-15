@@ -3,7 +3,8 @@ import { parseOfficialHolidays, setOfficialHolidays, type OfficialYear } from '.
 import type { DayValue } from '../core/types';
 import { parseEventMap, type EventMap } from '../core/events';
 import { clearAlarms, pendingStatus, scheduleAlarms, scheduleTest, type AlarmStatus, type TestResult } from './alarms';
-import { isApiError, readEvents, readMonth, readPushDeviceCount, refreshSession, signIn, type Config, type Session } from './api';
+import { isApiError, readEvents, readMonth, readPushDoc, refreshSession, signIn, type Config, type Session } from './api';
+import { pushCoversIphone } from '../push/doc';
 import type { Host, ListWidgetLike } from './host';
 import { makeWidget } from './render';
 import { renderTree } from './renderTree';
@@ -121,7 +122,7 @@ function readCachedEvents(host: Host): EventMap {
 /**
  * 알림 예약의 결과. scheduled: 예약된 수(알 수 없으면 null).
  * source: 서버의 알림 문서로 했다 / 서버를 읽지 못해 보관본으로 했다 / 읽을 권한이 없어 지웠다 / 알림 기능이 제때 끝나지 않았다 /
- * 푸시 알림을 켠 기기가 있어 예약하지 않고 예약해 둔 것을 지웠다.
+ * 아이폰의 푸시 알림이 알림을 맡고 있어(아이폰에서 켰고 알림 서버가 살아 있다) 예약하지 않고 예약해 둔 것을 지웠다.
  */
 export type SyncResult = { scheduled: number | null; source: 'server' | 'cache' | 'denied' | 'stuck' | 'push' };
 const SYNC_UNKNOWN: SyncResult = { scheduled: null, source: 'cache' };
@@ -146,12 +147,12 @@ async function syncAlarms(host: Host, cfg: Config, session: Session | null, now:
         }
       }
     }
-    // 푸시 알림을 켠 기기가 있으면 알림은 푸시로 간다. 위젯이 예약하면 같은 알림이 두 번 오므로 예약하지 않고 지운다.
-    // 읽지 못하면 마지막으로 읽은 것을 따른다.
+    // 아이폰에서 푸시 알림을 켰고 알림 서버가 살아 있으면 알림은 푸시로 간다. 위젯이 예약하면 같은 알림이 두 번 오므로 예약하지 않고 지운다.
+    // 알림 서버가 없거나 멈췄으면 예전처럼 예약한다. 읽지 못하면 마지막으로 읽은 것을 따른다.
     let pushOn = readCachedPushOn(host);
     if (session) {
       try {
-        pushOn = (await readPushDeviceCount(host, cfg, session)) > 0;
+        pushOn = pushCoversIphone(await readPushDoc(host, cfg, session), now.getTime());
         updateCache(host, { pushOn });
       } catch {
         // 보관한 값을 쓴다.

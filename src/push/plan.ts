@@ -14,7 +14,7 @@ export type Outgoing = {
   url: string;
   /** 같은 알림이 두 번 와도 하나로 보이게 하는 이름. */
   tag: string;
-  /** 울릴 때(밀리초). 시험 알림은 요청한 때(지금보다 늦으면 지금). */
+  /** 울릴 때(밀리초). 시험 알림은 요청한 때(기기 시계가 빠르면 조금 뒤일 수 있다). */
   at: number;
 };
 
@@ -43,17 +43,19 @@ export function planSends(users: UserData[], from: Date, to: Date, now: number):
   for (const u of users) {
     const devices = Object.entries(u.push.devices);
     if (devices.length === 0) continue;
+    // 같은 토큰이 두 기기 이름으로 적혀 있어도(기기 이름을 잃고 다시 켰다) 한 번만 보낸다.
+    const unique = devices.filter(([, d], i) => devices.findIndex(([, x]) => x.token === d.token) === i);
     for (const t of allAlarmTriggers(u.events, from, to)) {
       const { title, body } = alarmText(t);
-      for (const [deviceId, d] of devices) {
+      for (const [deviceId, d] of unique) {
         sends.push({ uid: u.uid, deviceId, token: d.token, title, body, url: `/#${t.occurrence}`, tag: `calfif:${t.key}`, at: t.at.getTime() });
       }
     }
     const handled = u.push.sender?.testAt ?? 0;
     if (u.push.testAt > handled && now - u.push.testAt < TEST_FRESH_MS && u.push.testAt <= now + 60_000) {
       tests.push({ uid: u.uid, testAt: u.push.testAt });
-      for (const [deviceId, d] of devices) {
-        sends.push({ uid: u.uid, deviceId, token: d.token, title: TEST_TITLE, body: TEST_BODY, url: '/', tag: `calfif-test:${u.push.testAt}`, at: Math.min(u.push.testAt, now) });
+      for (const [deviceId, d] of unique) {
+        sends.push({ uid: u.uid, deviceId, token: d.token, title: TEST_TITLE, body: TEST_BODY, url: '/', tag: `calfif-test:${u.push.testAt}`, at: u.push.testAt });
       }
     }
   }

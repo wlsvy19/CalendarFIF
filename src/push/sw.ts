@@ -20,7 +20,10 @@ export function noteFrom(payload: unknown): NoteSpec {
   return { title, body, tag, url };
 }
 
-type ClientLike = { url: string; focus?(): Promise<unknown>; navigate?(url: string): Promise<unknown> };
+type ClientLike = { url: string; focus?(): Promise<unknown>; navigate?(url: string): Promise<unknown>; postMessage?(message: unknown): void };
+
+/** 창을 옮기지 못했을 때 웹앱에 날짜를 알리는 메시지의 type. */
+export const OPEN_MESSAGE = 'calfif-open';
 type PushEventLike = { data: { json(): unknown; text(): string } | null; waitUntil(p: Promise<unknown>): void };
 type ClickEventLike = { notification: { close(): void; data?: unknown }; waitUntil(p: Promise<unknown>): void };
 export type SwScope = {
@@ -62,13 +65,17 @@ export function installPushHandlers(scope: SwScope): void {
       const open = all.find((c) => c.url.startsWith(scope.location.origin));
       if (open?.focus) {
         await open.focus();
-        if (open.navigate && open.url !== target) {
+        if (open.url === target) return;
+        let moved = false;
+        if (open.navigate) {
           try {
             await open.navigate(target);
+            moved = true;
           } catch {
-            // 옮기지 못해도 앞으로는 왔다.
+            // 이 서비스 워커가 맡지 않은 창이면 옮기지 못한다. 아래 메시지로 알린다.
           }
         }
+        if (!moved && path.includes('#')) open.postMessage?.({ type: OPEN_MESSAGE, hash: path.slice(path.indexOf('#')) });
         return;
       }
       await scope.clients.openWindow(target);

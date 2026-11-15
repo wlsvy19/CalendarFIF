@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AlarmRecord, EventMap } from '../core/events';
-import { newDeviceId, parsePushDoc, senderAlive, type PushDoc } from './doc';
+import { newDeviceId, parsePushDoc, pushCoversIphone, senderAlive, type PushDoc } from './doc';
 import { TEST_BODY, TEST_TITLE, alarmText, fcmMessage, planSends, type UserData } from './plan';
 
 const alarm = (over: Partial<AlarmRecord> = {}): AlarmRecord => ({
@@ -22,9 +22,18 @@ describe('parsePushDoc', () => {
     expect(parsePushDoc(null)).toEqual({ devices: {}, testAt: 0, sender: null });
   });
 
-  it('기기 이름은 영문과 숫자 20자', () => {
-    const id = newDeviceId();
-    expect(id).toMatch(/^[A-Za-z0-9]{20}$/);
+  it('기기 이름은 영문과 숫자 20자이고 영문자로 시작한다', () => {
+    expect(newDeviceId()).toMatch(/^[A-Za-z][A-Za-z0-9]{19}$/);
+    expect(newDeviceId(() => 0.999)).toMatch(/^z9{19}$/);
+  });
+
+  it('아이폰에서 켰고 알림 서버가 살아 있을 때만 푸시가 아이폰 알림을 맡는다', () => {
+    const now = at(18, 0).getTime();
+    const alive = { at: now - 60_000, testAt: 0, error: '' };
+    expect(pushCoversIphone(push({ sender: alive }), now)).toBe(true);
+    expect(pushCoversIphone(push({ sender: null }), now)).toBe(false);
+    expect(pushCoversIphone(push({ sender: alive, devices: { [D1]: { token: 't', label: '브라우저', at: 1 } } }), now)).toBe(false);
+    expect(pushCoversIphone(null, now)).toBe(false);
   });
 
   it('보내는 쪽이 15분 안에 확인했고 문제가 없으면 살아 있다', () => {
@@ -46,6 +55,12 @@ describe('planSends', () => {
       [D1, 't1', '회의', '17:48 알림', '/#2026-11-15', 'calfif:a@2026-11-15@0', at(17, 48).getTime()],
       [D2, 't2', '회의', '17:48 알림', '/#2026-11-15', 'calfif:a@2026-11-15@0', at(17, 48).getTime()],
     ]);
+  });
+
+  it('같은 토큰이 두 이름으로 적혀 있어도 한 번만 보낸다', () => {
+    const u = user({ a: alarm() }, push({ devices: { [D1]: { token: 'same', label: '', at: 1 }, [D2]: { token: 'same', label: '', at: 2 } }, testAt: at(17, 47).getTime() }));
+    const { sends } = planSends([u], at(17, 47, 30), at(17, 48, 30), at(17, 47, 30).getTime());
+    expect(sends.map((s) => [s.deviceId, s.title])).toEqual([[D1, TEST_TITLE], [D1, '회의']]);
   });
 
   it('기기가 없거나 완료한 알림은 보내지 않는다', () => {

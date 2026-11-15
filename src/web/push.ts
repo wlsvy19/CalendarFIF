@@ -1,5 +1,5 @@
 import type { FirebaseApp } from 'firebase/app';
-import { deleteField, doc, onSnapshot, setDoc, updateDoc, type Firestore } from 'firebase/firestore';
+import { FieldPath, deleteField, doc, onSnapshot, setDoc, updateDoc, type Firestore } from 'firebase/firestore';
 import { MAX_DEVICES, newDeviceId, parsePushDoc, senderAlive, type PushDevice, type PushDoc } from '../push/doc';
 import type { KeyValueStore } from '../sync/outbox';
 
@@ -12,6 +12,9 @@ export const TEST_WAIT_MS = 150_000;
 /** 토큰을 이보다 오래 적지 않았으면 열 때 다시 적는다(FCM은 오래 쓰지 않은 토큰을 지운다). */
 const REFRESH_MS = 7 * 86_400_000;
 const TOKEN_WAIT_MS = 20_000;
+/** 서버에 쓰기를 기다리는 가장 긴 시간. 넘으면 단추를 풀고 연결되면 올라간다고 알린다(쓰기는 기기에 남아 연결되면 올라간다). */
+const WRITE_WAIT_MS = 15_000;
+const SLOW = '연결이 느립니다. 연결되면 저장됩니다. 잠시 뒤 다시 확인해 주세요.';
 
 type Permission = 'default' | 'granted' | 'denied';
 
@@ -154,10 +157,15 @@ export class PushClient {
           // 저장하지 못하면 다음에 열 때 새 기기로 다시 적는다.
         }
       }
-      // 기기가 너무 많으면 가장 오래 적지 않은 것을 뺀다.
+      // 같은 토큰이 다른 이름으로 적혀 있으면(이 기기의 이름을 잃었다) 지우고, 기기가 너무 많으면 가장 오래 적지 않은 것을 뺀다.
       const others = Object.entries(this.doc?.devices ?? {}).filter(([k]) => k !== id).sort((a, b) => a[1].at - b[1].at);
-      for (const [old] of others.slice(0, Math.max(0, others.length - (MAX_DEVICES - 1)))) await remote.removeDevice(old);
-      await remote.saveDevice(id, { token, label, at: now() });
+      const same = others.filter(([, d]) => d.token === token).map(([k]) => k);
+      const rest = others.filter(([k]) => !same.includes(k));
+      const drop = [...same, ...rest.slice(0, Math.max(0, rest.length - (MAX_DEVICES - 1))).map(([k]) => k)];
+      await withTimeout((async () => {
+        for (const old of drop) await remote.removeDevice(old);
+        await remote.saveDevice(id, { token, label, at: now() });
+      })(), WRITE_WAIT_MS, SLOW);
       this.set(false, '켰습니다. 아래 "시험 알림 보내기"로 확인해 보세요.');
     } catch (e) {
       this.set(false, `알림을 켜지 못했습니다: ${errorText(e)}`);
@@ -169,7 +177,7 @@ export class PushClient {
     const id = this.deviceId();
     this.set(true, '끄는 중…');
     try {
-      if (id) await this.deps.remote.removeDevice(id);
+      if (id) await withTimeout(this.deps.remote.removeDevice(id), WRITE_WAIT_MS, SLOW);
       try {
         this.deps.storage.removeItem(DEVICE_KEY);
       } catch {
@@ -188,7 +196,7 @@ export class PushClient {
     const at = this.deps.now();
     this.set(true, '시험 알림을 부탁하는 중…');
     try {
-      await this.deps.remote.requestTest(at);
+      await withTimeout(this.deps.remote.requestTest(at), WRITE_WAIT_MS, SLOW);
     } catch (e) {
       this.set(false, `부탁하지 못했습니다: ${errorText(e)}`);
       return;
@@ -219,6 +227,7 @@ export class PushClient {
     try {
       const token = await withTimeout(platform.token(), TOKEN_WAIT_MS, 'timeout');
       const current = this.doc?.devices[id];
+      for (const [other, d] of Object.entries(this.doc?.devices ?? {})) if (other !== id && d.token === token) await remote.removeDevice(other);
       if (!current || current.token !== token || now() - current.at > REFRESH_MS) await remote.saveDevice(id, { token, label, at: now() });
     } catch {
       // 다음에 열 때 다시 한다.
@@ -231,7 +240,7 @@ export function firestorePushRemote(db: Firestore, uid: string): PushRemote {
   return {
     watch: (onDoc, onError) => onSnapshot(ref, (snap) => onDoc(parsePushDoc(snap.exists() ? snap.data() : {})), onError),
     saveDevice: (id, device) => setDoc(ref, { devices: { [id]: device } }, { merge: true }),
-    removeDevice: (id) => updateDoc(ref, { [`devices.${id}`]: deleteField() }).catch((e: unknown) => {
+    removeDevice: (id) => updateDoc(ref, new FieldPath('devices', id), deleteField()).catch((e: unknown) => {
       // 문서가 없으면 지울 것도 없다.
       if ((e as { code?: string })?.code === 'not-found') return;
       throw e;

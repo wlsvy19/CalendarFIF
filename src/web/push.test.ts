@@ -80,6 +80,26 @@ describe('PushClient', () => {
     expect(Object.keys((s.client.view().doc as PushDoc).devices)).toHaveLength(5);
   });
 
+  it('같은 토큰이 다른 이름으로 적혀 있으면(이 기기의 이름을 잃었다) 그 이름을 지운다', async () => {
+    const s = setup({ doc: { devices: { BBBBBBBBBBBBBBBBBBBB: { token: 'tok-new', label: '아이폰', at: 5 } }, testAt: 0, sender: null } });
+    s.client.start();
+    await s.client.enable();
+    expect(s.remote.removeDevice).toHaveBeenCalledWith('BBBBBBBBBBBBBBBBBBBB');
+    expect(Object.values((s.client.view().doc as PushDoc).devices).map((d) => d.token)).toEqual(['tok-new']);
+  });
+
+  it('서버가 답하지 않으면 15초 뒤에 단추를 풀고 연결되면 저장된다고 알린다', async () => {
+    vi.useFakeTimers();
+    const s = setup();
+    s.remote.saveDevice = vi.fn(() => new Promise<void>(() => {}));
+    s.client.start();
+    const done = s.client.enable();
+    await vi.advanceTimersByTimeAsync(15_000);
+    await done;
+    expect(s.client.view().busy).toBe(false);
+    expect(s.client.view().message).toContain('연결되면 저장됩니다');
+  });
+
   it('끄면 문서에서 빼고 이 기기의 이름과 토큰을 지운다', async () => {
     const s = setup({ deviceId: 'AAAAAAAAAAAAAAAAAAAA', doc: { devices: { AAAAAAAAAAAAAAAAAAAA: { token: 't', label: '', at: 1 } }, testAt: 0, sender: null } });
     s.setPerm('granted');

@@ -44,6 +44,12 @@ export const LOOKAHEAD_MS = 60_000;
 export const CATCH_UP_MS = 10 * 60_000;
 /** 이보다 오래 확인을 적지 않았으면 sender.at을 새로 적는다(웹앱이 보내는 쪽이 살아 있는지 본다). */
 export const HEARTBEAT_MS = 5 * 60_000;
+/** 이보다 먼저 울릴 것만 이번 실행에서 기다렸다 보낸다. 나머지는 다음 실행(1분 뒤)이 맡는다. 기다리는 시간도 Apps Script의 하루 실행 시간(90분)에 들어가서다. */
+export const SLEEP_MAX_MS = 30_000;
+/** 맡았지만 끝내지 못한 것(실행이 도중에 죽었다)은 이만큼 지나면 다시 맡을 수 있다. */
+export const CLAIM_TTL_MS = 3 * 60_000;
+/** 스크립트 속성 값 하나의 한도(9KB)보다 조금 작게. 넘으면 오래된 기록부터 버린다. */
+const SENT_MAX_CHARS = 8_500;
 const USERS_TTL_S = 600;
 const TOKEN_TTL_S = 3000;
 
@@ -114,6 +120,11 @@ const docsBase = (sa: ServiceAccount): string => `https://firestore.googleapis.c
 const docName = (sa: ServiceAccount, path: string): string => `projects/${sa.project_id}/databases/(default)/documents/${path}`;
 const auth = (ctx: Ctx): Record<string, string> => ({ Authorization: `Bearer ${ctx.token}` });
 
+/** 토큰이 거절되면(401) 캐시에서 지워 다음 실행이 새로 받게 한다. */
+function dropTokenOn401(ctx: Ctx, code: number): void {
+  if (code === 401) ctx.host.CacheService.getScriptCache().remove(TOKEN_CACHE);
+}
+
 function failText(what: string, res: GasResponse): string {
   return `${what}(${res.getResponseCode()}): ${res.getContentText().slice(0, 300)}`;
 }
@@ -136,7 +147,10 @@ export function listUsers(ctx: Ctx): string[] {
     // showMissing: users/{uid} 문서 자체는 없고 아래 문서만 있는 계정도 나온다.
     const url = `${docsBase(ctx.sa)}/users?showMissing=true&pageSize=300${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`;
     const res = ctx.host.UrlFetchApp.fetch(url, { method: 'get', headers: auth(ctx), muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) throw new SenderError(failText('사용자 목록을 읽지 못했습니다', res));
+    if (res.getResponseCode() !== 200) {
+      dropTokenOn401(ctx, res.getResponseCode());
+      throw new SenderError(failText('사용자 목록을 읽지 못했습니다', res));
+    }
     const json: unknown = JSON.parse(res.getContentText() || '{}');
     const docs = isObject(json) && Array.isArray(json.documents) ? json.documents : [];
     for (const d of docs) {
@@ -151,8 +165,8 @@ export function listUsers(ctx: Ctx): string[] {
   return uids;
 }
 
-/** exists: 푸시 문서가 있다(없으면 상태를 적지 않는다). */
-export type SenderUser = UserData & { exists: boolean };
+/** exists: 푸시 문서가 있다(없으면 상태를 적지 않는다). pushUpdateTime: 읽은 푸시 문서의 때(기기를 지울 때 그 사이에 바뀌지 않았는지 본다). */
+export type SenderUser = UserData & { exists: boolean; pushUpdateTime: string };
 
 /** 사람마다 알림 문서와 푸시 문서를 한 번에 읽는다. */
 export function readUsers(ctx: Ctx, uids: string[]): SenderUser[] {
@@ -165,21 +179,25 @@ export function readUsers(ctx: Ctx, uids: string[]): SenderUser[] {
     payload: JSON.stringify({ documents: names }),
     muteHttpExceptions: true,
   });
-  if (res.getResponseCode() !== 200) throw new SenderError(failText('알림 문서를 읽지 못했습니다', res));
+  if (res.getResponseCode() !== 200) {
+    dropTokenOn401(ctx, res.getResponseCode());
+    throw new SenderError(failText('알림 문서를 읽지 못했습니다', res));
+  }
   const json: unknown = JSON.parse(res.getContentText() || '[]');
-  const found = new Map<string, unknown>();
+  const found = new Map<string, Record<string, unknown>>();
   for (const r of Array.isArray(json) ? json : []) {
     if (isObject(r) && isObject(r.found) && typeof r.found.name === 'string') found.set(r.found.name, r.found);
   }
   return uids.map((uid) => {
     const events = found.get(docName(ctx.sa, `users/${uid}/data/events`));
     const push = found.get(docName(ctx.sa, `users/${uid}/data/push`));
-    const pushFields = isObject(push) && isObject(push.fields) ? push.fields : null;
+    const pushFields = push && isObject(push.fields) ? push.fields : null;
     return {
       uid,
       events: events ? parseEventsDocument(events) : {},
       push: parsePushDoc(pushFields ? decodeValue({ mapValue: { fields: pushFields } }) : {}),
-      exists: pushFields !== null,
+      exists: push !== undefined,
+      pushUpdateTime: push && typeof push.updateTime === 'string' ? push.updateTime : '',
     };
   });
 }
@@ -206,15 +224,18 @@ function fcmRequest(ctx: Ctx, body: unknown): GasRequest {
   };
 }
 
-/** 보낸 것을 기억하는 이름: 사람, 알림, 기기, 울릴 때. 시각을 고친 알림은 새 이름이라 새 시각에 다시 보낸다. */
-export const sendKey = (s: Outgoing): string => `${s.uid}|${s.tag}|${s.deviceId}|${s.at}`;
+/** 보낸 것을 기억하는 이름: 사람, 기기, 알림, 울릴 때(초, 36진수). 시각을 고친 알림은 새 이름이라 새 시각에 다시 보낸다. 짧게 줄여 스크립트 속성 한도 안에 둔다. */
+export const sendKey = (s: Outgoing): string => `${s.uid.slice(0, 12)}|${s.deviceId.slice(0, 8)}|${s.tag}|${Math.round(s.at / 1000).toString(36)}`;
 
 export type Delivery = { errors: string[]; dead: Set<string>; sent: number };
 
-/** 보낼 것들을 울릴 때마다 묶어 그때까지 기다렸다 보낸다. 사람마다 문제와 지울 기기를, 그리고 다시 보낼 것(failed)을 모은다. */
-export function deliver(ctx: Ctx, sends: Outgoing[]): { byUser: Map<string, Delivery>; failed: string[] } {
+/**
+ * 보낼 것들을 울릴 때마다 묶어 그때까지 기다렸다 보낸다. 사람마다 문제와 지울 기기를 모으고, 끝낸 것(보냈거나 토큰이 죽었다)의 이름을 done에 담는다.
+ * 묶음 하나를 보내다 던져도(연결 끊김, 한도) 그 묶음은 문제로 적고 다음 묶음으로 간다. done에 없는 것은 부른 쪽이 다시 보낼 수 있게 푼다.
+ */
+export function deliver(ctx: Ctx, sends: Outgoing[]): { byUser: Map<string, Delivery>; done: Set<string> } {
   const out = new Map<string, Delivery>();
-  const failed: string[] = [];
+  const done = new Set<string>();
   const entry = (uid: string) => {
     let e = out.get(uid);
     if (!e) out.set(uid, (e = { errors: [], dead: new Set(), sent: 0 }));
@@ -223,34 +244,53 @@ export function deliver(ctx: Ctx, sends: Outgoing[]): { byUser: Map<string, Deli
   const groups = new Map<number, Outgoing[]>();
   for (const s of sends) groups.set(s.at, [...(groups.get(s.at) ?? []), s]);
   for (const at of [...groups.keys()].sort((a, b) => a - b)) {
-    const wait = at - ctx.host.now();
-    if (wait > 0) ctx.host.Utilities.sleep(Math.min(wait, LOOKAHEAD_MS));
     const group = groups.get(at)!;
-    const responses = ctx.host.UrlFetchApp.fetchAll(group.map((s) => fcmRequest(ctx, fcmMessage(s))));
+    let responses: GasResponse[];
+    try {
+      const wait = at - ctx.host.now();
+      if (wait > 0) ctx.host.Utilities.sleep(Math.min(wait, SLEEP_MAX_MS));
+      responses = ctx.host.UrlFetchApp.fetchAll(group.map((s) => fcmRequest(ctx, fcmMessage(s))));
+    } catch (e) {
+      for (const s of group) entry(s.uid).errors.push(`보내지 못했습니다: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300));
+      continue;
+    }
     group.forEach((s, i) => {
       const res = responses[i];
       const code = res.getResponseCode();
       const text = res.getContentText();
       const kind = classify(code, text);
       const e = entry(s.uid);
-      if (kind === 'ok') e.sent += 1;
-      else if (kind === 'dead') e.dead.add(s.deviceId);
-      else {
+      dropTokenOn401(ctx, code);
+      if (kind === 'ok') {
+        e.sent += 1;
+        done.add(sendKey(s));
+      } else if (kind === 'dead') {
+        e.dead.add(s.deviceId);
+        done.add(sendKey(s));
+      } else {
         e.errors.push(`FCM ${code}: ${text.slice(0, 200)}`);
-        failed.push(sendKey(s));
       }
     });
   }
-  return { byUser: out, failed };
+  return { byUser: out, done };
 }
 
-/** 보낸(또는 보내기로 맡은) 것들. 이름 -> 울릴 때. 다시 볼 일이 없는 오래된 것은 버린다. */
-function readSent(host: GasHost, now: number): Map<string, number> {
-  const out = new Map<string, number>();
+/** 보냈거나 맡은 기록 하나. a: 울릴 때, c: 맡은 때, d: 끝냈으면 1. */
+type Claim = { a: number; c: number; d: 0 | 1 };
+
+/** 보낸(또는 맡은) 기록. 다시 볼 일이 없는 오래된 것과, 맡았지만 오래 끝내지 못한 것(실행이 죽었다)은 버린다. */
+function readSent(host: GasHost, now: number): Map<string, Claim> {
+  const out = new Map<string, Claim>();
   try {
     const raw: unknown = JSON.parse(host.PropertiesService.getScriptProperties().getProperty(SENT_PROPERTY) ?? '{}');
     if (isObject(raw)) {
-      for (const [k, v] of Object.entries(raw)) if (typeof v === 'number' && v >= now - CATCH_UP_MS - 2 * LOOKAHEAD_MS) out.set(k, v);
+      for (const [k, v] of Object.entries(raw)) {
+        if (!isObject(v) || typeof v.a !== 'number' || typeof v.c !== 'number') continue;
+        const claim: Claim = { a: v.a, c: v.c, d: v.d === 1 ? 1 : 0 };
+        if (claim.a < now - CATCH_UP_MS - 2 * LOOKAHEAD_MS) continue;
+        if (claim.d === 0 && now - claim.c > CLAIM_TTL_MS) continue;
+        out.set(k, claim);
+      }
     }
   } catch {
     // 깨졌으면 비운다(최악은 10분 안의 알림을 한 번 더 보내는 것).
@@ -258,19 +298,48 @@ function readSent(host: GasHost, now: number): Map<string, number> {
   return out;
 }
 
-function writeSent(host: GasHost, sent: Map<string, number>): void {
-  host.PropertiesService.getScriptProperties().setProperty(SENT_PROPERTY, JSON.stringify(Object.fromEntries(sent)));
+/** 기록을 적는다. 한도를 넘으면 끝낸 것 가운데 울릴 때가 이른 것부터 버린다. */
+export function writeSent(host: GasHost, sent: Map<string, Claim>): void {
+  const entries = [...sent.entries()];
+  let text = JSON.stringify(Object.fromEntries(entries));
+  if (text.length > SENT_MAX_CHARS) {
+    entries.sort((x, y) => y[1].d - x[1].d || x[1].a - y[1].a);
+    while (entries.length > 0 && text.length > SENT_MAX_CHARS) {
+      entries.shift();
+      text = JSON.stringify(Object.fromEntries(entries));
+    }
+  }
+  host.PropertiesService.getScriptProperties().setProperty(SENT_PROPERTY, text);
 }
 
 const intValue = (n: number) => ({ integerValue: String(Math.round(n)) });
 
-/** 푸시 문서에 보내는 쪽의 상태를 적고 쓸 수 없게 된 기기를 지운다. 문서가 없으면 만들지 않는다. */
-export function writeStatus(ctx: Ctx, uid: string, status: { at: number; testAt: number; error: string }, dead: string[]): void {
-  const mask = ['sender', ...dead.map((id) => `devices.${id}`)].map((f) => `updateMask.fieldPaths=${encodeURIComponent(f)}`).join('&');
-  const url = `${docsBase(ctx.sa)}/users/${uid}/data/push?${mask}&currentDocument.exists=true`;
+/** 필드 경로의 한 칸. 영문자나 _로 시작하는 이름이 아니면 백틱으로 감싼다(숫자로 시작하는 기기 이름). */
+export function fieldSegment(s: string): string {
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(s)) return s;
+  const BT = String.fromCharCode(96);
+  const BS = String.fromCharCode(92);
+  let escaped = '';
+  for (const ch of s) escaped += ch === BT || ch === BS ? BS + ch : ch;
+  return BT + escaped + BT;
+}
+
+/** 푸시 문서에 보내는 쪽의 상태를 적는다. 문서가 없으면 만들지 않는다. */
+export function writeStatus(ctx: Ctx, uid: string, status: { at: number; testAt: number; error: string }): void {
+  const url = `${docsBase(ctx.sa)}/users/${uid}/data/push?updateMask.fieldPaths=sender&currentDocument.exists=true`;
   const body = { fields: { sender: { mapValue: { fields: { at: intValue(status.at), testAt: intValue(status.testAt), error: { stringValue: status.error.slice(0, 500) } } } } } };
   const res = ctx.host.UrlFetchApp.fetch(url, { method: 'patch', contentType: 'application/json', headers: auth(ctx), payload: JSON.stringify(body), muteHttpExceptions: true });
   if (res.getResponseCode() !== 200 && res.getResponseCode() !== 404) ctx.host.Logger.log(failText(`${uid}의 상태를 적지 못했습니다`, res));
+}
+
+/** 쓸 수 없게 된 토큰의 기기를 지운다. 읽은 뒤에 문서가 바뀌었으면(그 기기가 새 토큰으로 다시 적었을 수 있다) 지우지 않고 다음 실행에 맡긴다. */
+export function removeDevices(ctx: Ctx, uid: string, ids: string[], updateTime: string): void {
+  if (ids.length === 0) return;
+  const mask = ids.map((id) => `updateMask.fieldPaths=${encodeURIComponent(`devices.${fieldSegment(id)}`)}`).join('&');
+  const precondition = updateTime ? `currentDocument.updateTime=${encodeURIComponent(updateTime)}` : 'currentDocument.exists=true';
+  const url = `${docsBase(ctx.sa)}/users/${uid}/data/push?${mask}&${precondition}`;
+  const res = ctx.host.UrlFetchApp.fetch(url, { method: 'patch', contentType: 'application/json', headers: auth(ctx), payload: JSON.stringify({ fields: {} }), muteHttpExceptions: true });
+  if (res.getResponseCode() !== 200) ctx.host.Logger.log(failText(`${uid}의 기기를 지우지 못했습니다(다음에 다시 봅니다)`, res));
 }
 
 function checkTimeZone(host: GasHost): void {
@@ -286,9 +355,10 @@ function context(host: GasHost): Ctx {
 export type TickReport = { from: number; to: number; users: number; sent: number; skipped?: string };
 
 /**
- * 1분마다 부른다. [지금-10분, 지금+1분) 사이에 울릴 알림 가운데 아직 보내지 않은 것을 보낸다(앞으로 울릴 것은 그 시각까지 기다린다).
- * 보낼 것은 잠금 안에서 "보냄"으로 적은 뒤에 보내서, 겹쳐 도는 실행이 같은 것을 두 번 보내지 않는다. 보내지 못한 것은 지워 다음 실행이 다시 한다.
- * 알림을 울릴 시각 바로 앞에 만들어도 다음 실행이 본다(맡은 구간을 넘기지 않는다).
+ * 1분마다 부른다. [지금-10분, 지금+30초] 사이에 울릴 알림 가운데 아직 보내지 않은 것을 보낸다(앞으로 울릴 것은 그 시각까지 기다린다).
+ * 보낼 것은 잠금 안에서 "맡음"으로 적은 뒤에 보내서 겹쳐 도는 실행이 같은 것을 두 번 보내지 않는다. 끝낸 것은 "끝냄"으로 바꾸고,
+ * 끝내지 못한 것은 풀어서 다음 실행이 다시 한다. 실행이 도중에 죽어 풀지 못한 것도 3분 뒤에는 다시 맡을 수 있다.
+ * 알림을 울릴 시각 바로 앞에 만들어도 다음 실행이 본다.
  */
 export function tick(host: GasHost): TickReport {
   checkTimeZone(host);
@@ -309,20 +379,30 @@ export function tick(host: GasHost): TickReport {
     const planned = planSends(users, new Date(from), new Date(to), now);
     tests = planned.tests;
     const sent = readSent(host, now);
-    mine = planned.sends.filter((s) => !sent.has(sendKey(s)));
-    for (const s of mine) sent.set(sendKey(s), s.at);
+    mine = planned.sends.filter((s) => s.at <= now + SLEEP_MAX_MS && !sent.has(sendKey(s)));
+    for (const s of mine) sent.set(sendKey(s), { a: s.at, c: now, d: 0 });
     writeSent(host, sent);
   } finally {
     lock.releaseLock();
   }
-  const { byUser, failed } = deliver(ctx, mine);
-  if (failed.length > 0 && lock.tryLock(30_000)) {
-    try {
-      const sent = readSent(host, host.now());
-      for (const k of failed) sent.delete(k);
-      writeSent(host, sent);
-    } finally {
-      lock.releaseLock();
+  let byUser = new Map<string, Delivery>();
+  let done = new Set<string>();
+  try {
+    ({ byUser, done } = deliver(ctx, mine));
+  } finally {
+    // 끝낸 것은 끝냄으로, 나머지(보내지 못했거나 도중에 던졌다)는 풀어서 다음 실행이 다시 한다.
+    if (mine.length > 0 && lock.tryLock(30_000)) {
+      try {
+        const sent = readSent(host, host.now());
+        for (const s of mine) {
+          const k = sendKey(s);
+          if (done.has(k)) sent.set(k, { a: s.at, c: sent.get(k)?.c ?? host.now(), d: 1 });
+          else sent.delete(k);
+        }
+        writeSent(host, sent);
+      } finally {
+        lock.releaseLock();
+      }
     }
   }
   let count = 0;
@@ -330,11 +410,13 @@ export function tick(host: GasHost): TickReport {
     if (!u.exists || Object.keys(u.push.devices).length === 0) continue;
     const r = byUser.get(u.uid);
     count += r?.sent ?? 0;
+    // 기기를 먼저 지운다(상태를 먼저 적으면 문서의 때가 바뀌어 지우기의 조건이 늘 어긋난다).
+    if (r && r.dead.size > 0) removeDevices(ctx, u.uid, [...r.dead], u.pushUpdateTime);
     const test = tests.find((t) => t.uid === u.uid);
     const prev = u.push.sender;
     const next = { at: host.now(), testAt: test?.testAt ?? prev?.testAt ?? 0, error: r?.errors[0] ?? '' };
-    const due = !prev || next.at - prev.at >= HEARTBEAT_MS || next.testAt !== prev.testAt || next.error !== prev.error || (r?.dead.size ?? 0) > 0;
-    if (due) writeStatus(ctx, u.uid, next, [...(r?.dead ?? [])]);
+    const due = !prev || next.at - prev.at >= HEARTBEAT_MS || next.testAt !== prev.testAt || next.error !== prev.error;
+    if (due) writeStatus(ctx, u.uid, next);
   }
   return { from, to, users: users.length, sent: count };
 }

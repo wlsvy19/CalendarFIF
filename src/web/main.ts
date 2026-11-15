@@ -16,6 +16,8 @@ import { startAlarmClock } from './alarmClock';
 import { playTone, unlockAudioOnGesture } from './tones';
 import { showAlarmBanner } from './ui/alarmBanner';
 import { PushClient, browserPushPlatform, firestorePushRemote } from './push';
+import { IOS_LABEL } from '../push/doc';
+import { OPEN_MESSAGE } from '../push/sw';
 import type { PushSectionDeps } from './ui/pushSection';
 import { FirestoreEventsSource } from '../sync/firestoreEvents';
 import { loadAppearance, saveAppearance, applyAppearance, type Appearance } from './appearance';
@@ -78,6 +80,14 @@ startHolidayFeed({
   },
 });
 
+// 푸시 알림을 누르면 서비스 워커가 열린 창을 앞으로 가져오고 그 날짜로 옮긴다. 창을 옮기지 못하면 이 메시지로 날짜를 알려 준다.
+if (!DESKTOP && typeof navigator !== 'undefined' && navigator.serviceWorker) {
+  navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => {
+    const data = event.data as { type?: unknown; hash?: unknown } | null;
+    if (data?.type === OPEN_MESSAGE && typeof data.hash === 'string' && /^#\d{4}-\d{2}-\d{2}$/.test(data.hash) && location.hash !== data.hash) location.hash = data.hash;
+  });
+}
+
 // 로그인 뒤 화면이 열려 있는 동안 메인 프로세스의 명령을 받는 동작들. 로그인 전에는 null이라 명령을 무시한다.
 // 저장되지 않아 이 페이지의 메모리에만 있는 편집이 있는가. mountMain이 로그인 중에만 채운다(새 버전으로 다시 읽기를 미룰지 정한다).
 let unsavedOnlyInMemory: () => boolean = () => false;
@@ -119,7 +129,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
         remote: firestorePushRemote(db, session.uid),
         storage: storage.store,
         now: () => Date.now(),
-        label: ios ? '아이폰' : '브라우저',
+        label: ios ? IOS_LABEL : '브라우저',
       });
   const stopPush = push ? push.start() : () => {};
   let appearance: Appearance | undefined = DESKTOP ? loadAppearance(storage.store) : undefined;

@@ -13,7 +13,7 @@ describe('noteFrom', () => {
   });
 });
 
-function makeScope(clients: Array<{ url: string; focus?: () => Promise<unknown>; navigate?: (u: string) => Promise<unknown> }> = []) {
+function makeScope(clients: Array<{ url: string; focus?: () => Promise<unknown>; navigate?: (u: string) => Promise<unknown>; postMessage?: (m: unknown) => void }> = []) {
   const handlers: Record<string, (e: never) => void> = {};
   const shown: Array<{ title: string; options: Record<string, unknown> }> = [];
   const opened: string[] = [];
@@ -53,6 +53,12 @@ describe('installPushHandlers', () => {
     expect(close).toHaveBeenCalled();
     expect(focus).toHaveBeenCalled();
     expect(navigate).toHaveBeenCalledWith('https://app.example/#2026-11-16');
+    // 창을 옮기지 못하면 웹앱에 날짜를 메시지로 알린다.
+    const posted: unknown[] = [];
+    const stuck = makeScope([{ url: 'https://app.example/', focus, navigate: async () => { throw new Error('not controlled'); }, postMessage: (m: unknown) => posted.push(m) } as never]);
+    stuck.handlers.notificationclick({ notification: { close: vi.fn(), data: { url: '/#2026-11-17' } }, waitUntil: (p: Promise<unknown>) => { wait = p; } } as never);
+    await wait;
+    expect(posted).toEqual([{ type: 'calfif-open', hash: '#2026-11-17' }]);
     const none = makeScope([]);
     none.handlers.notificationclick({ notification: { close: vi.fn(), data: { url: 'https://evil.example/' } }, waitUntil: (p: Promise<unknown>) => { wait = p; } } as never);
     await wait;

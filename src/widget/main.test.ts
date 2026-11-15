@@ -853,7 +853,12 @@ describe('아이폰 알림 예약', () => {
     expect(host.state.setWidgets).toHaveLength(1);
   });
 
-  const pushDoc = { fields: { devices: { mapValue: { fields: { AAAAAAAAAAAAAAAAAAAA: { mapValue: { fields: { token: { stringValue: 't' }, label: { stringValue: '아이폰' }, at: { integerValue: '1' } } } } } } } } };
+  // 아이폰에서 켰고 알림 서버가 1분 전에 확인한 푸시 문서. label이나 sender를 바꿔 다른 경우를 만든다.
+  const pushDocOf = (label: string, senderAt: number | null) => ({ fields: {
+    devices: { mapValue: { fields: { AAAAAAAAAAAAAAAAAAAA: { mapValue: { fields: { token: { stringValue: 't' }, label: { stringValue: label }, at: { integerValue: '1' } } } } } } },
+    ...(senderAt === null ? {} : { sender: { mapValue: { fields: { at: { integerValue: String(senderAt) }, testAt: { integerValue: '0' }, error: { stringValue: '' } } } } }),
+  } });
+  const pushDoc = pushDocOf('아이폰', now().getTime() - 60_000);
   const withPush = (push: (req: FakeRequest) => FakeAnswer): Backend => ({
     read: (req) => (req.url.includes('/data/push') ? push(req) : req.url.includes('/data/events') ? { body: eventsDoc } : { body: memoDoc }),
   });
@@ -865,6 +870,14 @@ describe('아이폰 알림 예약', () => {
     expect(host.state.pending.map((n) => n.identifier)).toEqual(['other:keep']);
     expect(JSON.parse(host.state.files.get(CACHE)!)).toMatchObject({ pushOn: true });
     expect(host.state.setWidgets).toHaveLength(1);
+  });
+
+  it('알림 서버가 없거나 멈췄거나 PC 브라우저에서만 켰으면 예전처럼 예약한다', async () => {
+    for (const doc of [pushDocOf('아이폰', null), pushDocOf('아이폰', now().getTime() - 20 * 60_000), pushDocOf('브라우저', now().getTime() - 60_000)]) {
+      const host = makeNative({ keychain: loggedIn }, withPush(() => ({ body: doc })));
+      await run(host, cfg, now);
+      expect(host.state.scheduled.map((n) => n.identifier)).toEqual([ID]);
+    }
   });
 
   it('푸시 문서를 읽지 못하면 마지막으로 읽은 것을 따르고, 문서가 없으면 예약한다', async () => {
