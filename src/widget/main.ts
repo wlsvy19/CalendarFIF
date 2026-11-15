@@ -3,7 +3,7 @@ import { parseOfficialHolidays, setOfficialHolidays, type OfficialYear } from '.
 import type { DayValue } from '../core/types';
 import { parseEventMap, type EventMap } from '../core/events';
 import { clearAlarms, pendingStatus, scheduleAlarms, scheduleTest, type AlarmStatus, type TestResult } from './alarms';
-import { isApiError, readEvents, readMonth, refreshSession, signIn, type Config, type Session } from './api';
+import { isApiError, readEvents, readMonth, readPushDeviceCount, refreshSession, signIn, type Config, type Session } from './api';
 import type { Host, ListWidgetLike } from './host';
 import { makeWidget } from './render';
 import { renderTree } from './renderTree';
@@ -92,6 +92,19 @@ function writeCache(host: Host, data: MonthData, now: Date): void {
   updateCache(host, { monthId: data.monthId, days: data.days, savedAt: now.getTime() });
 }
 
+/** 마지막으로 읽은 "푸시 알림을 쓰는가". 읽은 적이 없으면 false. */
+function readCachedPushOn(host: Host): boolean {
+  try {
+    const fm = host.FileManager.local();
+    const path = cachePath(host);
+    if (!fm.fileExists(path)) return false;
+    const parsed = JSON.parse(fm.readString(path)) as { pushOn?: unknown } | null;
+    return parsed?.pushOn === true;
+  } catch {
+    return false;
+  }
+}
+
 /** 마지막으로 읽어 보관해 둔 알림 항목들. 없거나 깨졌으면 빈 것. */
 function readCachedEvents(host: Host): EventMap {
   try {
@@ -107,9 +120,10 @@ function readCachedEvents(host: Host): EventMap {
 
 /**
  * 알림 예약의 결과. scheduled: 예약된 수(알 수 없으면 null).
- * source: 서버의 알림 문서로 했다 / 서버를 읽지 못해 보관본으로 했다 / 읽을 권한이 없어 지웠다 / 알림 기능이 제때 끝나지 않았다.
+ * source: 서버의 알림 문서로 했다 / 서버를 읽지 못해 보관본으로 했다 / 읽을 권한이 없어 지웠다 / 알림 기능이 제때 끝나지 않았다 /
+ * 푸시 알림을 켠 기기가 있어 예약하지 않고 예약해 둔 것을 지웠다.
  */
-export type SyncResult = { scheduled: number | null; source: 'server' | 'cache' | 'denied' | 'stuck' };
+export type SyncResult = { scheduled: number | null; source: 'server' | 'cache' | 'denied' | 'stuck' | 'push' };
 const SYNC_UNKNOWN: SyncResult = { scheduled: null, source: 'cache' };
 
 /**
@@ -131,6 +145,22 @@ async function syncAlarms(host: Host, cfg: Config, session: Session | null, now:
           return { scheduled: 0, source: 'denied' };
         }
       }
+    }
+    // 푸시 알림을 켠 기기가 있으면 알림은 푸시로 간다. 위젯이 예약하면 같은 알림이 두 번 오므로 예약하지 않고 지운다.
+    // 읽지 못하면 마지막으로 읽은 것을 따른다.
+    let pushOn = readCachedPushOn(host);
+    if (session) {
+      try {
+        pushOn = (await readPushDeviceCount(host, cfg, session)) > 0;
+        updateCache(host, { pushOn });
+      } catch {
+        // 보관한 값을 쓴다.
+      }
+    }
+    if (pushOn) {
+      const cleared = clearAlarms(host).then(() => true);
+      const done = notifyCapMs === undefined ? await cleared : await waitAtMost(host, cleared, notifyCapMs, false);
+      return done ? { scheduled: 0, source: 'push' } : { scheduled: null, source: 'stuck' };
     }
     const source = items !== null ? 'server' : 'cache';
     const work = scheduleAlarms(host, items ?? readCachedEvents(host), now, cfg.appUrl).then((scheduled) => ({ scheduled }));
@@ -414,6 +444,7 @@ export function alarmReport(result: SyncResult, status: AlarmStatus | null): str
   const { scheduled, source } = result;
   if (source === 'stuck') return '아이폰 알림 예약이 제때 끝나지 않았습니다. 잠시 뒤 다시 실행해 주세요.';
   if (source === 'denied') return '이 계정은 알림을 읽을 권한이 없어 예약한 알림을 지웠습니다. 관리자에게 문의하세요.';
+  if (source === 'push') return '아이폰 알림은 CalendarFIF 홈 화면 앱의 푸시 알림으로 옵니다. 위젯은 알림을 예약하지 않습니다(같은 알림이 두 번 오지 않게).';
   if (scheduled === null) return `알림을 예약하지 못했습니다. ${PERMISSION_HINT}`;
   const lines: string[] = [];
   const count = status ? status.count : scheduled;
@@ -478,7 +509,7 @@ async function runInApp(host: Host, cfg: Config, now: () => Date): Promise<void>
   const menu = new host.Alert();
   const base = cfg.version ? `CalendarFIF 위젯 ${cfg.version}` : 'CalendarFIF 위젯';
   const count = verifiedCount(result.scheduled, status);
-  menu.title = count === null ? base : `${base} · 알림 ${count}개 예약됨`;
+  menu.title = result.source === 'push' ? `${base} · 푸시 알림 사용 중` : count === null ? base : `${base} · 알림 ${count}개 예약됨`;
   menu.message = alarmReport(result, status);
   menu.addAction('미리 보기');
   menu.addAction('시험 알림 (1분 뒤)');

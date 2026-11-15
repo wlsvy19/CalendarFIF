@@ -1,5 +1,6 @@
 import { normalizeColor } from '../core/color';
 import { parseEventMap, type EventMap } from '../core/events';
+import { parsePushDoc } from '../push/doc';
 import type { DayValue } from '../core/types';
 import type { Host } from './host';
 
@@ -132,8 +133,23 @@ export async function readEvents(host: Host, cfg: Config, session: Session): Pro
   throw { kind: isClientError(a.status) ? 'failed' : 'network', code } satisfies ApiError;
 }
 
+/** 푸시 알림 문서(users/{uid}/data/push)에 적힌 기기의 수. 문서가 없으면 0. 기기가 있으면 알림은 푸시로 가므로 위젯은 예약하지 않는다. */
+export async function readPushDeviceCount(host: Host, cfg: Config, session: Session): Promise<number> {
+  const base = cfg.firestoreBase ?? 'https://firestore.googleapis.com';
+  const url = `${base}/v1/projects/${cfg.projectId}/databases/(default)/documents/users/${encodeURIComponent(session.uid)}/data/push`;
+  const a = await send(host, url, 'GET', { Authorization: `Bearer ${session.idToken}` });
+  if (a.status === 404) return 0;
+  if (a.status === 200) {
+    const fields = isObject(a.json) && isObject(a.json.fields) ? a.json.fields : {};
+    return Object.keys(parsePushDoc(decodeValue({ mapValue: { fields } })).devices).length;
+  }
+  const code = errorCode(a);
+  if (a.status === 403) throw { kind: 'denied', code } satisfies ApiError;
+  throw { kind: isClientError(a.status) ? 'failed' : 'network', code } satisfies ApiError;
+}
+
 /** Firestore REST의 값 하나를 보통 값으로 푼다. 모르는 모양은 undefined. */
-function decodeValue(v: unknown): unknown {
+export function decodeValue(v: unknown): unknown {
   if (!isObject(v)) return undefined;
   if (typeof v.stringValue === 'string') return v.stringValue;
   if (typeof v.booleanValue === 'boolean') return v.booleanValue;

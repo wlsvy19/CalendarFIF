@@ -3,6 +3,7 @@ import { attachSwipeToClose } from './sheetSwipe';
 import type { Prefs } from '../prefs';
 import { prefsSection } from './prefsSection';
 import { widgetSection, type WidgetInstallDeps } from './widgetInstall';
+import { pushSection, type PushSectionDeps } from './pushSection';
 
 export type AccountProps = {
   email: string;
@@ -223,6 +224,8 @@ export function mountSettings(
     widget?: WidgetInstallDeps;
     /** 주면 맨 위에 화면·달력·메모 칸을 보인다. 고르면 바로 onChange에 새 설정을 준다. 웹앱의 설정 화면만 준다. */
     prefs?: { value: Prefs; onChange(next: Prefs): void };
+    /** 주면 "아이폰 알림" 칸(푸시 알림 켜기, 시험, 알림 서버 만들기)을 보인다. 웹앱의 설정 화면만 준다. */
+    push?: PushSectionDeps;
   },
 ): { destroy(): void; setManageUsers: AccountSection['setManageUsers'] } {
   const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -259,6 +262,11 @@ export function mountSettings(
   const cleanups: Array<() => void> = [];
   const account = accountSection({ ...props, onSignOut: signOut }, props.widget ? widgetSection(props.widget) : undefined, (fn) => cleanups.push(fn));
   if (props.prefs) sheet.append(prefsSection({ prefs: props.prefs.value, onChange: props.prefs.onChange }));
+  if (props.push) {
+    const push = pushSection(props.push);
+    cleanups.push(() => push.destroy());
+    sheet.append(push.el);
+  }
   sheet.append(account.el);
   sheet.addEventListener('keydown', (e) => {
     if (e.isComposing) return;

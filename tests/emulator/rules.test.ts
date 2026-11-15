@@ -1,5 +1,5 @@
 import { assertFails, assertSucceeds, type RulesTestEnvironment } from '@firebase/rules-unit-testing';
-import { collection, deleteDoc, doc, getDoc, getDocs, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, deleteDoc, deleteField, doc, getDoc, getDocs, setDoc, updateDoc } from 'firebase/firestore';
 import { afterAll, beforeAll, beforeEach, it } from 'vitest';
 import type { Firestore } from 'firebase/firestore';
 import { OWNER, USER, anonDb, createEnv, otherDb, ownerDb, seedDocs, userDb } from './env';
@@ -208,4 +208,38 @@ it('다른 계정의 events는 못 읽는다', async () => {
   await assertFails(getDoc(doc(otherDb(env), `users/${OWNER}/data/events`)));
   await assertFails(getDoc(doc(anonDb(env), `users/${OWNER}/data/events`)));
   await assertFails(getDoc(doc(otherDb(env), 'users/someone-else/data/events')));
+});
+
+const pushPath = `users/${OWNER}/data/push`;
+const device = { token: 'fcm-token-example', label: '아이폰', at: 1 };
+it('소유자는 push 문서에 기기와 시험 요청을 쓰고 읽고 지운다', async () => {
+  const db = ownerDb(env);
+  await assertSucceeds(setDoc(doc(db, pushPath), { devices: { AAAAAAAAAAAAAAAAAAAA: device } }, { merge: true }));
+  await assertSucceeds(setDoc(doc(db, pushPath), { testAt: 1700000000000 }, { merge: true }));
+  await assertSucceeds(getDoc(doc(db, pushPath)));
+  await assertSucceeds(updateDoc(doc(db, pushPath), { 'devices.AAAAAAAAAAAAAAAAAAAA': deleteField() }));
+  await assertSucceeds(deleteDoc(doc(db, pushPath)));
+});
+it('웹앱은 push 문서의 sender를 쓰지 못하고, 모르는 칸이나 너무 많은 기기도 쓰지 못한다', async () => {
+  await seedDocs(env, { [pushPath]: { devices: {}, sender: { at: 1, testAt: 0, error: '' } } });
+  const db = ownerDb(env);
+  await assertFails(setDoc(doc(db, pushPath), { sender: { at: 2, testAt: 0, error: '' } }, { merge: true }));
+  await assertFails(setDoc(doc(db, `users/${OWNER}/data/push2`), { devices: {} }));
+  await assertFails(setDoc(doc(db, pushPath), { other: 1 }, { merge: true }));
+  await assertFails(setDoc(doc(db, pushPath), { testAt: 'now' }, { merge: true }));
+  const many: Record<string, unknown> = {};
+  for (let i = 0; i < 6; i += 1) many[`A${String(i).padStart(19, '0')}`] = device;
+  await assertFails(setDoc(doc(db, pushPath), { devices: many }, { merge: true }));
+  // sender가 있는 문서에 기기를 더하는 것은 된다.
+  await assertSucceeds(setDoc(doc(db, pushPath), { devices: { AAAAAAAAAAAAAAAAAAAA: device } }, { merge: true }));
+  // 새로 만들 때 sender를 넣지 못한다.
+  await assertFails(setDoc(doc(db, `users/${OWNER}/data/push`), { devices: {}, testAt: 1, sender: { at: 1 } }));
+});
+it('다른 계정과 중지된 사용자는 push 문서를 읽고 쓰지 못한다', async () => {
+  await seedDocs(env, { [pushPath]: { devices: { AAAAAAAAAAAAAAAAAAAA: device } }, 'access/off-uid': grant('off@example.com', { disabled: true }) });
+  await assertFails(getDoc(doc(otherDb(env), pushPath)));
+  await assertFails(setDoc(doc(otherDb(env), pushPath), { testAt: 1 }, { merge: true }));
+  await assertFails(getDoc(doc(anonDb(env), pushPath)));
+  const off = env.authenticatedContext('off-uid').firestore() as unknown as Firestore;
+  await assertFails(setDoc(doc(off, 'users/off-uid/data/push'), { testAt: 1 }));
 });

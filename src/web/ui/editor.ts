@@ -58,7 +58,7 @@ export function mountEditor(
      * 알림과 카운트다운. 없으면 그 도구 단추와 띠를 숨긴다. 시트의 저장과 삭제는 메모의 저장·취소와 따로 바로 끝난다.
      * flush: 저장한 것을 서버가 받을 때까지 기다린다(아이폰의 지금 예약). 받지 못하면 거절한다.
      */
-    events?: { view: EventsView; save(id: string, rec: EventRecord): void; remove(id: string): void; flush?(): Promise<void>; iosHint: boolean; now?: () => Date };
+    events?: { view: EventsView; save(id: string, rec: EventRecord): void; remove(id: string): void; flush?(): Promise<void>; iosHint: boolean | 'push'; now?: () => Date };
     onSave(next: DayValue): void;
     onCancel(): void;
   },

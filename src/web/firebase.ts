@@ -8,6 +8,12 @@ import {
   type Firestore,
 } from 'firebase/firestore';
 
+/** 앱 ID(1:<프로젝트 번호>:web:...)에서 FCM의 보내는 쪽 번호(프로젝트 번호)를 꺼낸다. 없으면 undefined. */
+export function senderIdFromAppId(appId: string | undefined): string | undefined {
+  const m = /^1:(\d+):/.exec(appId ?? '');
+  return m ? m[1] : undefined;
+}
+
 // app은 사용자 추가가 두 번째 앱 인스턴스를 같은 설정(app.options)으로 만들 때 쓴다.
 export type FirebaseHandles = { app: FirebaseApp; auth: Auth; db: Firestore };
 
@@ -17,6 +23,8 @@ export function initFirebase(env: Record<string, string | undefined>): FirebaseH
     authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,
     projectId: env.VITE_FIREBASE_PROJECT_ID,
     appId: env.VITE_FIREBASE_APP_ID,
+    // 푸시 알림(FCM)이 쓴다. 따로 적지 않았으면 앱 ID에서 꺼낸다.
+    messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || senderIdFromAppId(env.VITE_FIREBASE_APP_ID),
   });
   const forceLongPolling = env.VITE_FORCE_LONG_POLLING === '1';
   const db = initializeFirestore(app, {

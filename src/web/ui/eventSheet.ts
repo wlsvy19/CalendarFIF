@@ -22,11 +22,11 @@ export type EventSheetProps = {
   /** 있으면 고치기. */
   id?: string;
   record?: EventRecord;
-  /** 메모의 첫 줄([+] 뗀 것), 없으면 ''. */
+  /** 글이 비었을 때 쓰는 글. 편집 화면은 ''를 넘긴다(메모 첫 줄을 넣지 않는다). */
   defaultText: string;
   now: () => Date;
-  /** 아이폰이면 Scriptable 안내와 '지금 예약' 단추. */
-  iosHint: boolean;
+  /** 'push': 이 기기로 푸시 알림이 온다는 안내. true(아이폰, 푸시를 켜지 않음): 켜는 곳 안내와 Scriptable의 '지금 예약' 단추. */
+  iosHint: boolean | 'push';
   /** editedAt/editedBy는 받는 쪽이 채운다(0, ''로 넘긴다). */
   onSave(id: string, rec: EventRecord): void;
   onDelete(id: string): void;
@@ -274,8 +274,10 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps, env?:
 
   let hintText: HTMLElement | null = null;
   let scheduleBtn: HTMLButtonElement | null = null;
-  if (isAlarm && props.iosHint) {
-    hintText = el('span', 'ev-hint-text', '아이폰 알림은 Scriptable 위젯 스크립트가 예약합니다. 위젯이 새로 그려질 때 예약되고, 바로 하려면 누르세요. ');
+  if (isAlarm && props.iosHint === 'push') {
+    body.append(el('p', 'ev-hint', '이 기기로 푸시 알림이 옵니다. 앱을 닫거나 화면을 잠가도 그 시각에 옵니다.'));
+  } else if (isAlarm && props.iosHint) {
+    hintText = el('span', 'ev-hint-text', '아이폰 알림을 받으려면 홈 화면 앱의 설정 → 아이폰 알림을 켜세요. 켜기 전에는 Scriptable 위젯이 예약합니다. 바로 예약하려면 누르세요. ');
     scheduleBtn = el('button', 'ev-link ev-schedule', '지금 예약');
     scheduleBtn.type = 'button';
     const now = scheduleBtn;

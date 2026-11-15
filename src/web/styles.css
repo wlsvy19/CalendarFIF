@@ -835,6 +835,10 @@ button { touch-action: manipulation; }
 .widget-steps ol { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 8px; font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
 .widget-steps ol { margin-bottom: 12px; }
 .widget-steps .settings-note { font-size: 14px; line-height: 1.45; margin-top: 8px; }
+.push-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.push-actions .settings-btn { flex: 1 1 auto; padding: 0 14px; }
+.push-actions:not(:has(.settings-btn:not([hidden]))) { display: none; }
+.push-steps .settings-btn { margin-top: 8px; }
 .settings-btn:disabled { opacity: 0.5; cursor: default; }
 .widget-script {
   box-sizing: border-box;

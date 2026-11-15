@@ -89,6 +89,12 @@ vi.mock('./accessStore', () => ({
 }));
 // 공휴일 자료 받기는 네트워크에 닿으므로 켜는 것만 기록한다. 시험이 onChange를 직접 부른다.
 const feed: { starts: number; deps?: import('./holidayFeed').HolidayFeedDeps } = { starts: 0 };
+// 푸시 알림: 가짜 Firestore로는 문서를 들을 수 없으므로 아무것도 오지 않는 것으로 바꾼다(푸시를 켜지 않은 기기).
+vi.mock('./push', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./push')>()),
+  firestorePushRemote: () => ({ watch: () => () => {}, saveDevice: async () => {}, removeDevice: async () => {}, requestTest: async () => {} }),
+  browserPushPlatform: () => ({ supported: false, standalone: false, ios: false, permission: () => 'default', requestPermission: async () => 'default', token: async () => '', dropToken: async () => {} }),
+}));
 vi.mock('./holidayFeed', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./holidayFeed')>()),
   startHolidayFeed: (deps: import('./holidayFeed').HolidayFeedDeps) => {

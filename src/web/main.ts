@@ -15,6 +15,8 @@ import { EventsStore } from './eventsStore';
 import { startAlarmClock } from './alarmClock';
 import { playTone, unlockAudioOnGesture } from './tones';
 import { showAlarmBanner } from './ui/alarmBanner';
+import { PushClient, browserPushPlatform, firestorePushRemote } from './push';
+import type { PushSectionDeps } from './ui/pushSection';
 import { FirestoreEventsSource } from '../sync/firestoreEvents';
 import { loadAppearance, saveAppearance, applyAppearance, type Appearance } from './appearance';
 import type { SettingsPage } from '../desktop/api';
@@ -108,6 +110,18 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   const source = new FirestoreMonthStore(db, session.uid);
   // 알림과 카운트다운(data/events 문서). 달 문서와 따로 저장한다.
   const events = new EventsStore({ source: new FirestoreEventsSource(db, session.uid), storage: storage.store, uid: session.uid, editedBy });
+  // 푸시 알림(웹앱만): 이 기기를 FCM에 등록해 users/{uid}/data/push에 적고 그 문서를 듣는다. 알림은 Apps Script가 보낸다.
+  const ios = isIos(navigator.userAgent, navigator.maxTouchPoints);
+  const push = DESKTOP
+    ? null
+    : new PushClient({
+        platform: browserPushPlatform(app, ios, import.meta.env.VITE_FCM_VAPID_KEY || undefined),
+        remote: firestorePushRemote(db, session.uid),
+        storage: storage.store,
+        now: () => Date.now(),
+        label: ios ? '아이폰' : '브라우저',
+      });
+  const stopPush = push ? push.start() : () => {};
   let appearance: Appearance | undefined = DESKTOP ? loadAppearance(storage.store) : undefined;
   if (appearance) applyAppearance(document.documentElement, appearance);
   // 웹앱의 설정(밝기, 색상, 달력과 메모의 표시). 이 기기의 브라우저에만 저장한다.
@@ -175,6 +189,18 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     },
     copy: (text) => (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error('클립보드를 쓸 수 없습니다.'))),
   };
+  const pushInstall: PushSectionDeps | undefined = push
+    ? {
+        client: push,
+        loadScript: async () => {
+          const response = await fetch('/push/calendarfif-push.js');
+          if (!response.ok) throw new Error(`알림 서버 스크립트를 받지 못했습니다 (${response.status})`);
+          return response.text();
+        },
+        copy: widgetInstall.copy,
+        now: () => Date.now(),
+      }
+    : undefined;
   // 설정에서 바꾼 모양은 바로 달력과 <html>에 반영하고 이 기기에 저장한다. 저장하지 못하면 false(값은 화면에 그대로 둔다).
   const changeAppearance = (next: Appearance): boolean => {
     appearance = next;
@@ -230,7 +256,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     };
     settings = appearance
       ? mountDesktopSettings(root, { appearance, onAppearance: changeAppearance, bridge, account, page: settingsPage, onClose })
-      : mountSettings(root, { ...account, onClose, widget: DESKTOP ? undefined : widgetInstall, prefs: prefs ? { value: prefs, onChange: changePrefs } : undefined });
+      : mountSettings(root, { ...account, onClose, widget: DESKTOP ? undefined : widgetInstall, push: pushInstall, prefs: prefs ? { value: prefs, onChange: changePrefs } : undefined });
     settingsPage = undefined;
     interactivity.begin('settings');
   };
@@ -270,7 +296,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
         save: (id, rec) => events.save(id, rec),
         remove: (id) => events.remove(id),
         flush: () => events.flush(),
-        iosHint: isIos(navigator.userAgent, navigator.maxTouchPoints),
+        iosHint: push?.view().mode === 'on' ? 'push' : ios,
         now: () => new Date(),
       },
       onSave: (next) => {
@@ -447,6 +473,8 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
         bridge.showAlarms(triggers.map((x) => ({ time: x.time, text: x.text, date: x.occurrence, advance: x.advance })), tone);
         return;
       }
+      // 이 기기로 푸시 알림이 오고 알림 서버가 살아 있으면 화면 안 알림은 띄우지 않는다(같은 알림이 두 번 보이지 않게).
+      if (push?.handlesAlarms()) return;
       banners.push(showAlarmBanner(root, triggers, openFromAlarm));
       if (tone !== 'none') playTone(tone);
     },
@@ -475,6 +503,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       calendar.destroy();
       alarmClock.stop();
       for (const b of banners) b.destroy(); // 내려간 화면 위에 알림 상자가 남지 않게 한다
+      stopPush();
       stopUnlock();
       events.destroy();
       window.removeEventListener('storage', onStorage);

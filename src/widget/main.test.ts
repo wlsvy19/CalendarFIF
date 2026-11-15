@@ -49,7 +49,7 @@ describe('위젯으로 실행', () => {
   it('토큰이 있으면 갱신하고, 읽고, 보관하고, 위젯을 둔다', async () => {
     const host = make({ keychain: loggedIn });
     await run(host, cfg, now);
-    expect(host.state.requests.map((r) => r.method)).toEqual(['POST', 'GET', 'GET']); // 갱신, 달, 알림 문서
+    expect(host.state.requests.map((r) => r.method)).toEqual(['POST', 'GET', 'GET', 'GET']); // 갱신, 달, 알림 문서, 푸시 문서
     expect(host.state.requests[1].url).toContain('/users/owner-test-uid/months/2026-11');
     expect(host.state.requests[1].headers.Authorization).toBe('Bearer ID2');
     expect(JSON.parse(host.state.files.get(CACHE)!)).toMatchObject({ monthId: '2026-11', days: { '13': { text: '리뷰', color: 'F9BC0B' } } });
@@ -846,11 +846,42 @@ describe('아이폰 알림 예약', () => {
   it('위젯 실행 뒤 알림을 예약한다', async () => {
     const host = makeNative({ keychain: loggedIn }, withEvents());
     await run(host, cfg, now);
-    expect(host.state.requests.map((r) => r.url.split('/documents/')[1] ?? '')).toEqual(['', 'users/owner-test-uid/months/2026-11', 'users/owner-test-uid/data/events']);
+    expect(host.state.requests.map((r) => r.url.split('/documents/')[1] ?? '')).toEqual(['', 'users/owner-test-uid/months/2026-11', 'users/owner-test-uid/data/events', 'users/owner-test-uid/data/push']);
     expect(host.state.scheduled.map((n) => n.identifier)).toEqual([ID]);
     expect(host.state.scheduled[0]).toMatchObject({ body: '09:30 회의', openURL: 'https://example.test/#2026-11-16' });
     expect(JSON.parse(host.state.files.get(CACHE)!)).toMatchObject({ monthId: '2026-11', events: { abc123: { text: '회의' } } });
     expect(host.state.setWidgets).toHaveLength(1);
+  });
+
+  const pushDoc = { fields: { devices: { mapValue: { fields: { AAAAAAAAAAAAAAAAAAAA: { mapValue: { fields: { token: { stringValue: 't' }, label: { stringValue: '아이폰' }, at: { integerValue: '1' } } } } } } } } };
+  const withPush = (push: (req: FakeRequest) => FakeAnswer): Backend => ({
+    read: (req) => (req.url.includes('/data/push') ? push(req) : req.url.includes('/data/events') ? { body: eventsDoc } : { body: memoDoc }),
+  });
+
+  it('푸시 알림을 켠 기기가 있으면 예약하지 않고 예약해 둔 것을 지운다(같은 알림이 두 번 오지 않게)', async () => {
+    const host = makeNative({ keychain: loggedIn, pending: [{ identifier: ID }, { identifier: 'other:keep' }] }, withPush(() => ({ body: pushDoc })));
+    await run(host, cfg, now);
+    expect(host.state.scheduled).toEqual([]);
+    expect(host.state.pending.map((n) => n.identifier)).toEqual(['other:keep']);
+    expect(JSON.parse(host.state.files.get(CACHE)!)).toMatchObject({ pushOn: true });
+    expect(host.state.setWidgets).toHaveLength(1);
+  });
+
+  it('푸시 문서를 읽지 못하면 마지막으로 읽은 것을 따르고, 문서가 없으면 예약한다', async () => {
+    const host = makeNative({ keychain: loggedIn, files: { [CACHE]: JSON.stringify({ pushOn: true }) } }, withPush(() => ({ status: 503, body: {} })));
+    await run(host, cfg, now);
+    expect(host.state.scheduled).toEqual([]);
+    const none = makeNative({ keychain: loggedIn }, withPush(() => ({ status: 404, body: { error: { status: 'NOT_FOUND' } } })));
+    await run(none, cfg, now);
+    expect(none.state.scheduled.map((n) => n.identifier)).toEqual([ID]);
+    expect(JSON.parse(none.state.files.get(CACHE)!)).toMatchObject({ pushOn: false });
+  });
+
+  it('앱에서 실행하면 메뉴가 푸시 알림을 쓴다고 알린다', async () => {
+    const host = makeNative({ keychain: loggedIn, runsInApp: true, alerts: [{ button: -1 }] }, withPush(() => ({ body: pushDoc })));
+    await run(host, cfg, now);
+    expect(host.state.alerts[0].title).toContain('푸시 알림 사용 중');
+    expect(host.state.alerts[0].message).toContain('푸시 알림으로 옵니다');
   });
 
   it('schedule=1이면 예약만 하고 결과를 상자로 보인다', async () => {

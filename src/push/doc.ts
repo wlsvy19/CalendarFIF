@@ -1,0 +1,51 @@
+// 푸시 알림 문서(users/{uid}/data/push)의 모양. 웹앱이 기기를 적고, 알림 보내는 스크립트(Apps Script)가 읽고 상태를 적는다.
+//
+// devices: 알림을 받는 기기. 열쇠는 기기마다 만든 이름(영문과 숫자 20자), 값은 FCM 등록 토큰과 이름표와 적은 때.
+// testAt: 웹앱의 "시험 알림 보내기"를 누른 때(밀리초). 보내는 쪽이 보면 시험 알림을 보낸다.
+// sender: 보내는 쪽만 적는다. at은 마지막으로 이 문서를 확인한 때, testAt은 마지막으로 처리한 시험 요청, error는 마지막 문제.
+
+export const MAX_DEVICES = 5;
+export const DEVICE_ID_PATTERN = /^[A-Za-z0-9]{20}$/;
+
+export type PushDevice = { token: string; label: string; at: number };
+export type SenderStatus = { at: number; testAt: number; error: string };
+export type PushDoc = { devices: Record<string, PushDevice>; testAt: number; sender: SenderStatus | null };
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+/** 보통 값(Firestore SDK의 data() 또는 REST 값을 푼 것)을 문서로. 틀린 기기는 버린다. */
+export function parsePushDoc(raw: unknown): PushDoc {
+  const o = isObject(raw) ? raw : {};
+  const devices: Record<string, PushDevice> = {};
+  if (isObject(o.devices)) {
+    for (const [id, d] of Object.entries(o.devices)) {
+      if (!DEVICE_ID_PATTERN.test(id) || !isObject(d)) continue;
+      const token = str(d.token);
+      if (token === '' || token.length > 4096) continue;
+      devices[id] = { token, label: str(d.label).slice(0, 40), at: num(d.at) };
+    }
+  }
+  const s = isObject(o.sender) ? o.sender : null;
+  return {
+    devices,
+    testAt: num(o.testAt),
+    sender: s ? { at: num(s.at), testAt: num(s.testAt), error: str(s.error).slice(0, 500) } : null,
+  };
+}
+
+/** 기기마다 한 번 만들어 이 브라우저에 두는 이름. */
+export function newDeviceId(random: () => number = Math.random): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let out = '';
+  for (let i = 0; i < 20; i += 1) out += chars[Math.floor(random() * chars.length) % chars.length];
+  return out;
+}
+
+/** 보내는 쪽이 이보다 오래 확인하지 않았으면 멈춘 것으로 본다. */
+export const SENDER_STALE_MS = 15 * 60_000;
+
+export function senderAlive(doc: PushDoc | null, now: number): boolean {
+  return !!doc?.sender && doc.sender.at > 0 && now - doc.sender.at < SENDER_STALE_MS && doc.sender.error === '';
+}

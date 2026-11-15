@@ -212,13 +212,20 @@ it('생일을 고르면 반복이 매년이 된다(사용자가 바꾸지 않았
   expect(m.onSave.mock.calls[0][1]).toMatchObject({ kind: 'anniversary', repeat: { freq: 'lunarYearly' } });
 });
 
+it('푸시 알림을 켠 기기는 푸시로 온다고만 알리고 Scriptable 단추가 없다', () => {
+  const m = mount({ iosHint: 'push' });
+  expect(m.root.querySelector('.ev-hint')!.textContent).toContain('푸시 알림이 옵니다');
+  expect(m.root.querySelector('.ev-schedule')).toBeNull();
+  const ios = mount({ iosHint: true });
+  expect(ios.root.querySelector('.ev-hint')!.textContent).toContain('설정 → 아이폰 알림');
+});
 it('아이폰 안내는 iosHint일 때만', () => {
   const off = mount({ iosHint: false });
   expect(off.root.querySelector('.ev-schedule')).toBeNull();
   const on = mount({ iosHint: true });
   const b = on.root.querySelector<HTMLButtonElement>('button.ev-schedule')!;
   expect([b.textContent, b.type]).toEqual(['지금 예약', 'button']);
-  expect(on.root.textContent).toContain('아이폰 알림은 Scriptable 위젯 스크립트가 예약합니다');
+  expect(on.root.textContent).toContain('켜기 전에는 Scriptable 위젯이 예약합니다');
   expect(mount({ type: 'countdown', iosHint: true }).root.querySelector('.ev-schedule')).toBeNull();
 });
 

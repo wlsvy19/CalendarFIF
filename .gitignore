@@ -13,3 +13,5 @@ build/
 *.db
 coverage/
 public/widget/
+public/push/
+public/push-sw.js

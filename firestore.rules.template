@@ -24,12 +24,30 @@ service cloud.firestore {
         && (uid == '__OWNER_UID__' || isActive(uid));
     }
 
-    // 알림과 카운트다운: 문서 하나(events). 달 문서와 같은 사람만.
+    // 푸시 알림 문서(push)의 모양. 웹앱은 devices와 testAt만 쓴다. sender는 알림 보내는 스크립트(서비스 계정, 규칙을 거치지 않는다)만 쓴다.
+    function validPush(d) {
+      return d.keys().hasOnly(['devices', 'testAt', 'sender'])
+        && (!('devices' in d) || (d.devices is map && d.devices.size() <= 5))
+        && (!('testAt' in d) || d.testAt is number);
+    }
+    function senderUntouched() {
+      return resource == null
+        ? !('sender' in request.resource.data)
+        : !request.resource.data.diff(resource.data).affectedKeys().hasAny(['sender']);
+    }
+
+    // 알림과 카운트다운(events)과 푸시 알림(push): 문서 둘. 달 문서와 같은 사람만.
     match /users/{uid}/data/{docId} {
-      allow read, write: if signedIn()
+      allow read: if signedIn()
         && request.auth.uid == uid
-        && docId == 'events'
+        && (docId == 'events' || docId == 'push')
         && (uid == '__OWNER_UID__' || isActive(uid));
+      allow write: if signedIn()
+        && request.auth.uid == uid
+        && (uid == '__OWNER_UID__' || isActive(uid))
+        && (docId == 'events'
+          || (docId == 'push'
+            && (request.method == 'delete' || (validPush(request.resource.data) && senderUntouched()))));
     }
 
     // 사용 허가: 관리자만 쓰고 목록을 본다. 사용자는 자기 것을 읽기만 한다.
