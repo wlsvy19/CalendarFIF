@@ -738,6 +738,29 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   );
   await closeDay(); // 색을 바꿨지만 저장하지 않고 취소한다
 
+  // 색 상자가 열린 채 어두운 바깥(편집 화면 위쪽의 가림막)을 누르면 상자만 닫힌다. 그 누르기의 click이 가림막에 가서 편집 화면까지
+  // 닫으면 안 된다. 한 번 더 누르면(고친 것이 없으므로) 편집 화면이 닫힌다.
+  const paletteDay = await openKey(alarmKey);
+  await sleep(700);
+  await tap(await center($('.sheet button.tool.color')));
+  const paletteUp = await waitFor("!!document.querySelector('.sheet .palette .swatch')");
+  const dimX = Math.round(PHONE.width / 2);
+  const dimY = await cdp.evaluate<number>("Math.max(4, Math.round(document.querySelector('.sheet:not(.event-sheet)').getBoundingClientRect().top / 2))");
+  const onDim = await cdp.evaluate<boolean>(`(() => { const e = document.elementFromPoint(${dimX}, ${dimY}); return !!e && e.classList.contains('scrim') && !e.classList.contains('event-scrim'); })()`);
+  await tap({ x: dimX, y: dimY });
+  await sleep(500);
+  const afterDim = await cdp.evaluate<{ palette: boolean; day: boolean }>(
+    "({ palette: !!document.querySelector('.sheet .palette'), day: !!document.querySelector('.sheet:not(.event-sheet)') })",
+  );
+  await tap({ x: dimX, y: dimY });
+  const dimClosed = await waitFor("!document.querySelector('.sheet, .scrim')");
+  await sleep(300);
+  record(
+    '색 상자가 열린 채 어두운 바깥을 누르면 상자만 닫히고, 한 번 더 누르면 편집 화면이 닫힌다',
+    paletteDay && paletteUp && onDim && !afterDim.palette && afterDim.day && dimClosed,
+    `바깥 (${dimX}, ${dimY})px(가림막 ${onDim ? '맞음' : '아님'}), 첫 누르기 뒤 상자 ${afterDim.palette ? '남음' : '닫힘'}·편집 화면 ${afterDim.day ? '그대로' : '닫힘'}, 두 번째 누르기 뒤 편집 화면 ${dimClosed ? '닫힘' : '남음'}`,
+  );
+
   // 알림: 편집 화면의 알림 단추로 만들면 띠와 달력 칸에 보인다.
   const alarmText = '약 먹기';
   const alarmTime = '08:45';
@@ -778,10 +801,11 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     "(() => { const s = document.querySelector('.sheet:not(.event-sheet)'); const a = document.activeElement; return { day: !!s, focus: !s ? '없음' : a === s ? '편집 화면' : a?.classList.contains('memo-input') ? '메모 칸' : s.contains(a) ? '편집 화면 안' : (a?.tagName ?? '없음'), memo: s?.querySelector('.memo-input')?.value ?? '' }; })()",
   );
   const dayTopAfter = (await sheetNow())?.top ?? null;
+  // 폰 폭에서는 시트를 닫으면 초점이 메모 칸이 아니라 편집 화면 시트로 간다(메모 칸이면 닫을 때마다 글자판이 올라온다).
   record(
-    '알림 시트가 열린 동안 바깥을 눌러도 편집 화면은 그대로이고, 시트를 닫으면 메모 칸으로 돌아온다',
+    '알림 시트가 열린 동안 바깥을 눌러도 편집 화면은 그대로이고, 시트를 닫으면 초점이 편집 화면으로 돌아온다',
     dayTop !== null && sheetOpenedAgain && hitScrim && dirtyStays && cancelled && cleanClosed && back.day && back.memo === memoBefore &&
-      dayTopAfter !== null && Math.abs(dayTopAfter - dayTop) <= 1 && (back.focus === '메모 칸' || back.focus === '편집 화면'),
+      dayTopAfter !== null && Math.abs(dayTopAfter - dayTop) <= 1 && back.focus === '편집 화면',
     `바깥 y ${outsideY}px(알림 막 ${hitScrim ? '맞음' : '아님'}), 글을 적고 바깥을 누른 뒤 시트 ${dirtyStays ? '남음' : '닫힘'}, 취소 뒤 ${cancelled ? '닫힘' : '남음'}, 안 고치고 바깥을 누른 뒤 ${cleanClosed ? '닫힘' : '남음'}, 편집 화면 ${back.day ? `top ${px(dayTopAfter)}(전 ${px(dayTop)})` : '없음'}, 메모 ${back.memo === memoBefore ? '그대로' : '바뀜'}, 초점 ${back.focus}`,
   );
   await closeDay();
