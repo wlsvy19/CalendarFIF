@@ -24,6 +24,14 @@ service cloud.firestore {
         && (uid == '__OWNER_UID__' || isActive(uid));
     }
 
+    // 알림과 카운트다운: 문서 하나(events). 달 문서와 같은 사람만.
+    match /users/{uid}/data/{docId} {
+      allow read, write: if signedIn()
+        && request.auth.uid == uid
+        && docId == 'events'
+        && (uid == '__OWNER_UID__' || isActive(uid));
+    }
+
     // 사용 허가: 관리자만 쓰고 목록을 본다. 사용자는 자기 것을 읽기만 한다.
     match /access/{uid} {
       allow get: if signedIn() && (request.auth.uid == uid || isAdmin());

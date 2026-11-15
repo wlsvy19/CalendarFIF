@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseMonthDocument, readMonth, refreshSession, signIn, type ApiError, type Config } from './api';
+import { parseEventsDocument, parseMonthDocument, readEvents, readMonth, refreshSession, signIn, type ApiError, type Config } from './api';
 import { makeFakeHost, type FakeAnswer, type FakeRequest } from './fakeHost';
 
 const cfg: Config = { projectId: 'demo-calfif', apiKey: 'demo-key', appUrl: 'https://example.test/' };
@@ -179,5 +179,39 @@ describe('parseMonthDocument', () => {
 
   it.each([null, undefined, 5, 'x', [], { fields: 3 }, { fields: { days: 7 } }])('쓰레기(%j)는 빈 객체', (junk) => {
     expect(parseMonthDocument(junk)).toEqual({});
+  });
+});
+
+describe('알림 문서', () => {
+  const rest = {
+    fields: {
+      items: { mapValue: { fields: {
+        abc123: { mapValue: { fields: {
+          type: { stringValue: 'alarm' }, date: { stringValue: '2026-11-20' }, text: { stringValue: '회의' }, done: { booleanValue: false },
+          time: { stringValue: '09:30' }, advance: { arrayValue: { values: [{ integerValue: '0' }, { integerValue: '1' }] } },
+          repeat: { mapValue: { fields: { freq: { stringValue: 'weekly' }, count: { integerValue: '3' } } } },
+          editedAt: { integerValue: '5' }, editedBy: { nullValue: null },
+        } } },
+        bad: { mapValue: { fields: { type: { stringValue: 'alarm' }, text: { stringValue: '날짜 없음' } } } },
+      } } },
+      updatedAt: { timestampValue: '2026-11-15T00:00:00Z' },
+    },
+  };
+
+  it('parseEventsDocument가 REST 값을 풀고 틀린 항목을 버린다', () => {
+    const map = parseEventsDocument(rest);
+    expect(Object.keys(map)).toEqual(['abc123']);
+    expect(map.abc123).toMatchObject({ type: 'alarm', text: '회의', time: '09:30', advance: [0, 1], repeat: { freq: 'weekly', count: 3 }, editedAt: 5 });
+    expect(parseEventsDocument(null)).toEqual({});
+    expect(parseEventsDocument({ fields: {} })).toEqual({});
+  });
+
+  it('readEvents의 404는 빈 것', async () => {
+    const host = hostWith(() => ({ status: 404, body: { error: { status: 'NOT_FOUND' } } }));
+    expect(await readEvents(host, cfg, session)).toEqual({});
+    expect(host.state.requests[0].url).toBe('https://firestore.googleapis.com/v1/projects/demo-calfif/databases/(default)/documents/users/owner-test-uid/data/events');
+    expect(host.state.requests[0].headers).toEqual({ Authorization: 'Bearer ID' });
+    const ok = hostWith(() => ({ body: rest }));
+    expect(Object.keys(await readEvents(ok, cfg, session))).toEqual(['abc123']);
   });
 });

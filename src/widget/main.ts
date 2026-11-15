@@ -1,7 +1,9 @@
 import { isColor } from '../core/color';
 import { parseOfficialHolidays, setOfficialHolidays, type OfficialYear } from '../core/holidays';
 import type { DayValue } from '../core/types';
-import { isApiError, readMonth, refreshSession, signIn, type Config } from './api';
+import { parseEventMap, type EventMap } from '../core/events';
+import { clearAlarms, scheduleAlarms } from './alarms';
+import { isApiError, readEvents, readMonth, refreshSession, signIn, type Config, type Session } from './api';
 import type { Host, ListWidgetLike } from './host';
 import { makeWidget } from './render';
 import { renderTree } from './renderTree';
@@ -68,11 +70,64 @@ const cachePath = (host: Host): string => {
   return fm.joinPath(fm.documentsDirectory(), CACHE_FILE);
 };
 
-function writeCache(host: Host, data: MonthData, now: Date): void {
+/** 보관 파일에 칸을 덮어쓴다. 다른 칸(달과 알림)은 그대로 둔다. 보관하지 못해도 위젯은 그린다. */
+function updateCache(host: Host, patch: Record<string, unknown>): void {
   try {
-    host.FileManager.local().writeString(cachePath(host), JSON.stringify({ monthId: data.monthId, days: data.days, savedAt: now.getTime() }));
+    const fm = host.FileManager.local();
+    const path = cachePath(host);
+    let current: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = fm.fileExists(path) ? JSON.parse(fm.readString(path)) : null;
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) current = parsed as Record<string, unknown>;
+    } catch {
+      // 깨진 보관본은 새로 쓴다.
+    }
+    fm.writeString(path, JSON.stringify({ ...current, ...patch }));
   } catch {
     // 보관하지 못해도 위젯은 그린다.
+  }
+}
+
+function writeCache(host: Host, data: MonthData, now: Date): void {
+  updateCache(host, { monthId: data.monthId, days: data.days, savedAt: now.getTime() });
+}
+
+/** 마지막으로 읽어 보관해 둔 알림 항목들. 없거나 깨졌으면 빈 것. */
+function readCachedEvents(host: Host): EventMap {
+  try {
+    const fm = host.FileManager.local();
+    const path = cachePath(host);
+    if (!fm.fileExists(path)) return {};
+    const parsed = JSON.parse(fm.readString(path)) as { events?: unknown } | null;
+    return parseEventMap(parsed?.events);
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 알림 문서를 읽어(못 읽으면 보관해 둔 것으로) 아이폰 알림을 예약한다. 돌려주는 값은 예약된 수, 알 수 없으면 null.
+ * 어떤 문제가 나도 던지지 않는다. 알림 글은 예약한 알림과 이 보관 파일에만 남긴다.
+ */
+async function syncAlarms(host: Host, cfg: Config, session: Session | null, now: Date): Promise<number | null> {
+  try {
+    let items: EventMap | null = null;
+    if (session) {
+      try {
+        items = await readEvents(host, cfg, session);
+        updateCache(host, { events: items });
+      } catch (e) {
+        items = null;
+        if (isApiError(e) && e.kind === 'denied') {
+          // 읽을 권한이 없다: 보관해 둔 알림도 예약해 둔 알림도 남기지 않는다.
+          await dropAlarmData(host);
+          return 0;
+        }
+      }
+    }
+    return await scheduleAlarms(host, items ?? readCachedEvents(host), now, cfg.appUrl);
+  } catch {
+    return null;
   }
 }
 
@@ -161,12 +216,31 @@ async function prepareHolidays(host: Host, cfg: Config, now: Date): Promise<void
   }
 }
 
-function clearLogin(host: Host): void {
-  for (const key of [REFRESH_KEY, UID_KEY]) if (host.Keychain.contains(key)) host.Keychain.remove(key);
+/** 보관 파일의 알림 항목과 예약해 둔 알림을 지운다. 던지지 않는다. */
+async function dropAlarmData(host: Host): Promise<void> {
+  try {
+    const fm = host.FileManager.local();
+    const path = cachePath(host);
+    if (fm.fileExists(path)) {
+      const parsed: unknown = JSON.parse(fm.readString(path));
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        delete (parsed as Record<string, unknown>).events;
+        fm.writeString(path, JSON.stringify(parsed));
+      }
+    }
+  } catch {
+    // 깨진 보관본이면 그대로 둔다(알림 글을 읽을 수 없다).
+  }
+  await clearAlarms(host);
 }
 
-function clearAll(host: Host): void {
-  clearLogin(host);
+async function clearLogin(host: Host): Promise<void> {
+  for (const key of [REFRESH_KEY, UID_KEY]) if (host.Keychain.contains(key)) host.Keychain.remove(key);
+  await dropAlarmData(host); // 로그인이 없으면 알림 글도 남기지 않는다
+}
+
+async function clearAll(host: Host): Promise<void> {
+  await clearLogin(host);
   const fm = host.FileManager.local();
   const path = cachePath(host);
   if (fm.fileExists(path)) fm.remove(path);
@@ -181,8 +255,36 @@ const message = (env: Env, title: string, lines: string[]): View =>
   env.image ? { scene: messageScene({ theme: env.pictureTheme(), size: env.size, title, lines }) } : { tree: messageTree({ title, lines }) };
 const loginHint = (env: Env): View => message(env, '로그인이 필요합니다', ['Scriptable 앱에서', '이 스크립트를 한 번 실행해', '로그인하세요.']);
 
+/** 그리기 전에 알림 예약을 기다리는 가장 긴 시간. Scriptable의 알림 기능이 멈춰도(던지지 않고) 위젯은 그린다. */
+const ALARM_SYNC_WAIT_MS = 5000;
+
+/**
+ * work를 ms까지만 기다린다. 늦으면 fallback으로 끝낸다(work는 뒤에서 이어질 수 있다). 타이머를 걸지 못하면 끝까지 기다린다.
+ * 던지지 않는 work에만 쓴다.
+ */
+async function waitAtMost<T>(host: Host, work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: { invalidate(): void } | undefined;
+  const late = new Promise<T>((resolve) => {
+    try {
+      timer = host.Timer.schedule(ms, false, () => resolve(fallback));
+    } catch {
+      // 타이머가 없으면 work를 끝까지 기다린다.
+    }
+  });
+  try {
+    return await Promise.race([work, late]);
+  } finally {
+    try {
+      timer?.invalidate();
+    } catch {
+      // 이미 끝난 타이머
+    }
+  }
+}
+
 /** 이번 달 위젯에 놓을 것을 만든다. 읽지 못하는 까닭이 있으면 그 까닭을 알리는 것을 돌려준다. */
-async function load(host: Host, cfg: Config, env: Env, now: Date): Promise<View> {
+/** alarmsDone: 이 실행에서 알림을 이미 예약했으면 다시 하지 않는다(앱). */
+async function load(host: Host, cfg: Config, env: Env, now: Date, alarmsDone = false): Promise<View> {
   const token = host.Keychain.contains(REFRESH_KEY) ? host.Keychain.get(REFRESH_KEY) : '';
   if (token === '') return loginHint(env);
   const monthId = env.today.slice(0, 7);
@@ -205,6 +307,8 @@ async function load(host: Host, cfg: Config, env: Env, now: Date): Promise<View>
     const days = await readMonth(host, cfg, session, monthId);
     const month: MonthData = { monthId, days };
     writeCache(host, month, now);
+    // 던지지 않는다. 알림 기능이 멈춰 끝나지 않아도 5초 뒤에는 그린다(예약은 다음 실행에 다시 한다).
+    if (!alarmsDone) await waitAtMost(host, syncAlarms(host, cfg, session, now), ALARM_SYNC_WAIT_MS, null);
     return await drawMonth(month, false);
   } catch (e) {
     if (!isApiError(e)) throw e;
@@ -212,7 +316,7 @@ async function load(host: Host, cfg: Config, env: Env, now: Date): Promise<View>
     if (e.kind === 'failed') return fromCache(e.code);
     if (e.kind === 'denied') return message(env, '권한이 없습니다', ['관리자에게 문의하세요.']);
     if (e.kind === 'rejected') {
-      clearLogin(host);
+      await clearLogin(host);
       return loginHint(env);
     }
     throw e;
@@ -273,12 +377,38 @@ async function notify(host: Host, title: string, text: string): Promise<void> {
   await alert.presentAlert();
 }
 
+/** 앱에서 열었을 때: 저장된 로그인으로 알림을 읽어 예약한다(안 되면 보관본으로). 로그인이 안 된 것은 여기서 다루지 않는다. 던지지 않는다. */
+async function scheduleFromSaved(host: Host, cfg: Config, now: Date): Promise<number | null> {
+  let session: Session | null = null;
+  try {
+    session = await refreshSession(host, cfg, host.Keychain.get(REFRESH_KEY));
+    storeLogin(host, session.refreshToken, session.uid);
+  } catch {
+    session = null; // 거절과 연결 문제는 미리 보기가 다룬다
+  }
+  return syncAlarms(host, cfg, session, now);
+}
+
 async function runInApp(host: Host, cfg: Config, now: () => Date): Promise<void> {
   let askedAgain = false;
+  let alarmsDone = false; // 메뉴 앞에서 예약했으면 미리 보기에서 다시 하지 않는다
+  const notice = async (body: string): Promise<void> => {
+    try {
+      const n = new host.Notification();
+      n.title = 'CalendarFIF';
+      n.body = body;
+      await n.schedule();
+    } catch {
+      // 알림을 못 보여도 할 수 있는 일이 없다.
+    }
+  };
+  const scheduleOnly = host.args.queryParameters?.schedule === '1';
   const show = async (): Promise<void> => {
     const at = now();
     const env = makeEnv(host, 'large', at);
-    const view = await load(host, cfg, env, at);
+    const skip = alarmsDone;
+    alarmsDone = false;
+    const view = await load(host, cfg, env, at, skip);
     // 저장된 로그인이 방금 거절돼 지워졌다: 이미 Scriptable 안이므로 안내 대신 바로 다시 묻는다(한 실행에 한 번).
     if (!askedAgain && !host.Keychain.contains(REFRESH_KEY)) {
       askedAgain = true;
@@ -288,18 +418,30 @@ async function runInApp(host: Host, cfg: Config, now: () => Date): Promise<void>
     await toWidget(host, env, view, cfg.appUrl, at).presentLarge();
   };
   if (!host.Keychain.contains(REFRESH_KEY)) {
+    if (scheduleOnly) {
+      await notice('CalendarFIF 위젯에 먼저 로그인하세요'); // 단축어 등에서는 로그인 창을 띄우지 않는다
+      return;
+    }
     if (await askLogin(host, cfg)) await show();
     return;
   }
+  const scheduled = await scheduleFromSaved(host, cfg, now());
+  alarmsDone = true;
+  if (scheduleOnly) {
+    // 알림 예약만 하고 끝낸다(단축어나 자동화가 이 주소로 연다).
+    await notice(scheduled === null ? '알림을 예약하지 못했습니다' : `알림 ${scheduled}개를 예약했습니다`);
+    return;
+  }
   const menu = new host.Alert();
-  menu.title = cfg.version ? `CalendarFIF 위젯 ${cfg.version}` : 'CalendarFIF 위젯';
+  const base = cfg.version ? `CalendarFIF 위젯 ${cfg.version}` : 'CalendarFIF 위젯';
+  menu.title = scheduled === null ? base : `${base} · 알림 ${scheduled}개 예약됨`;
   menu.addAction('미리 보기');
   menu.addAction('로그아웃');
   menu.addCancelAction('닫기');
   const choice = await menu.presentAlert();
   if (choice === 0) await show();
   else if (choice === 1) {
-    clearAll(host);
+    await clearAll(host);
     await notify(host, 'CalendarFIF 위젯', '로그아웃했습니다.');
   }
 }

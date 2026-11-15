@@ -6,6 +6,7 @@ import type { Appearance, Bullet } from '../appearance';
 import { accountSection, type AccountProps, type AccountSection } from '../ui/settings';
 import { makeDraggable, sessionMemory } from './dragSheet';
 import { playDoneTone } from './tone';
+import { playTone } from '../tones';
 
 type Props = {
   appearance: Appearance;
@@ -162,7 +163,7 @@ export function mountDesktopSettings(
     return row;
   };
 
-  const toggleRow = (page: SettingsPage, label: string, key: 'monthGap' | 'weekNumbers' | 'shadow' | 'titleBar' | 'holidays' | 'lunar' | 'doneToBottom' | 'showDone' | 'showRestDays', help?: string): Row => {
+  const toggleRow = (page: SettingsPage, label: string, key: 'monthGap' | 'weekNumbers' | 'shadow' | 'titleBar' | 'holidays' | 'lunar' | 'doneToBottom' | 'showDone' | 'showRestDays' | 'showAlarmTime', help?: string): Row => {
     const row = add(page, makeRow(label));
     row.ctl.append(switchInput(label, cur[key], (on) => set(key, on)));
     if (help) row.help(help);
@@ -209,9 +210,14 @@ export function mountDesktopSettings(
   );
   toggleRow('cell', '완료 작업 자동으로 맨 아래 줄로 이동', 'doneToBottom');
   toggleRow('cell', '완료된 작업 표시', 'showDone');
+  toggleRow('cell', '알림 시각 표시', 'showAlarmTime');
   add('cell', makeRow('편집 완료 알람')).ctl.append(selectInput('편집 완료 알람', [['none', '없음'], ['short', '짧은 소리']], cur.doneTone, (v) => {
     set('doneTone', v as Appearance['doneTone']);
     if (v === 'short') playDoneTone();
+  }));
+  add('cell', makeRow('리마인드 알람')).ctl.append(selectInput('리마인드 알람', [['none', '없음'], ['chime', '차임'], ['bell', '벨']], cur.alarmTone, (v) => {
+    set('alarmTone', v as Appearance['alarmTone']);
+    if (v !== 'none') playTone(v as 'chime' | 'bell');
   }));
 
   // 글꼴 및 색상 쪽

@@ -1,5 +1,6 @@
 import { normalizeAccelerator } from '../core/accelerator';
-import type { DragKind, Hotkey, Point, SystemPatch } from './api';
+import { parseAlarmTone, sanitizeAlarmItems } from './alarmPopup';
+import type { AlarmPopupItem, AlarmTone, DragKind, Hotkey, Point, SystemPatch } from './api';
 
 export function parseBool(v: unknown): boolean | null {
   return typeof v === 'boolean' ? v : null;
@@ -41,4 +42,11 @@ export function parseSystemPatch(v: unknown): SystemPatch | null {
   if (content) patch.contentHotkey = content;
   if (typeof v.startWithWindows === 'boolean') patch.startWithWindows = v.startWithWindows;
   return patch;
+}
+
+// 알림 창 요청: 보낸 곳이 앱의 화면이 아니거나 걸러 남는 항목이 없으면 창을 부르지 않는다.
+export function handleAlarm(fromWindow: boolean, items: unknown, tone: unknown, show: (items: AlarmPopupItem[], tone: AlarmTone) => void): void {
+  if (!fromWindow) return;
+  const clean = sanitizeAlarmItems(items);
+  if (clean.length > 0) show(clean, parseAlarmTone(tone));
 }

@@ -1,11 +1,12 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { BrowserWindow, Menu, app, globalShortcut, type MenuItem } from 'electron';
+import { BrowserWindow, Menu, app, globalShortcut, screen, type MenuItem } from 'electron';
 import type { SystemPatch, SystemState } from './api';
 import type { MenuAction } from './menu';
 import { trayMenu } from './tray';
 import { clampBounds, defaultBounds, layoutKey, resolveBounds, type Rect } from './bounds';
+import { alarmWindowForSmoke } from './alarmWindow';
 import { isAtBottom } from './policy';
 import type { Runtime, Scenario } from './runtime';
 import { loadDesktopSettings } from './settings';
@@ -18,7 +19,7 @@ import {
 export type Desk = { runAction(a: MenuAction): void; applySystem(p: SystemPatch): SystemState };
 type Result = { fields: Record<string, unknown>; checks: Record<string, boolean> };
 const TOTAL_MS = 60000;
-const BRIDGE_KEYS = ['adjustDone', 'drag', 'dragStart', 'getSystem', 'onCommand', 'setInteractive', 'setSystem', 'showMenu'];
+const BRIDGE_KEYS = ['adjustDone', 'drag', 'dragStart', 'getSystem', 'onCommand', 'setInteractive', 'setSystem', 'showAlarms', 'showMenu'];
 const HIDE_KEY = 'Ctrl+Alt+Shift+F9';
 const CONTENT_KEY = 'Ctrl+Alt+Shift+F10';
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -584,7 +585,68 @@ async function e2e(rt: Runtime): Promise<Result> {
   return { fields: { ...progress, loginItemCalls }, checks: { ready, remoteSeen, localEditDone, uploaded, verified, loginItemCalls: loginItemCalls === 0 } };
 }
 
-const SCENARIOS: Partial<Record<Scenario, (rt: Runtime, desk: Desk) => Promise<Result>>> = { attach, bounds, tray, settings, e2e };
+// 알림: 에뮬레이터에 지금 분에 울리는 알림을 하나 쓰면(아이폰의 편집을 흉내 낸다) 앱의 알림 시계가 울려 맨 위 알림 창이 뜬다.
+// 창에 글이 있고, 확인을 누르면 닫히는지 본다.
+const FIRESTORE_DOCS = 'http://127.0.0.1:8085/v1/projects/demo-calfif/databases/(default)/documents';
+async function alarm(): Promise<Result> {
+  const win = getWindow();
+  if (!win) return { fields: {}, checks: { window: false } };
+  await until(() => getMode() !== null, 10000);
+  const ready = await until(async () => (await js(win, RENDERED)) === 'calendar', 15000);
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  // 그 분의 시작은 이미 지났으므로 문서가 들어오는 즉시 울린다(시계는 10분 안에 지난 알림을 울린다).
+  const time = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const str = (stringValue: string) => ({ stringValue });
+  const fields = {
+    items: { mapValue: { fields: { smokealarm1: { mapValue: { fields: {
+      type: str('alarm'), date: str(date), text: str('시험 알림'), done: { booleanValue: false },
+      repeat: { mapValue: { fields: { freq: str('none') } } }, time: str(time),
+      advance: { arrayValue: { values: [{ integerValue: '0' }] } }, editedAt: { integerValue: String(Date.now()) }, editedBy: str('iphone'),
+    } } } } } },
+  };
+  const put = await fetch(`${FIRESTORE_DOCS}/users/owner-test-uid/data/events`, {
+    method: 'PATCH', headers: { authorization: 'Bearer owner', 'content-type': 'application/json' }, body: JSON.stringify({ fields }),
+  });
+  const seeded = put.ok;
+  const wroteAt = Date.now();
+  const opened = await until(() => alarmWindowForSmoke() !== null, 15000);
+  const popup = alarmWindowForSmoke();
+  const openedMs = Date.now() - wroteAt;
+  let text = '';
+  let hasTime = false;
+  let title = '';
+  let flags = { alwaysOnTop: false, resizable: true, visible: false, focused: true };
+  let bounds: Rect | null = null;
+  let onWorkArea = false;
+  let closed = false;
+  if (popup) {
+    // 창의 페이지는 렌더러가 뜨고 소리를 준비하는 동안 늦게 읽힐 수 있다(이 PC에서 7초쯤 잰 적이 있다). 계획대로 15초 안에
+    // 글이 나오기를 기다리고, 창은 첫 그림을 그린 뒤(ready-to-show, 글보다 몇 ms 늦다) 보이므로 보일 때까지 기다린 뒤에 잰다.
+    // 끝내 글이 없거나 보이지 않으면 text나 visible이 실패한다.
+    await until(async () => ((await jsOr(popup, "document.body ? document.body.innerText : ''", '')) as string).includes('시험 알림'), 15000);
+    await until(() => popup.isDestroyed() || popup.isVisible(), 5000);
+    text = (await jsOr(popup, "document.body ? document.body.innerText : ''", '')) as string;
+    hasTime = ((await jsOr(popup, "!!document.querySelector('li b')", false)) as boolean) && ((await jsOr(popup, "document.querySelector('li b').textContent", '')) as string) === time;
+    title = popup.getTitle();
+    flags = { alwaysOnTop: popup.isAlwaysOnTop(), resizable: popup.isResizable(), visible: popup.isVisible(), focused: popup.isFocused() };
+    bounds = rectOf(popup.getBounds());
+    const area = screen.getPrimaryDisplay().workArea;
+    onWorkArea = bounds.x + bounds.width <= area.x + area.width && bounds.y + bounds.height <= area.y + area.height && bounds.x >= area.x && bounds.y >= area.y;
+    await js(popup, "document.getElementById('ok').click()");
+    closed = await until(() => alarmWindowForSmoke() === null, 3000);
+  }
+  const calendarOnly = BrowserWindow.getAllWindows().length === 1;
+  const fieldsOut = { ready, seeded, seedStatus: put.status, time, opened, openedMs, text, hasTime, title, ...flags, bounds, onWorkArea, closed, calendarOnly, nestedNativeCalls: nestedNativeCalls(), loginItemCalls };
+  const checks = {
+    ready, seeded, opened, text: text.includes('시험 알림'), hasTime, title: title === 'CalendarFIF 알림', alwaysOnTop: flags.alwaysOnTop, notResizable: !flags.resizable,
+    visible: flags.visible, notFocused: !flags.focused, onWorkArea, closed, calendarOnly, nestedNativeCalls: nestedNativeCalls() === 0, loginItemCalls: loginItemCalls === 0,
+  };
+  return { fields: fieldsOut, checks };
+}
+
+const SCENARIOS: Partial<Record<Scenario, (rt: Runtime, desk: Desk) => Promise<Result>>> = { attach, bounds, tray, settings, e2e, alarm };
 
 export async function runSmoke(rt: Runtime, desk: Desk): Promise<void> {
   const scenario = rt.smoke as Scenario;

@@ -1,4 +1,5 @@
 import { ACCENTS, type Accent, type Prefs } from '../prefs';
+import { playTone } from '../tones';
 
 type Choice<T> = { value: T; label: string };
 
@@ -123,9 +124,22 @@ export function prefsSection(props: { prefs: Prefs; onChange(next: Prefs): void 
     ]),
     field('메모', [
       row('글자 크기', segmented('prefMemoSize', [{ value: 'small', label: '작게' }, { value: 'medium', label: '보통' }, { value: 'large', label: '크게' }], prefs.memoSize, (v) => set('memoSize', v)), 'prefMemoSize'),
-      row('완료한 줄 보이기', toggle(prefs.showDone, (on) => set('showDone', on))),
-      row('완료한 줄을 아래로', toggle(prefs.doneToBottom, (on) => set('doneToBottom', on))),
-      row('줄 머리 기호', segmented('prefBullet', [{ value: 'none', label: '없음' }, { value: 'number', label: '숫자' }, { value: 'dot', label: '점' }], prefs.bullet, (v) => set('bullet', v)), 'prefBullet'),
+    ]),
+    field('셀', [
+      row('줄 머리', segmented('prefBullet', [{ value: 'none', label: '없음' }, { value: 'number', label: '숫자' }, { value: 'dot', label: '점' }], prefs.bullet, (v) => set('bullet', v)), 'prefBullet'),
+      row('셀 간격', segmented('prefCellGap', [{ value: 'narrow', label: '좁게' }, { value: 'normal', label: '보통' }, { value: 'wide', label: '넓게' }], prefs.cellGap, (v) => set('cellGap', v)), 'prefCellGap'),
+      row('줄 간격', segmented('prefLineSpacing', [{ value: 'tight', label: '좁게' }, { value: 'normal', label: '보통' }, { value: 'loose', label: '넓게' }], prefs.lineSpacing, (v) => set('lineSpacing', v)), 'prefLineSpacing'),
+      row('완료된 작업 표시', toggle(prefs.showDone, (on) => set('showDone', on))),
+      row('완료 작업 맨 아래로', toggle(prefs.doneToBottom, (on) => set('doneToBottom', on))),
+      row('알림 시각 표시', toggle(prefs.showAlarmTime, (on) => set('showAlarmTime', on))),
+      row('편집 완료 알람', segmented('prefDoneTone', [{ value: 'none', label: '없음' }, { value: 'short', label: '짧은 소리' }], prefs.doneTone, (v) => {
+        set('doneTone', v);
+        if (v === 'short') playTone('done');
+      }), 'prefDoneTone'),
+      row('리마인드 알람', segmented('prefAlarmTone', [{ value: 'none', label: '없음' }, { value: 'chime', label: '차임' }, { value: 'bell', label: '벨' }], prefs.alarmTone, (v) => {
+        set('alarmTone', v);
+        if (v !== 'none') playTone(v);
+      }), 'prefAlarmTone'),
     ]),
   );
   return el;

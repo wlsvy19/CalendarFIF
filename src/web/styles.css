@@ -115,7 +115,7 @@ body {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   grid-template-rows: repeat(var(--rows, 5), minmax(0, 1fr));
-  gap: 1px;
+  gap: var(--cell-gap, 1px);
   background: var(--hairline);
   border-bottom: 1px solid var(--hairline);
   -webkit-user-select: none;
@@ -209,6 +209,8 @@ body {
 .textbtn.end { justify-self: end; font-weight: 700; }
 .field { flex: none; display: grid; gap: 8px; min-height: 0; }
 .field.grow { flex: 1; grid-template-rows: auto minmax(0, 1fr); }
+/* 편집 화면의 메모 칸은 머리 줄이 없으니 칸 하나가 남는 높이를 모두 채운다 */
+.field.grow:has(> .memo-input:only-child) { grid-template-rows: minmax(0, 1fr); }
 .field-head { display: flex; align-items: center; justify-content: space-between; }
 .field-label { font-size: 12px; font-weight: 600; color: var(--muted); }
 .donebtn {
@@ -253,6 +255,67 @@ body {
   line-height: 1.5;
 }
 .memo-input:focus-visible { outline-offset: 0; }
+/* 고른 배경색: 칸(.cell[data-color])과 같은 섞기 */
+.memo-input[data-color] { background: color-mix(in srgb, var(--day-color) 38%, var(--surface)); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .memo-input[data-color] { background: color-mix(in srgb, var(--day-color) 45%, var(--surface)); }
+}
+:root[data-theme="dark"] .memo-input[data-color] { background: color-mix(in srgb, var(--day-color) 45%, var(--surface)); }
+.ev-strip[hidden] { display: none; }
+.ev-strip { flex: none; }
+/* 편집 화면 아래의 도구 줄 */
+.editor-tools { flex: none; display: flex; gap: 8px; }
+.tool {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px 2px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.tool[hidden] { display: none; }
+.tool:active { opacity: 0.6; }
+.tool .dot {
+  position: absolute;
+  top: 8px;
+  right: calc(50% - 22px);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--hairline);
+  background: var(--sw, var(--surface));
+}
+.tool .dot.none {
+  background:
+    linear-gradient(to top right, transparent calc(50% - 1px), var(--sun) calc(50% - 1px), var(--sun) calc(50% + 1px), transparent calc(50% + 1px)),
+    var(--surface);
+}
+/* 배경 색 상자: 시트 안에서 배경 단추 위에 뜬다 */
+.palette {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: repeat(6, 34px);
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 8px 28px -8px var(--shadow);
+}
 
 /* 로그인 */
 .login {
@@ -544,8 +607,59 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
 .ln.more { opacity: 0.65; font-weight: 600; }
 /* 줄 머리 기호(설정): 숫자 또는 점 */
 .calendar[data-bullet="number"] .memo { counter-reset: ln; }
-.calendar[data-bullet="number"] .ln:not(.more)::before { counter-increment: ln; content: counter(ln) ". "; }
-.calendar[data-bullet="dot"] .ln:not(.more)::before { content: "• "; }
+.calendar[data-bullet="number"] .ln:not(.more):not(.ev)::before { counter-increment: ln; content: counter(ln) ". "; }
+.calendar[data-bullet="dot"] .ln:not(.more):not(.ev)::before { content: "• "; }
+
+/* 알림과 카운트다운 줄: 메모 줄과 같은 줄이고 앞에 작은 그림(종, 모래시계, 케이크)이 붙는다. 그림은 글자색을 따른다. */
+.ln.ev::before {
+  content: "";
+  display: inline-block;
+  width: 0.95em;
+  height: 0.95em;
+  margin-right: 0.25em;
+  vertical-align: -0.12em;
+  background-color: currentColor;
+  -webkit-mask: var(--ev-icon) center / contain no-repeat;
+  mask: var(--ev-icon) center / contain no-repeat;
+}
+.ln.ev.alarm { --ev-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 17V11a6 6 0 0 1 12 0v6l2 2H4z'/%3E%3Cpath d='M10 21h4'/%3E%3C/svg%3E"); }
+.ln.ev.countdown { --ev-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 3h12M6 21h12M7 3c0 6 5 6 5 9s-5 3-5 9M17 3c0 6-5 6-5 9s5 3 5 9'/%3E%3C/svg%3E"); }
+.ln.ev.countdown.birthday { --ev-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 21h16v-7H4zM4 17c3 2 5-2 8 0s5-2 8 0M12 14V9M12 6v1'/%3E%3C/svg%3E"); }
+
+/* 달력 아래 줄: 다가오는 카운트다운. 폰에서는 한 줄로 옆으로 스크롤한다(스크롤바는 숨긴다). */
+.cd-bar {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.cd-bar::-webkit-scrollbar { display: none; }
+.cd-bar[hidden] { display: none; }
+.cd-bar > [role="listitem"] { flex: none; display: block; }
+.cd-chip {
+  -webkit-appearance: none;
+  appearance: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 70vw;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--hairline);
+  background: color-mix(in srgb, var(--muted) 18%, var(--surface));
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cd-chip .cd-text { overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.cd-chip .cd-days { color: var(--accent); font-weight: 600; }
 
 /* 좁은 화면은 화면 높이를 채우고, 주 줄들이 남는 높이를 똑같이 나눠 가진다 */
 @media (max-width: 879.98px) {
@@ -772,3 +886,135 @@ button { touch-action: manipulation; }
 .blocked-pending { margin: 0; font-size: 15px; line-height: 1.5; }
 .login-forgot { justify-self: center; font-weight: 500; }
 .login-error.ok { color: var(--muted); }
+
+/* 편집 화면의 알림·카운트다운 띠와 시트 */
+.ev-strip { display: flex; flex-wrap: wrap; gap: 6px; }
+.ev-chip {
+  max-width: 100%;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.ev-chip.countdown { color: var(--accent); }
+.ev-chip.done { text-decoration: line-through; color: var(--muted); }
+.ev-chip:active { opacity: 0.6; }
+/* 알림 시트는 편집 화면보다 위에 뜬다. 자기 덮개를 가져서 편집 화면의 끌어 닫기와 덮개가 이 시트의 터치를 보지 못한다. */
+.scrim.event-scrim { z-index: 40; animation: scrim-in 0.2s ease-out; }
+.sheet.event-sheet {
+  z-index: 41;
+  top: auto;
+  /* --vv-bottom, --vv-height: eventSheet.ts가 window.visualViewport에서 넘겨주는 값. 글자판 위에 앉는다. */
+  bottom: var(--vv-bottom, 0px);
+  height: auto;
+  max-height: calc(100vh - env(safe-area-inset-top, 0px) - 24px);
+  max-height: calc(var(--vv-height, 100dvh) - env(safe-area-inset-top, 0px) - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  gap: 8px;
+}
+.ev-body { display: flex; flex-direction: column; gap: 2px; }
+.ev-row { min-height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 16px; }
+.ev-row.stack { flex-direction: column; align-items: stretch; justify-content: center; gap: 8px; padding: 8px 0; }
+.ev-row[hidden] { display: none; }
+.ev-name { flex: none; }
+.ev-input {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px; /* 16px 미만이면 아이폰이 입력할 때 화면을 확대한다 */
+}
+.ev-row > .ev-input { flex: 1 1 auto; max-width: 70%; text-align: right; }
+.ev-row.stack > .ev-input { max-width: none; text-align: left; }
+.ev-input[hidden] { display: none; }
+.ev-advance { display: flex; flex-wrap: wrap; gap: 6px; }
+.ev-check {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+.ev-check[aria-checked="true"] { border-color: var(--accent); background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.ev-end .segmented { align-self: flex-start; }
+.ev-error { margin: 6px 0 0; color: var(--sun); font-size: 14px; }
+.ev-error[hidden] { display: none; }
+.ev-hint { margin: 10px 0 0; font-size: 13px; line-height: 1.45; color: var(--muted); }
+.ev-link { text-decoration: none; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
+.ev-link:disabled { color: var(--muted); cursor: default; }
+.ev-actions { display: flex; margin-top: 8px; }
+.ev-actions .settings-btn { flex: 1; }
+/* 삭제를 한 번 누르면 빨갛게 채워 한 번 더 누르면 지운다는 것을 보인다. */
+.ev-actions .settings-btn.danger.armed { background: var(--sun); color: var(--on-accent); }
+@media (max-width: 879.98px) {
+  :root .sheet.event-sheet::before { display: none; }
+}
+@media (min-width: 880px) {
+  .sheet.event-sheet { top: 50%; bottom: auto; height: auto; max-height: min(640px, calc(100vh - 48px)); max-height: min(640px, calc(100dvh - 48px)); }
+}
+
+/* 화면 안 알림: 화면 위쪽, 편집 화면(20/21)과 알림 시트(40/41)보다 위. 초점을 가져오지 않는다. */
+.alarm-banner {
+  position: fixed;
+  z-index: 60;
+  top: calc(env(safe-area-inset-top, 0px) + 8px);
+  left: max(8px, env(safe-area-inset-left, 0px));
+  right: max(8px, env(safe-area-inset-right, 0px));
+  max-width: 480px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--accent);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
+  animation: scrim-in 0.2s ease-out;
+}
+.alarm-list { display: flex; flex-direction: column; gap: 2px; max-height: 40vh; overflow-y: auto; }
+.alarm-item {
+  min-height: 44px;
+  padding: 6px 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.alarm-item:active { opacity: 0.6; }
+.alarm-ok {
+  align-self: flex-end;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}

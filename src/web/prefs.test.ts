@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_APPEARANCE, WEB_APPEARANCE } from './appearance';
-import { ACCENTS, applyPrefs, DEFAULT_PREFS, loadPrefs, MEMO_METRICS, parsePrefs, PREFS_KEY, prefsAppearance, savePrefs, type Prefs } from './prefs';
+import { ACCENTS, applyPrefs, CELL_GAP_PX, DEFAULT_PREFS, LINE_SPACING_FACTOR, loadPrefs, MEMO_METRICS, parsePrefs, PREFS_KEY, prefsAppearance, savePrefs, type Prefs } from './prefs';
 
 function memory(initial: Record<string, string> = {}) {
   const data = new Map(Object.entries(initial));
@@ -12,13 +12,14 @@ describe('웹앱 설정(기기마다 따로 저장한다)', () => {
     expect(DEFAULT_PREFS).toEqual({
       version: 1, theme: 'auto', accent: 'blue', lunar: true, holidays: true, weekNumbers: false, weekStart: 0,
       memoSize: 'medium', showDone: true, doneToBottom: false, bullet: 'none',
+      cellGap: 'narrow', lineSpacing: 'normal', showAlarmTime: true, doneTone: 'none', alarmTone: 'chime',
     });
     expect(parsePrefs(null)).toEqual(DEFAULT_PREFS);
     expect(parsePrefs('글')).toEqual(DEFAULT_PREFS);
   });
 
   it('읽을 때 값마다 따로 확인하고, 틀린 값은 기본값으로 둔다', () => {
-    const good: Prefs = { version: 1, theme: 'dark', accent: 'gold', lunar: false, holidays: false, weekNumbers: true, weekStart: 1, memoSize: 'large', showDone: false, doneToBottom: true, bullet: 'dot' };
+    const good: Prefs = { version: 1, theme: 'dark', accent: 'gold', lunar: false, holidays: false, weekNumbers: true, weekStart: 1, memoSize: 'large', showDone: false, doneToBottom: true, bullet: 'dot', cellGap: 'wide', lineSpacing: 'loose', showAlarmTime: false, doneTone: 'short', alarmTone: 'bell' };
     expect(parsePrefs(good)).toEqual(good);
     expect(parsePrefs({ theme: 'neon', accent: 'red', lunar: 'yes', weekStart: 7, memoSize: 12, bullet: null, weekNumbers: true })).toEqual({ ...DEFAULT_PREFS, weekNumbers: true });
     expect(parsePrefs({ ...good, weekStart: 6, extra: 1 })).toEqual({ ...good, weekStart: 6 });
@@ -77,5 +78,25 @@ describe('웹앱 설정(기기마다 따로 저장한다)', () => {
     for (const m of Object.values(MEMO_METRICS)) for (const { size, line } of [m.narrow, m.wide]) expect(line).toBeGreaterThan(size);
     expect(MEMO_METRICS.small.narrow.size).toBeLessThan(MEMO_METRICS.medium.narrow.size);
     expect(MEMO_METRICS.large.narrow.size).toBeGreaterThan(MEMO_METRICS.medium.narrow.size);
+  });
+
+  it('새 칸(칸 간격, 줄 간격, 알림 시각, 소리)은 틀린 값이면 기본값으로 돌아간다', () => {
+    expect(parsePrefs({ cellGap: 'huge', lineSpacing: 3, showAlarmTime: 'no', doneTone: 'long', alarmTone: 'horn' })).toEqual(DEFAULT_PREFS);
+    expect(parsePrefs({ cellGap: 'normal', lineSpacing: 'tight', alarmTone: 'none' })).toEqual({ ...DEFAULT_PREFS, cellGap: 'normal', lineSpacing: 'tight', alarmTone: 'none' });
+    expect(CELL_GAP_PX).toEqual({ narrow: 1, normal: 2, wide: 4 });
+    expect(LINE_SPACING_FACTOR).toEqual({ tight: 0.9, normal: 1, loose: 1.15 });
+  });
+
+  it('applyPrefs가 --cell-gap을 건다', () => {
+    const el = document.createElement('html');
+    applyPrefs(el, DEFAULT_PREFS);
+    expect(el.style.getPropertyValue('--cell-gap')).toBe('1px');
+    applyPrefs(el, { ...DEFAULT_PREFS, cellGap: 'wide' });
+    expect(el.style.getPropertyValue('--cell-gap')).toBe('4px');
+  });
+
+  it('prefsAppearance가 showAlarmTime과 alarmTone과 doneTone을 넘긴다', () => {
+    const a = prefsAppearance({ ...DEFAULT_PREFS, showAlarmTime: false, alarmTone: 'bell', doneTone: 'short' });
+    expect([a.showAlarmTime, a.alarmTone, a.doneTone]).toEqual([false, 'bell', 'short']);
   });
 });

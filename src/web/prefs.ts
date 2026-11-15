@@ -3,11 +3,14 @@
  * PC 앱은 이것을 쓰지 않는다(appearance.ts의 설정을 쓴다).
  */
 import type { KeyValueStore } from '../sync/outbox';
-import { WEB_APPEARANCE, type Appearance, type Bullet } from './appearance';
+import { WEB_APPEARANCE, type Appearance, type AlarmTone, type Bullet } from './appearance';
 
 export type ThemeMode = 'auto' | 'light' | 'dark';
 export type Accent = 'blue' | 'pink' | 'gold' | 'purple' | 'green' | 'orange' | 'yellow' | 'sky';
 export type MemoSize = 'small' | 'medium' | 'large';
+export type CellGap = 'narrow' | 'normal' | 'wide';
+export type LineSpacing = 'tight' | 'normal' | 'loose';
+export type { AlarmTone };
 export type Prefs = {
   version: 1;
   theme: ThemeMode;
@@ -20,6 +23,11 @@ export type Prefs = {
   showDone: boolean;
   doneToBottom: boolean;
   bullet: Bullet;
+  cellGap: CellGap;
+  lineSpacing: LineSpacing;
+  showAlarmTime: boolean;
+  doneTone: 'none' | 'short';
+  alarmTone: AlarmTone;
 };
 
 export const PREFS_KEY = 'calfif.prefs';
@@ -27,7 +35,13 @@ export const PREFS_KEY = 'calfif.prefs';
 export const DEFAULT_PREFS: Prefs = {
   version: 1, theme: 'auto', accent: 'blue', lunar: true, holidays: true, weekNumbers: false, weekStart: 0,
   memoSize: 'medium', showDone: true, doneToBottom: false, bullet: 'none',
+  cellGap: 'narrow', lineSpacing: 'normal', showAlarmTime: true, doneTone: 'none', alarmTone: 'chime',
 };
+
+/** 칸 사이 간격(px). styles.css의 --cell-gap으로 간다. */
+export const CELL_GAP_PX: Record<CellGap, number> = { narrow: 1, normal: 2, wide: 4 };
+/** 메모 줄 높이에 곱하는 값(MEMO_METRICS의 줄 높이 × 이 값, 반올림). */
+export const LINE_SPACING_FACTOR: Record<LineSpacing, number> = { tight: 0.9, normal: 1, loose: 1.15 };
 
 /** 강조색. light는 밝은 화면에서, dark는 어두운 화면에서 쓴다. 단추의 글자색이자 오늘 표시의 바탕색이다. */
 export const ACCENTS: Record<Accent, { light: string; dark: string; label: string }> = {
@@ -67,6 +81,11 @@ export function parsePrefs(input: unknown): Prefs {
     showDone: bool(raw.showDone, d.showDone),
     doneToBottom: bool(raw.doneToBottom, d.doneToBottom),
     bullet: choice(raw.bullet, ['none', 'number', 'dot'] as const, d.bullet),
+    cellGap: choice(raw.cellGap, ['narrow', 'normal', 'wide'] as const, d.cellGap),
+    lineSpacing: choice(raw.lineSpacing, ['tight', 'normal', 'loose'] as const, d.lineSpacing),
+    showAlarmTime: bool(raw.showAlarmTime, d.showAlarmTime),
+    doneTone: choice(raw.doneTone, ['none', 'short'] as const, d.doneTone),
+    alarmTone: choice(raw.alarmTone, ['none', 'chime', 'bell'] as const, d.alarmTone),
   };
 }
 
@@ -89,6 +108,7 @@ export function prefsAppearance(p: Prefs): Appearance {
     ...WEB_APPEARANCE,
     lunar: p.lunar, holidays: p.holidays, weekNumbers: p.weekNumbers, weekStart: p.weekStart,
     showDone: p.showDone, doneToBottom: p.doneToBottom, bullet: p.bullet,
+    showAlarmTime: p.showAlarmTime, alarmTone: p.alarmTone, doneTone: p.doneTone,
   };
 }
 
@@ -98,4 +118,5 @@ export function applyPrefs(el: HTMLElement, p: Prefs): void {
   else el.dataset.theme = p.theme;
   el.style.setProperty('--accent-light', ACCENTS[p.accent].light);
   el.style.setProperty('--accent-dark', ACCENTS[p.accent].dark);
+  el.style.setProperty('--cell-gap', `${CELL_GAP_PX[p.cellGap]}px`);
 }

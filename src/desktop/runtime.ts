@@ -1,9 +1,9 @@
 import { dirname, join } from 'node:path';
 
-export type Scenario = 'attach' | 'bounds' | 'tray' | 'settings' | 'e2e';
+export type Scenario = 'attach' | 'bounds' | 'tray' | 'settings' | 'e2e' | 'alarm';
 export type Runtime = { rendererDir: string; profileDir: string; statusDir: string | null; smoke: Scenario | null; emulator: boolean; manageLoginItem: boolean };
 
-const SCENARIOS: readonly string[] = ['attach', 'bounds', 'tray', 'settings', 'e2e'];
+const SCENARIOS: readonly string[] = ['attach', 'bounds', 'tray', 'settings', 'e2e', 'alarm'];
 
 // 환경 변수로 개발·시험 실행을 가른다. 꾸린 앱은 렌더러 폴더를 바꿀 수 없다.
 export function resolveRuntime(p: { env: Record<string, string | undefined>; isPackaged: boolean; appPath: string; appData: string; emulatorBuild: boolean }): Runtime {

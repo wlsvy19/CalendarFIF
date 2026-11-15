@@ -7,7 +7,7 @@ import { FAKE_HOST_MARKER, makeFakeHost, widgetTexts } from '../src/widget/fakeH
 import type { Host } from '../src/widget/host';
 
 /** 시작 줄이 run에 넘기는 Scriptable의 전역들. Host의 키와 같아야 한다. */
-const GLOBALS = ['Keychain', 'Request', 'Alert', 'DrawContext', 'ListWidget', 'FileManager', 'Script', 'config', 'args', 'Device', 'Color', 'Font', 'Size', 'Rect', 'Point', 'Path'] as const satisfies readonly (keyof Host)[];
+const GLOBALS = ['Keychain', 'Request', 'Alert', 'DrawContext', 'ListWidget', 'FileManager', 'Script', 'Notification', 'config', 'args', 'Device', 'Color', 'Font', 'Size', 'Rect', 'Point', 'Path', 'Timer'] as const satisfies readonly (keyof Host)[];
 
 // 앞의 세 줄은 Scriptable이 읽는다. 그대로 둔다.
 const header = (version: string): string => `// Variables used by Scriptable.

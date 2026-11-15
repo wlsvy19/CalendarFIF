@@ -394,10 +394,15 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   const springing = await sheetNow();
   await sleep(400);
   const settledB = await sheetNow();
-  const swatch = "document.querySelectorAll('.sheet .swatch')[3]";
+  await tap(await center("document.querySelector('.sheet button.tool.color')")); // 배경 도구로 색 상자를 연다
+  await sleep(150);
+  const swatch = "document.querySelectorAll('.sheet .palette .swatch')[3]";
+  const swatchColor = await cdp.evaluate<string>(`(${swatch})?.dataset.color ?? ''`);
   await tap(await center(swatch));
   await sleep(150);
-  const picked = await cdp.evaluate<boolean>(`(${swatch})?.getAttribute('aria-checked') === 'true'`);
+  const picked = await cdp.evaluate<boolean>(
+    `document.querySelector('.sheet .palette') === null && document.querySelector('.sheet .memo-input')?.dataset.color === ${JSON.stringify(swatchColor)} && document.querySelector('.sheet .tool.color .dot')?.style.getPropertyValue('--sw') === ${JSON.stringify('#' + swatchColor)}`,
+  );
   record(
     '40px만 끌고 멈췄다 놓으면 닫히지 않고 제자리로 돌아가며, 그 뒤에도 색 단추가 눌린다',
     restB !== null && springing !== null && springing.moving && settledB !== null && Math.abs(settledB.top - restB) <= 1 && settledB.inline === '' && !settledB.moving && picked,
@@ -670,6 +675,183 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     narrowFit.tight && narrowFit.clipped === 0 && narrowFit.shown > 0 && !wideFit.tight && wideFit.hidden === 0 && wideFit.clipped === 0 && wideFit.shown === narrowFit.shown + narrowFit.hidden,
     `폭 320: 좁은 꼴 ${narrowFit.tight ? '예' : '아니오'}, 보이는 음력 ${narrowFit.shown}칸, 숨긴 것 ${narrowFit.hidden}칸, 잘린 채 보이는 것 ${narrowFit.clipped}칸 / 폭 ${PHONE.width}: 좁은 꼴 ${wideFit.tight ? '예' : '아니오'}, 보이는 음력 ${wideFit.shown}칸, 숨긴 것 ${wideFit.hidden}칸, 잘린 것 ${wideFit.clipped}칸`,
   );
+
+  // 메모 도구(배경, 알림, 카운트다운)와 셀 간격. 다음 달로 가서(오늘 이후라야 "N일 남음"이 된다) 그 달의 10일과 20일 칸을 쓴다.
+  const waitFor = async (js: string, timeoutMs = 3000): Promise<boolean> => {
+    for (let t = 0; t < timeoutMs; t += 50) {
+      if (await cdp.evaluate<boolean>(js).catch(() => false)) return true;
+      await sleep(50);
+    }
+    return false;
+  };
+  const eventSheetUp = "!!document.querySelector('.event-sheet')";
+  const openKey = async (key: string): Promise<boolean> => {
+    await tap(await center($(`.grid.current .cell[data-key="${key}"]`)));
+    return waitFor("!!document.querySelector('.sheet:not(.event-sheet)')");
+  };
+  /** 편집 화면의 도구 단추로 알림 시트를 연다. 시트가 자리를 잡을 때까지 기다린다. */
+  const openEventSheet = async (tool: 'alarm' | 'countdown'): Promise<boolean> => {
+    await tap(await center($(`.sheet button.tool.${tool}`)));
+    const up = await waitFor(eventSheetUp);
+    await sleep(600);
+    return up;
+  };
+  const typeInto = async (selector: string, value: string): Promise<void> => {
+    await tap(await center($(selector)));
+    await sleep(200);
+    await cdp.send('Input.insertText', { text: value });
+  };
+  const closeDay = async (): Promise<void> => {
+    await tap(await center($('.sheet:not(.event-sheet) .textbtn.start')));
+    await waitFor("!document.querySelector('.sheet, .scrim')");
+    await sleep(300);
+  };
+  await pressNext();
+  const monthKeys = await cdp.evaluate<string[]>("[...document.querySelectorAll('.grid.current .cell:not(.other)')].map((c) => c.dataset.key)");
+  const alarmKey = monthKeys[9];
+  const countdownKey = monthKeys[19];
+  const dayDiff = (key: string): number => {
+    const t = new Date();
+    const [y, m, d] = key.split('-').map(Number);
+    return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(t.getFullYear(), t.getMonth(), t.getDate())) / 86400000);
+  };
+
+  // 배경: 상자에서 고른 색이 메모 칸 바탕에 보인다.
+  const colorOpened = await openKey(alarmKey);
+  await sleep(700);
+  const memoBg = () => cdp.evaluate<string>("getComputedStyle(document.querySelector('.sheet .memo-input')).backgroundColor");
+  const bgBefore = await memoBg();
+  await tap(await center($('.sheet button.tool.color')));
+  await waitFor("!!document.querySelector('.sheet .palette .swatch')");
+  const swatchTwo = "document.querySelectorAll('.sheet .palette .swatch')[3]";
+  const swatchHex = await cdp.evaluate<string>(`(${swatchTwo})?.dataset.color ?? ''`);
+  await tap(await center(swatchTwo));
+  await sleep(200);
+  const bgAfter = await memoBg();
+  const memoColor = await cdp.evaluate<{ data: string | null; day: string; dot: string }>(
+    "(() => { const m = document.querySelector('.sheet .memo-input'); return { data: m.dataset.color ?? null, day: m.style.getPropertyValue('--day-color').trim(), dot: document.querySelector('.sheet .tool.color .dot')?.style.getPropertyValue('--sw') ?? '' }; })()",
+  );
+  record(
+    '배경 상자에서 고른 색이 메모 칸 바탕에 보인다',
+    colorOpened && swatchHex !== '' && memoColor.data === swatchHex && memoColor.day.toUpperCase() === `#${swatchHex}`.toUpperCase() && memoColor.dot === `#${swatchHex}` && bgAfter !== bgBefore && bgAfter !== 'rgba(0, 0, 0, 0)',
+    `고른 색 ${swatchHex}, 메모 칸 바탕 ${bgBefore} -> ${bgAfter}, data-color ${memoColor.data ?? '없음'}, --day-color ${memoColor.day || '없음'}, 점 ${memoColor.dot || '없음'}`,
+  );
+  await closeDay(); // 색을 바꿨지만 저장하지 않고 취소한다
+
+  // 색 상자가 열린 채 어두운 바깥(편집 화면 위쪽의 가림막)을 누르면 상자만 닫힌다. 그 누르기의 click이 가림막에 가서 편집 화면까지
+  // 닫으면 안 된다. 한 번 더 누르면(고친 것이 없으므로) 편집 화면이 닫힌다.
+  const paletteDay = await openKey(alarmKey);
+  await sleep(700);
+  await tap(await center($('.sheet button.tool.color')));
+  const paletteUp = await waitFor("!!document.querySelector('.sheet .palette .swatch')");
+  const dimX = Math.round(PHONE.width / 2);
+  const dimY = await cdp.evaluate<number>("Math.max(4, Math.round(document.querySelector('.sheet:not(.event-sheet)').getBoundingClientRect().top / 2))");
+  const onDim = await cdp.evaluate<boolean>(`(() => { const e = document.elementFromPoint(${dimX}, ${dimY}); return !!e && e.classList.contains('scrim') && !e.classList.contains('event-scrim'); })()`);
+  await tap({ x: dimX, y: dimY });
+  await sleep(500);
+  const afterDim = await cdp.evaluate<{ palette: boolean; day: boolean }>(
+    "({ palette: !!document.querySelector('.sheet .palette'), day: !!document.querySelector('.sheet:not(.event-sheet)') })",
+  );
+  await tap({ x: dimX, y: dimY });
+  const dimClosed = await waitFor("!document.querySelector('.sheet, .scrim')");
+  await sleep(300);
+  record(
+    '색 상자가 열린 채 어두운 바깥을 누르면 상자만 닫히고, 한 번 더 누르면 편집 화면이 닫힌다',
+    paletteDay && paletteUp && onDim && !afterDim.palette && afterDim.day && dimClosed,
+    `바깥 (${dimX}, ${dimY})px(가림막 ${onDim ? '맞음' : '아님'}), 첫 누르기 뒤 상자 ${afterDim.palette ? '남음' : '닫힘'}·편집 화면 ${afterDim.day ? '그대로' : '닫힘'}, 두 번째 누르기 뒤 편집 화면 ${dimClosed ? '닫힘' : '남음'}`,
+  );
+
+  // 알림: 편집 화면의 알림 단추로 만들면 띠와 달력 칸에 보인다.
+  const alarmText = '약 먹기';
+  const alarmTime = '08:45';
+  const dayOpened = await openKey(alarmKey);
+  await sleep(700);
+  const alarmUp = await openEventSheet('alarm');
+  await typeInto('.event-sheet input.ev-text', alarmText);
+  await cdp.evaluate(`(() => { const t = document.querySelector('.event-sheet input[type=time]'); t.value = ${JSON.stringify(alarmTime)}; t.dispatchEvent(new Event('input', { bubbles: true })); t.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await tap(await center($('.event-sheet .textbtn.end'))); // 저장
+  const sheetGone = await waitFor("!document.querySelector('.event-sheet, .event-scrim')");
+  const stripOk = await waitFor(`[...document.querySelectorAll('.sheet .ev-strip button.ev-chip')].some((c) => c.textContent === ${JSON.stringify(`${alarmTime} ${alarmText}`)})`);
+  const cellOk = await waitFor(`[...document.querySelectorAll('.grid.current .cell[data-key="${alarmKey}"] .ln.ev.alarm')].some((l) => l.textContent.includes(${JSON.stringify(alarmText)}))`);
+  const cellLine = await cdp.evaluate<string>(`document.querySelector('.grid.current .cell[data-key="${alarmKey}"] .ln.ev.alarm')?.textContent ?? ''`);
+  const dayStillOpen = await cdp.evaluate<boolean>("!!document.querySelector('.sheet:not(.event-sheet)')");
+  record(
+    '편집 화면의 알림 단추로 알림을 만들면 띠와 달력 칸에 보인다',
+    dayOpened && alarmUp && sheetGone && dayStillOpen && stripOk && cellOk,
+    `${alarmKey}에 ${alarmTime} ${alarmText}: 알림 시트 ${alarmUp ? '열림' : '안 열림'}, 저장 뒤 시트 ${sheetGone ? '닫힘' : '남음'}, 편집 화면 ${dayStillOpen ? '그대로' : '없음'}, 띠의 칩 ${stripOk ? '있음' : '없음'}, 달력 칸 줄 ${cellOk ? `"${cellLine}"` : '없음'}`,
+  );
+
+  // 알림 시트 바깥 누르기: 고친 것이 없으면 시트만 닫히고 편집 화면은 그대로다. 고친 것이 있으면 시트도 그대로다. 시트를 닫으면 편집 화면으로 돌아온다.
+  const dayTop = (await sheetNow())?.top ?? null;
+  const memoBefore = await cdp.evaluate<string>("document.querySelector('.sheet .memo-input')?.value ?? ''");
+  const sheetOpenedAgain = await openEventSheet('alarm');
+  const outsideY = await cdp.evaluate<number>("Math.max(6, Math.round(document.querySelector('.event-sheet').getBoundingClientRect().top / 2))");
+  const hitScrim = await cdp.evaluate<boolean>(`document.elementFromPoint(${Math.round(PHONE.width / 2)}, ${outsideY})?.classList.contains('event-scrim') ?? false`);
+  await typeInto('.event-sheet input.ev-text', '시험');
+  await tap({ x: Math.round(PHONE.width / 2), y: outsideY });
+  await sleep(500);
+  const dirtyStays = await cdp.evaluate<boolean>(eventSheetUp);
+  await tap(await center("[...document.querySelectorAll('.event-sheet button')].find((b) => b.textContent === '취소')"));
+  const cancelled = await waitFor("!document.querySelector('.event-sheet, .event-scrim')");
+  await openEventSheet('alarm');
+  await tap({ x: Math.round(PHONE.width / 2), y: outsideY });
+  const cleanClosed = await waitFor("!document.querySelector('.event-sheet, .event-scrim')");
+  await sleep(400);
+  const back = await cdp.evaluate<{ day: boolean; focus: string; memo: string }>(
+    "(() => { const s = document.querySelector('.sheet:not(.event-sheet)'); const a = document.activeElement; return { day: !!s, focus: !s ? '없음' : a === s ? '편집 화면' : a?.classList.contains('memo-input') ? '메모 칸' : s.contains(a) ? '편집 화면 안' : (a?.tagName ?? '없음'), memo: s?.querySelector('.memo-input')?.value ?? '' }; })()",
+  );
+  const dayTopAfter = (await sheetNow())?.top ?? null;
+  // 폰 폭에서는 시트를 닫으면 초점이 메모 칸이 아니라 편집 화면 시트로 간다(메모 칸이면 닫을 때마다 글자판이 올라온다).
+  record(
+    '알림 시트가 열린 동안 바깥을 눌러도 편집 화면은 그대로이고, 시트를 닫으면 초점이 편집 화면으로 돌아온다',
+    dayTop !== null && sheetOpenedAgain && hitScrim && dirtyStays && cancelled && cleanClosed && back.day && back.memo === memoBefore &&
+      dayTopAfter !== null && Math.abs(dayTopAfter - dayTop) <= 1 && back.focus === '편집 화면',
+    `바깥 y ${outsideY}px(알림 막 ${hitScrim ? '맞음' : '아님'}), 글을 적고 바깥을 누른 뒤 시트 ${dirtyStays ? '남음' : '닫힘'}, 취소 뒤 ${cancelled ? '닫힘' : '남음'}, 안 고치고 바깥을 누른 뒤 ${cleanClosed ? '닫힘' : '남음'}, 편집 화면 ${back.day ? `top ${px(dayTopAfter)}(전 ${px(dayTop)})` : '없음'}, 메모 ${back.memo === memoBefore ? '그대로' : '바뀜'}, 초점 ${back.focus}`,
+  );
+  await closeDay();
+
+  // 카운트다운: 만들면 달력 아래 줄에 N일 남음으로 보인다.
+  const cdText = '시험';
+  const cdDays = dayDiff(countdownKey);
+  const cdDayOpened = await openKey(countdownKey);
+  await sleep(700);
+  const cdUp = await openEventSheet('countdown');
+  await typeInto('.event-sheet input.ev-text', cdText);
+  await tap(await center($('.event-sheet .textbtn.end')));
+  const cdSheetGone = await waitFor("!document.querySelector('.event-sheet, .event-scrim')");
+  await closeDay();
+  const chipJs = `[...document.querySelectorAll('.cd-bar .cd-chip')].find((c) => c.textContent.includes(${JSON.stringify(cdText)}))`;
+  const chipShown = await waitFor(`!!(${chipJs})`);
+  const chip = await cdp.evaluate<{ days: string; hidden: boolean; below: boolean; key: string } | null>(
+    `(() => { const c = ${chipJs}; if (!c) return null; const bar = document.querySelector('.cd-bar'); return { days: c.querySelector('.cd-days')?.textContent ?? '', hidden: bar.hidden, below: bar.getBoundingClientRect().top >= document.querySelector('.pager').getBoundingClientRect().bottom - 0.5, key: c.dataset.key }; })()`,
+  );
+  record(
+    '카운트다운을 만들면 달력 아래 줄에 N일 남음으로 보인다',
+    cdDayOpened && cdUp && cdSheetGone && chipShown && chip !== null && !chip.hidden && chip.below && chip.days === `${cdDays}일 남음` && chip.key === countdownKey,
+    `${countdownKey}에 ${cdText}: 카운트다운 시트 ${cdUp ? '열림' : '안 열림'}, 저장 뒤 시트 ${cdSheetGone ? '닫힘' : '남음'}, 아래 줄 칩 ${chip ? `"${chip.days}"(기대 ${cdDays}일 남음, 달력 ${chip.below ? '아래' : '아래가 아님'})` : '없음'}`,
+  );
+
+  // 셀 간격: 설정에서 넓게를 고르면 .grid의 gap이 4px이 되어 칸 사이가 벌어진다.
+  const gapNow = () =>
+    cdp.evaluate<{ gap: string; between: number; pref: string | null }>(
+      "(() => { const g = document.querySelector('.grid.current'); const [a, b] = [...g.querySelectorAll('.cell')]; const ra = a.getBoundingClientRect(); const rb = b.getBoundingClientRect(); return { gap: getComputedStyle(g).gap, between: Math.round((rb.left - ra.right) * 10) / 10, pref: JSON.parse(localStorage.getItem('calfif.prefs') || 'null')?.cellGap ?? null }; })()",
+    );
+  const gapBefore = await gapNow();
+  await tap(await center(gear));
+  await sheetSettled();
+  await tapIn(choice('prefCellGap', 'wide'));
+  const gapWide = await gapNow();
+  await tapIn(choice('prefCellGap', 'narrow'));
+  const gapBack = await gapNow();
+  await tap(await center($('.sheet .sheet-bar .textbtn.end')));
+  await sleep(600);
+  record(
+    '셀 설정의 셀 간격 넓게가 달력 칸 사이에 보인다',
+    gapBefore.gap === '1px' && gapWide.gap === '4px' && Math.abs(gapWide.between - 4) <= 0.5 && gapWide.pref === 'wide' && gapBack.gap === '1px' && gapBack.pref === 'narrow',
+    `처음 gap ${gapBefore.gap}(칸 사이 ${gapBefore.between}px), 넓게 gap ${gapWide.gap}(칸 사이 ${gapWide.between}px, 저장 ${gapWide.pref}), 좁게로 되돌린 뒤 gap ${gapBack.gap}(저장 ${gapBack.pref})`,
+  );
+  await tap(await center($('.pill')));
+  await rest();
 
   await emulatePhone(cdp, { reducedMotion: true });
   await sleep(500);

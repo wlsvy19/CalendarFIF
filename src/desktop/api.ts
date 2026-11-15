@@ -8,8 +8,11 @@ export const CH = {
   dragStart: 'calfif:drag-start',
   drag: 'calfif:drag',
   adjustDone: 'calfif:adjust-done',
+  alarm: 'calfif:alarm',
 } as const;
 
+export type AlarmTone = 'none' | 'chime' | 'bell';
+export type AlarmPopupItem = { time: string; text: string; date: string; advance: number };
 export type Point = { x: number; y: number };
 export type DragKind = 'move' | 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 export type Hotkey = { accelerator: string; enabled: boolean };
@@ -34,6 +37,7 @@ export interface CalfifDesktop {
   dragStart(): void; // send CH.dragStart
   drag(kind: DragKind, dx: number, dy: number): void; // send CH.drag
   adjustDone(apply: boolean): void; // send CH.adjustDone
+  showAlarms(items: AlarmPopupItem[], tone: AlarmTone): void; // send CH.alarm (맨 위 알림 창)
 }
 
 declare global {
