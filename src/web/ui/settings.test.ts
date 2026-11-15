@@ -336,11 +336,11 @@ it('비밀번호 변경: 던지는 콜백도 거부처럼 다루고 폼을 푼�
   expect(input('current').disabled).toBe(false);
 });
 
-it('prefs를 주면 맨 위에 화면·달력·메모 칸을 두고, 고른 것을 바로 알린다. 안 주면 그 칸이 없다', async () => {
+it('prefs를 주면 맨 위에 화면·달력·메모·셀 칸을 두고, 고른 것을 바로 알린다. 안 주면 그 칸이 없다', async () => {
   const { DEFAULT_PREFS } = await import('../prefs');
   const onChange = vi.fn();
   const { root } = mount({ prefs: { value: { ...DEFAULT_PREFS, theme: 'dark' }, onChange } });
-  expect([...root.querySelectorAll('.field-label')].map((l) => l.textContent)).toEqual(['화면', '달력', '메모', '계정', '동기화']);
+  expect([...root.querySelectorAll('.field-label')].map((l) => l.textContent)).toEqual(['화면', '달력', '메모', '셀', '계정', '동기화']);
   expect(root.querySelector('[aria-labelledby="prefTheme"] [aria-checked="true"]')!.textContent).toBe('어둡게');
   root.querySelector<HTMLInputElement>('label.pref-row input')!.click(); // 음력
   expect(onChange).toHaveBeenLastCalledWith({ ...DEFAULT_PREFS, theme: 'dark', lunar: false });

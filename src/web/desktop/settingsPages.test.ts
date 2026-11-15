@@ -22,7 +22,7 @@ it('다섯 쪽과 설계 8절의 문구', () => {
   expect([...root.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toEqual(['캘린더', '셀', '글꼴 및 색상', '고급', '계정']);
   expect(labels(root)).toEqual(['배치', '최대 행', '지나간 주 표시', '월 간격', '주 번호', '그림자', '제목 표시줄 표시', '공휴일', '음력']);
   tab(root, '셀').click();
-  expect(labels(root)).toEqual(['줄 머리', '셀 간격', '줄 간격', '완료 작업 자동으로 맨 아래 줄로 이동', '완료된 작업 표시', '편집 완료 알람']);
+  expect(labels(root)).toEqual(['줄 머리', '셀 간격', '줄 간격', '완료 작업 자동으로 맨 아래 줄로 이동', '완료된 작업 표시', '알림 시각 표시', '편집 완료 알람', '리마인드 알람']);
   tab(root, '글꼴 및 색상').click();
   expect(labels(root)).toEqual(['캘린더 글꼴(날짜·요일) 색과 크기', '편집 내용의 글꼴 크기 및 색상', '캘린더 배경', '휴일 배경색', '오늘의 테두리', '제목 표시줄 버튼 색상', '휴일 텍스트 색상', '음력 텍스트 색상', '투명도']);
   tab(root, '고급').click();
@@ -222,4 +222,15 @@ it('계정 쪽의 사용자 관리 단추는 상자가 열린 뒤에도 생기�
   handle.setManageUsers(undefined);
   expect(manage()).toBeUndefined();
   handle.destroy();
+});
+
+it('셀 쪽에 알림 시각 표시와 리마인드 알람이 있다', () => {
+  const { root, onAppearance } = mount();
+  tab(root, '셀').click();
+  row(root, '알림 시각 표시').querySelector<HTMLInputElement>('input[role="switch"]')!.click();
+  expect(onAppearance.mock.lastCall![0].showAlarmTime).toBe(!DEFAULT_APPEARANCE.showAlarmTime);
+  const select = row(root, '리마인드 알람').querySelector('select')!;
+  expect([...select.options].map((o) => o.textContent)).toEqual(['없음', '차임', '벨']);
+  change(select, 'bell');
+  expect(onAppearance.mock.lastCall![0].alarmTone).toBe('bell');
 });
