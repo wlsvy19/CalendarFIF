@@ -52,6 +52,15 @@ vi.mock('../sync/firestoreStore', () => ({
     }
   },
 }));
+vi.mock('../sync/firestoreEvents', () => ({
+  FirestoreEventsSource: class {
+    subscribe(onData: (items: Record<string, never>) => void): () => void {
+      onData({});
+      return () => {};
+    }
+    async write(): Promise<void> {}
+  },
+}));
 // 내 access 문서는 시험이 직접 보낸다. 관리자 표시 만들기는 늘 거부된다(관리자가 아닌 계정).
 const access: { emit?: (s: AccessSnapshot) => void; fail?: (code: string) => void; subscribed: number } = { subscribed: 0 };
 vi.mock('./accessStore', () => ({

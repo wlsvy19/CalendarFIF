@@ -256,4 +256,22 @@ describe('EventsStore', () => {
     expect(s.version()).toBeGreaterThan(v1);
     s.destroy();
   });
+
+  it('destroy 뒤에는 보내던 것이 끝나도 더 보내지 않고 타이머도 걸지 않는다', async () => {
+    vi.useFakeTimers();
+    const s = make();
+    let release!: () => void;
+    source.gate = new Promise<void>((r) => { release = r; });
+    s.save('a1', rec('가'));
+    s.save('a1', rec('나')); // 보내는 중에 다시 고침
+    s.destroy();
+    source.gate = null;
+    release();
+    await flushAll();
+    expect(source.writes).toHaveLength(1);
+    s.save('a1', rec('다')); // 늦게 온 호출도 아무 일 없다
+    await flushAll();
+    expect(source.writes).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

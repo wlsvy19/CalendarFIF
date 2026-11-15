@@ -28,6 +28,7 @@ export class EventsStore implements EventsView {
   private isLoaded = false;
   private sending = false;
   private again = false;
+  private destroyed = false;
   private serverJson = '';
   private readonly listeners = new Set<() => void>();
   private unsubscribe: (() => void) | null = null;
@@ -71,6 +72,7 @@ export class EventsStore implements EventsView {
   }
 
   async flush(): Promise<void> {
+    if (this.destroyed) return;
     if (this.sending) { this.again = true; return; }
     if (this.opts.online && !this.opts.online()) return;
     this.sending = true;
@@ -92,13 +94,14 @@ export class EventsStore implements EventsView {
           if (this.pending[id] === p) { delete this.pending[id]; dropped = true; }
         }
         if (dropped) this.changed();
-      } while (this.again);
+      } while (this.again && !this.destroyed);
     } finally {
       this.sending = false;
     }
   }
 
   destroy(): void {
+    this.destroyed = true; // 보내던 쓰기가 끝나도 이어 보내지 않고, 타이머와 듣는 쪽도 더는 움직이지 않는다
     this.unsubscribe?.();
     this.unsubscribe = null;
     if (typeof window !== 'undefined') window.removeEventListener('online', this.onOnline);
@@ -107,6 +110,7 @@ export class EventsStore implements EventsView {
   }
 
   private onServer(items: EventMap, confirmed: boolean): void {
+    if (this.destroyed) return;
     const json = JSON.stringify(items);
     const same = this.isLoaded && json === this.serverJson;
     this.server = items;
@@ -137,6 +141,7 @@ export class EventsStore implements EventsView {
 
   private syncTimer(): void {
     const has = Object.keys(this.pending).length > 0;
+    if (this.destroyed) return;
     if (has && this.timer === undefined && typeof window !== 'undefined') {
       this.timer = setInterval(() => { void this.flush(); }, RETRY_MS);
     } else if (!has) this.stopTimer();

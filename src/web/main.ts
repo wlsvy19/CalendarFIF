@@ -10,7 +10,12 @@ import { changePassword, firebasePasswordDeps, passwordMessage, sendReset } from
 import { addUser, addUserMessage } from './users';
 import { CalendarStore } from './state';
 import { startAutoFlush } from './autoFlush';
-import { deviceLabel } from './device';
+import { deviceLabel, isIos } from './device';
+import { EventsStore } from './eventsStore';
+import { startAlarmClock } from './alarmClock';
+import { playTone, unlockAudio } from './tones';
+import { showAlarmBanner } from './ui/alarmBanner';
+import { FirestoreEventsSource } from '../sync/firestoreEvents';
 import { loadAppearance, saveAppearance, applyAppearance, type Appearance } from './appearance';
 import type { SettingsPage } from '../desktop/api';
 import { getBridge } from './desktop/bridge';
@@ -101,6 +106,8 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   const { getAccess, storage, outbox } = ctx;
   const editedBy = deviceLabel(navigator.userAgent);
   const source = new FirestoreMonthStore(db, session.uid);
+  // 알림과 카운트다운(data/events 문서). 달 문서와 따로 저장한다.
+  const events = new EventsStore({ source: new FirestoreEventsSource(db, session.uid), storage: storage.store, uid: session.uid, editedBy });
   let appearance: Appearance | undefined = DESKTOP ? loadAppearance(storage.store) : undefined;
   if (appearance) applyAppearance(document.documentElement, appearance);
   // 웹앱의 설정(밝기, 색상, 달력과 메모의 표시). 이 기기의 브라우저에만 저장한다.
@@ -244,6 +251,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       value: base,
       note: dayNote(dateKey),
       doneTone: prefs?.doneTone ?? appearance?.doneTone,
+      events: { view: events, save: (id, rec) => events.save(id, rec), remove: (id) => events.remove(id), iosHint: isIos(navigator.userAgent, navigator.maxTouchPoints), now: () => new Date() },
       onSave: (next) => {
         closeEditor(); // 주소가 바뀌기를 기다리지 않고 바로 닫는다
         engine.saveEdit(monthId, day, base, next);
@@ -362,6 +370,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   };
   const calendar = mountCalendar(root, {
     store,
+    events,
     status: engine,
     today: () => todayKey(),
     onOpenDay: openDay,
@@ -392,6 +401,20 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       signOut: () => (engine.status().pending === 0 ? signOutNow() : openSettingsFromCommand('account')),
     };
   }
+  // 알림 시계: 시각이 된 알림을 화면 안 알림으로 띄우고 소리를 낸다(PC 앱의 별도 알림 창은 나중에 바꾼다).
+  // 소리는 울리는 때의 설정을 읽는다(열려 있는 동안 설정이 바뀔 수 있다).
+  const alarmClock = startAlarmClock({
+    view: events,
+    storage: storage.store,
+    onRing: (triggers) => {
+      showAlarmBanner(root, triggers, openDay);
+      const tone = prefs?.alarmTone ?? appearance?.alarmTone ?? 'none';
+      if (tone !== 'none') playTone(tone);
+    },
+  });
+  // 아이폰은 사용자가 한 번 누른 뒤에야 소리를 낸다. 웹앱만 처음 누를 때 소리를 깨운다.
+  const unlock = (): void => unlockAudio();
+  if (!DESKTOP) document.addEventListener('pointerdown', unlock, { capture: true, passive: true, once: true });
   // 공휴일 자료가 바뀌면 달력(과 붙어 있는 쪽)을 다시 그린다.
   const redraw = (): void => store.refresh();
   redrawHolidays = redraw;
@@ -412,6 +435,9 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       closeSettings();
       closeUsers();
       calendar.destroy();
+      alarmClock.stop();
+      document.removeEventListener('pointerdown', unlock, { capture: true });
+      events.destroy();
       window.removeEventListener('storage', onStorage);
       offStatus();
       offCommit();
