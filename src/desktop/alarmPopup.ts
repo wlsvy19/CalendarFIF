@@ -1,9 +1,40 @@
-import { ADVANCE_DAYS } from '../core/events';
+import type { BrowserWindowConstructorOptions } from 'electron';
+import { ADVANCE_DAYS, ADVANCE_LABELS } from '../core/events';
 import type { AlarmPopupItem, AlarmTone } from './api';
 
-// PC 알림 창의 순수한 부분: 화면에서 온 항목을 거르고, 창에 열 HTML을 만든다. Electron을 모른다.
+// PC 알림 창의 순수한 부분: 화면에서 온 항목을 거르고, 창의 설정과 HTML을 만들고, 떠 있는 창에 합칠지 정한다.
+// Electron의 값은 쓰지 않는다(타입만).
 
 export const MAX_ALARM_ITEMS = 20;
+/** 이만큼 안에 소리를 냈으면 떠 있는 창에 합칠 때 다시 내지 않는다. */
+export const TONE_QUIET_MS = 5000;
+const WIDTH = 340;
+
+/** 알림 창의 설정. 꾸린 앱(packaged)에서는 달력 창처럼 개발자 도구를 막는다. */
+export function alarmWindowOptions(height: number, packaged: boolean): BrowserWindowConstructorOptions {
+  return {
+    width: WIDTH, height, frame: false, alwaysOnTop: true, resizable: false, skipTaskbar: false, show: false,
+    title: 'CalendarFIF 알림',
+    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, autoplayPolicy: 'no-user-gesture-required', devTools: !packaged },
+  };
+}
+
+/** 지금 창의 상태. closing: 확인을 눌러 닫히는 중이다(closed가 오기 전). toneAt: 마지막으로 소리를 낸 때. */
+export type AlarmPopupState = { closing: boolean; shown: AlarmPopupItem[]; toneAt: number | null };
+/** reuse: 떠 있는 창에 합쳐 다시 연다. items: 그 창에 보일 것, tone: 이번에 낼 소리. */
+export type AlarmPopupPlan = { reuse: boolean; items: AlarmPopupItem[]; tone: AlarmTone };
+
+/**
+ * 새 알림을 어디에 보일지 정한다. 떠 있고 닫히는 중이 아닌 창에는 합친다(20개를 넘으면 최근 것 20개). 그때 몇 초 안에 소리를
+ * 냈으면 다시 내지 않는다. 창이 없거나 닫히는 중이면 새 창을 연다(닫히는 창에 합치면 함께 사라진다).
+ */
+export function planAlarmPopup(current: AlarmPopupState | null, items: AlarmPopupItem[], tone: AlarmTone, now: number): AlarmPopupPlan {
+  if (current && !current.closing) {
+    const quiet = current.toneAt !== null && now - current.toneAt < TONE_QUIET_MS;
+    return { reuse: true, items: [...current.shown, ...items].slice(-MAX_ALARM_ITEMS), tone: quiet ? 'none' : tone };
+  }
+  return { reuse: false, items: items.slice(-MAX_ALARM_ITEMS), tone };
+}
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -61,10 +92,18 @@ try {
 } catch (e) {}
 `;
 
+/** 미리 알림의 말(웹앱의 알림 상자와 같은 ADVANCE_LABELS)과 그 날짜. 당일은 적지 않는다. */
+function advanceNote(i: AlarmPopupItem): string {
+  if (i.advance <= 0) return '';
+  const [, m, d] = i.date.split('-').map(Number);
+  return `${ADVANCE_LABELS[i.advance] ?? `${i.advance}일 전`} · ${m}월 ${d}일`;
+}
+
 export function alarmPopupHtml(items: AlarmPopupItem[], tone: AlarmTone): string {
   const rows = items
     .map((i) => {
-      const early = i.advance > 0 ? `<span class="note">${i.advance}일 뒤 ${escapeHtml(i.date)}</span>` : '';
+      const note = advanceNote(i);
+      const early = note ? `<span class="note">${escapeHtml(note)}</span>` : '';
       return `<li><b>${escapeHtml(i.time)}</b><span class="text">${escapeHtml(i.text)}</span>${early}</li>`;
     })
     .join('');

@@ -1,5 +1,5 @@
-import { BrowserWindow, screen } from 'electron';
-import { MAX_ALARM_ITEMS, alarmPopupHtml } from './alarmPopup';
+import { BrowserWindow, app, screen } from 'electron';
+import { alarmPopupHtml, alarmWindowOptions, planAlarmPopup } from './alarmPopup';
 import type { AlarmPopupItem, AlarmTone } from './api';
 
 // 알림 시각에 맨 위에 뜨는 작은 창. 달력 창과 따로이고, 달력 창의 순서 처리(window.ts)의 대상이 아니다.
@@ -7,8 +7,9 @@ const WIDTH = 340;
 const MARGIN = 16;
 const MAX_HEIGHT = 420;
 
-let popup: BrowserWindow | null = null;
-let shown: AlarmPopupItem[] = [];
+/** 떠 있는 창과 그 상태. closing은 확인을 눌러 닫히는 중(close 뒤, closed 전)이다. */
+type Popup = { win: BrowserWindow; shown: AlarmPopupItem[]; closing: boolean; toneAt: number | null };
+let popup: Popup | null = null;
 
 const heightFor = (count: number): number => Math.min(MAX_HEIGHT, 110 + count * 44);
 
@@ -18,39 +19,42 @@ function place(win: BrowserWindow, count: number): void {
   win.setBounds({ x: area.x + area.width - WIDTH - MARGIN, y: area.y + area.height - height - MARGIN, width: WIDTH, height });
 }
 
-function load(win: BrowserWindow, tone: AlarmTone): void {
-  void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(alarmPopupHtml(shown, tone))}`);
+function load(win: BrowserWindow, items: AlarmPopupItem[], tone: AlarmTone): void {
+  void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(alarmPopupHtml(items, tone))}`);
 }
 
 export function showAlarmWindow(items: AlarmPopupItem[], tone: AlarmTone): void {
-  if (popup && !popup.isDestroyed()) {
-    // 이미 떠 있으면 항목을 합쳐(최대 20) 다시 연다.
-    shown = [...shown, ...items].slice(0, MAX_ALARM_ITEMS);
-    place(popup, shown.length);
-    load(popup, tone);
+  const now = Date.now();
+  const live = popup && !popup.win.isDestroyed() ? popup : null;
+  const plan = planAlarmPopup(live, items, tone, now);
+  if (plan.reuse && live) {
+    // 떠 있으면 항목을 합쳐(최근 20개) 다시 연다. 몇 초 안에 소리를 냈으면 다시 내지 않는다.
+    live.shown = plan.items;
+    if (plan.tone !== 'none') live.toneAt = now;
+    place(live.win, plan.items.length);
+    load(live.win, plan.items, plan.tone);
     return;
   }
-  shown = items.slice(0, MAX_ALARM_ITEMS);
-  const win = new BrowserWindow({
-    width: WIDTH, height: heightFor(shown.length), frame: false, alwaysOnTop: true, resizable: false, skipTaskbar: false, show: false,
-    title: 'CalendarFIF 알림',
-    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, autoplayPolicy: 'no-user-gesture-required' },
-  });
-  popup = win;
+  // 창이 없거나 닫히는 중이면 새 창을 연다. 닫히는 창에 합치면 그 알림도 함께 사라진다.
+  const win = new BrowserWindow(alarmWindowOptions(heightFor(plan.items.length), app.isPackaged));
+  const mine: Popup = { win, shown: plan.items, closing: false, toneAt: plan.tone !== 'none' ? now : null };
+  popup = mine;
   win.setMenu(null);
+  win.on('close', () => {
+    mine.closing = true;
+  });
   win.on('closed', () => {
-    if (popup === win) popup = null;
-    shown = [];
+    if (popup === mine) popup = null; // 그 사이 연 새 창은 그대로 둔다
   });
   // 이동과 새 창은 installSecurity(window.ts)가 모든 창에 대해 막는다.
-  place(win, shown.length);
+  place(win, plan.items.length);
   win.once('ready-to-show', () => {
     if (!win.isDestroyed()) win.showInactive();
   });
-  load(win, tone);
+  load(win, plan.items, plan.tone);
 }
 
 /** 시험용: 지금 떠 있는 알림 창. */
 export function alarmWindowForSmoke(): BrowserWindow | null {
-  return popup && !popup.isDestroyed() ? popup : null;
+  return popup && !popup.win.isDestroyed() ? popup.win : null;
 }
