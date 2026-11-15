@@ -2,6 +2,7 @@ import type { Layout, PageOptions, WeekRule } from '../core/layout';
 import type { KeyValueStore } from '../sync/outbox';
 
 export type Bullet = 'none' | 'number' | 'dot';
+export type AlarmTone = 'none' | 'chime' | 'bell';
 export type FontSetting = { color: string; size: number };
 export type Appearance = {
   version: 1; layout: Layout; maxRows: number; pastWeeks: number; monthGap: boolean; weekNumbers: boolean;
@@ -10,6 +11,7 @@ export type Appearance = {
   calendarFont: FontSetting; memoFont: FontSetting; calendarBg: string; restBg: string; todayBorder: string;
   titleButton: string; holidayInk: string; lunarInk: string; transparency: number; weekStart: number;
   firstWeek: WeekRule; showRestDays: boolean; restDays: number[];
+  showAlarmTime: boolean; alarmTone: AlarmTone;
 };
 
 export const APPEARANCE_KEY = 'calfif.appearance';
@@ -20,6 +22,7 @@ export const DEFAULT_APPEARANCE: Appearance = {
   showDone: true, doneTone: 'none', calendarFont: { color: 'FFFFFF', size: 13 }, memoFont: { color: 'FFFFFF', size: 14 },
   calendarBg: '141820', restBg: '3A1F24', todayBorder: '6AA6FF', titleButton: 'FFFFFF', holidayInk: 'FF6B6B',
   lunarInk: '9FB3C8', transparency: 60, weekStart: 0, firstWeek: 'jan1', showRestDays: true, restDays: [0, 6],
+  showAlarmTime: true, alarmTone: 'chime',
 };
 
 /** 웹앱(아이폰 화면)의 기본값. 전체 월 배치이고 음력과 공휴일을 보여 준다. */
@@ -98,6 +101,8 @@ export function parseAppearance(input: unknown): Appearance {
     firstWeek: readChoice(raw.firstWeek, ['jan1', 'iso'] as const, d.firstWeek),
     showRestDays: readBool(raw.showRestDays, d.showRestDays),
     restDays: readRestDays(raw.restDays, [...d.restDays]),
+    showAlarmTime: readBool(raw.showAlarmTime, d.showAlarmTime),
+    alarmTone: readChoice(raw.alarmTone, ['none', 'chime', 'bell'] as const, d.alarmTone),
   };
 }
 

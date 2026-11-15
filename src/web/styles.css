@@ -115,7 +115,7 @@ body {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   grid-template-rows: repeat(var(--rows, 5), minmax(0, 1fr));
-  gap: 1px;
+  gap: var(--cell-gap, 1px);
   background: var(--hairline);
   border-bottom: 1px solid var(--hairline);
   -webkit-user-select: none;

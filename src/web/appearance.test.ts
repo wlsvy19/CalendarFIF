@@ -10,6 +10,7 @@ describe('appearance', () => {
       showDone: true, doneTone: 'none', calendarFont: { color: 'FFFFFF', size: 13 }, memoFont: { color: 'FFFFFF', size: 14 },
       calendarBg: '141820', restBg: '3A1F24', todayBorder: '6AA6FF', titleButton: 'FFFFFF', holidayInk: 'FF6B6B',
       lunarInk: '9FB3C8', transparency: 60, weekStart: 0, firstWeek: 'jan1', showRestDays: true, restDays: [0, 6],
+      showAlarmTime: true, alarmTone: 'chime',
     });
     expect(WEB_APPEARANCE).toEqual({ ...DEFAULT_APPEARANCE, layout: 'month', holidays: true, lunar: true, monthGap: false, shadow: false });
   });
@@ -38,4 +39,9 @@ it('설정을 CSS 변수로 바꾼다', () => {
   });
   const v = appearanceVars({ ...DEFAULT_APPEARANCE, transparency: 30, calendarBg: '', todayBorder: '' });
   expect([v['--desk-cell-bg'], v['--desk-rest-bg'], v['--desk-today'], v['--desk-day-pct']]).toEqual(['transparent', 'rgba(58, 31, 36, 0.7)', 'transparent', '70%']);
+});
+it('알림 시각 표시와 알림 소리: 기본값과 틀린 값의 되돌림', () => {
+  expect([DEFAULT_APPEARANCE.showAlarmTime, DEFAULT_APPEARANCE.alarmTone]).toEqual([true, 'chime']);
+  expect(parseAppearance({ showAlarmTime: false, alarmTone: 'bell' })).toMatchObject({ showAlarmTime: false, alarmTone: 'bell' });
+  expect(parseAppearance({ showAlarmTime: 'x', alarmTone: 'horn' })).toMatchObject({ showAlarmTime: true, alarmTone: 'chime' });
 });
