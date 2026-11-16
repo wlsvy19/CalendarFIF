@@ -4,7 +4,7 @@ import { pushSection } from './pushSection';
 
 afterEach(() => { document.body.replaceChildren(); });
 
-function mount(view: PushView) {
+function mount(view: PushView, viaWidget = false) {
   let current = view;
   const listeners = new Set<() => void>();
   const client = {
@@ -13,7 +13,7 @@ function mount(view: PushView) {
     enable: vi.fn(async () => undefined),
     disable: vi.fn(async () => undefined),
   };
-  const section = pushSection({ client });
+  const section = pushSection({ client, viaWidget });
   document.body.append(section.el);
   const sw = section.el.querySelector<HTMLInputElement>('input.switch')!;
   const note = section.el.querySelector<HTMLElement>('.push-message')!;
@@ -83,6 +83,15 @@ it('켤 수 없는 화면이면 스위치를 막고 까닭을 짧게 적는다',
     expect(m.note.textContent).toContain(text);
     m.section.destroy();
   }
+});
+
+it('위젯에서 연 화면(Scriptable 안)이면 홈 화면 앱에서 켠 대로 알림이 온다고 적는다. 다른 까닭은 그대로다', () => {
+  const m = mount(view('install'), true);
+  expect([m.sw.disabled, m.note.textContent]).toEqual([true, '위젯에서 연 화면이라 여기서는 켜고 끌 수 없습니다. 알림은 홈 화면 CalendarFIF 앱에서 켠 대로 옵니다.']);
+  m.section.destroy();
+  const denied = mount(view('denied'), true);
+  expect(denied.note.textContent).toContain('아이폰 설정');
+  denied.section.destroy();
 });
 
 it('닫으면 더 듣지 않는다', () => {

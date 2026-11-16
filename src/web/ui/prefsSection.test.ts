@@ -42,7 +42,8 @@ it('고르면 바로 새 설정을 준다. 바꾼 것들이 쌓인다', () => {
   m.radios('prefMemoSize')[0].click();
   m.radios('prefBullet')[1].click();
   m.switchOf('주 번호').click();
-  expect(m.last()).toEqual({ ...DEFAULT_PREFS, theme: 'dark', lunar: false, weekStart: 1, memoSize: 'small', bullet: 'number', weekNumbers: true });
+  // 줄 머리를 고르면 고른 적이 있다고 적는다(그래야 다음에 읽을 때 기본인 점으로 돌아가지 않는다).
+  expect(m.last()).toEqual({ ...DEFAULT_PREFS, theme: 'dark', lunar: false, weekStart: 1, memoSize: 'small', bullet: 'number', bulletPicked: true, weekNumbers: true });
   expect(m.checked('prefTheme')).toBe('dark');
   // 이미 고른 것을 다시 누르면 알리지 않는다.
   const calls = m.onChange.mock.calls.length;

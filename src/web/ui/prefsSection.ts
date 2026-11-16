@@ -91,7 +91,7 @@ function field(title: string, rows: HTMLElement[]): HTMLElement {
 export function prefsSection(props: { prefs: Prefs; onChange(next: Prefs): void }): HTMLElement {
   let prefs = props.prefs;
   const set = <K extends keyof Prefs>(key: K, value: Prefs[K]): void => {
-    prefs = { ...prefs, [key]: value };
+    prefs = { ...prefs, [key]: value, ...(key === 'bullet' ? { bulletPicked: true } : {}) };
     props.onChange(prefs);
   };
   const el = document.createElement('div');

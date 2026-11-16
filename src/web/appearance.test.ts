@@ -6,13 +6,17 @@ describe('appearance', () => {
   it('기본값은 설계 8절의 표와 같다', () => {
     expect(DEFAULT_APPEARANCE).toEqual({
       version: 1, layout: 'floating', maxRows: 5, pastWeeks: 1, monthGap: true, weekNumbers: false, shadow: true,
-      titleBar: true, holidays: true, lunar: false, solarTerms: true, bullet: 'none', cellGap: 4, lineSpacing: 1.35, doneToBottom: false,
+      titleBar: true, holidays: true, lunar: false, solarTerms: true, bullet: 'dot', bulletPicked: false, cellGap: 4, lineSpacing: 1.35, doneToBottom: false,
       showDone: true, doneTone: 'none', calendarFont: { color: 'FFFFFF', size: 13 }, memoFont: { color: 'FFFFFF', size: 14 },
       calendarBg: '141820', restBg: '3A1F24', todayBorder: '6AA6FF', titleButton: 'FFFFFF', holidayInk: 'FF6B6B',
       lunarInk: '9FB3C8', termInk: '5FD37A', transparency: 60, weekStart: 0, firstWeek: 'jan1', showRestDays: true, restDays: [0, 6],
       showAlarmTime: true, alarmTone: 'chime',
     });
     expect(WEB_APPEARANCE).toEqual({ ...DEFAULT_APPEARANCE, layout: 'month', holidays: true, lunar: true, monthGap: false, shadow: false });
+  });
+  it('PC 앱도 줄 머리의 기본은 점이다. 고른 적이 없는 옛 설정은 점이 되고, 고른 것은 그대로다', () => {
+    expect(parseAppearance({ ...DEFAULT_APPEARANCE, bullet: 'none', bulletPicked: undefined })).toMatchObject({ bullet: 'dot', bulletPicked: false });
+    expect(parseAppearance({ bullet: 'none', bulletPicked: true })).toMatchObject({ bullet: 'none', bulletPicked: true });
   });
   it('범위 밖은 범위 안으로, 목록 밖과 틀린 형식은 기본값으로, 색은 대문자 6자리로', () => {
     const a = parseAppearance({ version: 1, maxRows: 12, pastWeeks: -1, cellGap: 30, lineSpacing: 1.333, transparency: 101, weekStart: 7, layout: 'spiral', bullet: 'dot', calendarFont: { color: 'ff0000', size: 40 }, memoFont: 'big' });

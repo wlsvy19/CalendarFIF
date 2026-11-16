@@ -60,6 +60,27 @@ const accounts = firebaseAccountMaker(app.options, {
 const DESKTOP = import.meta.env.VITE_DESKTOP === '1';
 // 웹앱의 밝기와 색상은 로그인 화면에도 걸려야 하므로 화면을 올리기 전에 건다. PC 앱은 자기 설정(appearance)을 쓴다.
 if (!DESKTOP) applyPrefs(document.documentElement, loadPrefs(openStorage().store));
+// 위젯을 눌러 Scriptable 안에서 연 화면인가. 위젯은 주소에 ?via=widget을 붙여 연다(src/widget/main.ts). 주소에서는 지우고
+// 이 탭(Scriptable의 화면)이 열려 있는 동안 기억한다. 그 화면에서는 알림 받기를 켤 수 없어서 까닭을 달리 적는다.
+const VIA_KEY = 'calfif.via';
+(() => {
+  try {
+    const url = new URL(location.href);
+    if (url.searchParams.get('via') !== 'widget') return;
+    sessionStorage.setItem(VIA_KEY, 'widget');
+    url.searchParams.delete('via');
+    history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+  } catch {
+    // 기억하지 못하면 보통 화면처럼 적는다.
+  }
+})();
+const viaWidget = (): boolean => {
+  try {
+    return sessionStorage.getItem(VIA_KEY) === 'widget';
+  } catch {
+    return false;
+  }
+};
 // 옮긴 자리는 상자마다 따로, 앱이 켜져 있는 동안만 기억한다.
 const editorMemory = sessionMemory();
 const usersMemory = sessionMemory();
@@ -201,7 +222,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     },
     copy: (text) => (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error('클립보드를 쓸 수 없습니다.'))),
   };
-  const pushInstall: PushSectionDeps | undefined = push ? { client: push } : undefined;
+  const pushInstall: PushSectionDeps | undefined = push ? { client: push, viaWidget: viaWidget() } : undefined;
   // 설정에서 바꾼 모양은 바로 달력과 <html>에 반영하고 이 기기에 저장한다. 저장하지 못하면 false(값은 화면에 그대로 둔다).
   const changeAppearance = (next: Appearance): boolean => {
     appearance = next;

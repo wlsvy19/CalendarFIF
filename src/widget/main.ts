@@ -107,12 +107,24 @@ function findWebView(): (new () => WebViewLike) | null {
  * Scriptable 안의 웹 화면(WebView)에 달력을 띄운다. 닫을 때까지 기다린다. 띄웠으면 빈 글, 띄우지 못하면 그 까닭을 준다.
  * 불러오기가 끝나기를 기다리지 않고 바로 띄운다: 기다리는 동안 Scriptable의 화면이 보이지 않게, 그리고 느린 연결에서 멈춰 있지 않게.
  */
+/** 웹앱 주소에 via=widget을 붙인다. 주소를 읽지 못하면 그대로 둔다. */
+function withVia(appUrl: string): string {
+  try {
+    const url = new URL(appUrl);
+    url.searchParams.set('via', 'widget');
+    return url.toString();
+  } catch {
+    return appUrl;
+  }
+}
+
 async function openCalendarInApp(cfg: Config): Promise<string> {
   try {
     const Ctor = findWebView();
     if (!Ctor) return 'Scriptable의 WebView를 찾지 못했다';
     const view = new Ctor();
-    void Promise.resolve(view.loadURL(cfg.appUrl)).catch(() => {
+    // ?via=widget: 웹앱이 위젯에서 연 화면인 것을 안다(알림 받기를 여기서 켤 수 없는 까닭을 달리 적는다).
+    void Promise.resolve(view.loadURL(withVia(cfg.appUrl))).catch(() => {
       // 불러오지 못하면 빈 화면이 남는다. 닫으면 끝난다.
     });
     await view.present(true);

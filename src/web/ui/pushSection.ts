@@ -5,7 +5,12 @@ import type { PushView } from '../push';
 
 export type PushSectionDeps = {
   client: { view(): PushView; onChange(fn: () => void): () => void; enable(): Promise<void>; disable(): Promise<void> };
+  /** 위젯을 눌러 Scriptable 안에서 연 화면이다(main.ts의 viaWidget). 그 화면에서는 켤 수 없는 까닭을 달리 적는다. */
+  viaWidget?: boolean;
 };
+
+/** 위젯에서 연 화면(Scriptable 안)의 까닭. iOS는 홈 화면 앱에서만 웹 푸시를 받게 하므로 여기서는 켜고 끌 수 없다. */
+const VIA_WIDGET = '위젯에서 연 화면이라 여기서는 켜고 끌 수 없습니다. 알림은 홈 화면 CalendarFIF 앱에서 켠 대로 옵니다.';
 
 /** 스위치를 쓸 수 없는 때의 짧은 까닭. */
 const BLOCKED: Partial<Record<PushView['mode'], string>> = {
@@ -32,7 +37,7 @@ export function pushSection(deps: PushSectionDeps): { el: HTMLElement; destroy()
     if (!busy) sw.checked = v.mode === 'on';
     sw.disabled = busy || (v.mode !== 'on' && v.mode !== 'off');
     // 다시 누르면 지난번 까닭은 지운다. 끝나면 새 까닭(있으면)을 보인다.
-    const text = busy ? '' : v.message || BLOCKED[v.mode] || '';
+    const text = busy ? '' : v.message || (v.mode === 'install' && deps.viaWidget ? VIA_WIDGET : BLOCKED[v.mode]) || '';
     note.textContent = text;
     note.hidden = text === '';
   };

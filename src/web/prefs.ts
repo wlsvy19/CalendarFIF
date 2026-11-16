@@ -24,6 +24,8 @@ export type Prefs = {
   showDone: boolean;
   doneToBottom: boolean;
   bullet: Bullet;
+  /** 사용자가 줄 머리를 고른 적이 있다. 없으면 저장된 줄 머리 대신 기본(점)을 쓴다. */
+  bulletPicked: boolean;
   cellGap: CellGap;
   lineSpacing: LineSpacing;
   showAlarmTime: boolean;
@@ -35,7 +37,7 @@ export const PREFS_KEY = 'calfif.prefs';
 
 export const DEFAULT_PREFS: Prefs = {
   version: 1, theme: 'auto', accent: 'blue', lunar: true, solarTerms: true, holidays: true, weekNumbers: false, weekStart: 0,
-  memoSize: 'medium', showDone: true, doneToBottom: false, bullet: 'none',
+  memoSize: 'medium', showDone: true, doneToBottom: false, bullet: 'dot', bulletPicked: false,
   cellGap: 'narrow', lineSpacing: 'normal', showAlarmTime: true, doneTone: 'none', alarmTone: 'chime',
 };
 
@@ -82,7 +84,9 @@ export function parsePrefs(input: unknown): Prefs {
     memoSize: choice(raw.memoSize, ['small', 'medium', 'large'] as const, d.memoSize),
     showDone: bool(raw.showDone, d.showDone),
     doneToBottom: bool(raw.doneToBottom, d.doneToBottom),
-    bullet: choice(raw.bullet, ['none', 'number', 'dot'] as const, d.bullet),
+    // 줄 머리의 기본은 점이다(2026-11-16). 그 앞에 저장된 설정에는 그때의 기본(없음)이 들어 있으므로, 사용자가 고른 적이 있을 때만 저장된 값을 쓴다.
+    bullet: raw.bulletPicked === true ? choice(raw.bullet, ['none', 'number', 'dot'] as const, d.bullet) : d.bullet,
+    bulletPicked: raw.bulletPicked === true,
     cellGap: choice(raw.cellGap, ['narrow', 'normal', 'wide'] as const, d.cellGap),
     lineSpacing: choice(raw.lineSpacing, ['tight', 'normal', 'loose'] as const, d.lineSpacing),
     showAlarmTime: bool(raw.showAlarmTime, d.showAlarmTime),

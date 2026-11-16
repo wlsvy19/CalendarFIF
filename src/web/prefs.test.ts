@@ -11,7 +11,7 @@ describe('웹앱 설정(기기마다 따로 저장한다)', () => {
   it('기본값: 자동 밝기, 파랑, 음력과 절기와 공휴일을 보이고 일요일에 시작한다', () => {
     expect(DEFAULT_PREFS).toEqual({
       version: 1, theme: 'auto', accent: 'blue', lunar: true, solarTerms: true, holidays: true, weekNumbers: false, weekStart: 0,
-      memoSize: 'medium', showDone: true, doneToBottom: false, bullet: 'none',
+      memoSize: 'medium', showDone: true, doneToBottom: false, bullet: 'dot', bulletPicked: false,
       cellGap: 'narrow', lineSpacing: 'normal', showAlarmTime: true, doneTone: 'none', alarmTone: 'chime',
     });
     expect(parsePrefs(null)).toEqual(DEFAULT_PREFS);
@@ -19,10 +19,17 @@ describe('웹앱 설정(기기마다 따로 저장한다)', () => {
   });
 
   it('읽을 때 값마다 따로 확인하고, 틀린 값은 기본값으로 둔다', () => {
-    const good: Prefs = { version: 1, theme: 'dark', accent: 'gold', lunar: false, solarTerms: false, holidays: false, weekNumbers: true, weekStart: 1, memoSize: 'large', showDone: false, doneToBottom: true, bullet: 'dot', cellGap: 'wide', lineSpacing: 'loose', showAlarmTime: false, doneTone: 'short', alarmTone: 'bell' };
+    const good: Prefs = { version: 1, theme: 'dark', accent: 'gold', lunar: false, solarTerms: false, holidays: false, weekNumbers: true, weekStart: 1, memoSize: 'large', showDone: false, doneToBottom: true, bullet: 'number', bulletPicked: true, cellGap: 'wide', lineSpacing: 'loose', showAlarmTime: false, doneTone: 'short', alarmTone: 'bell' };
     expect(parsePrefs(good)).toEqual(good);
     expect(parsePrefs({ theme: 'neon', accent: 'red', lunar: 'yes', solarTerms: 0, weekStart: 7, memoSize: 12, bullet: null, weekNumbers: true })).toEqual({ ...DEFAULT_PREFS, weekNumbers: true });
     expect(parsePrefs({ ...good, weekStart: 6, extra: 1 })).toEqual({ ...good, weekStart: 6 });
+  });
+
+  it('줄 머리의 기본은 점이다. 고른 적이 없는 옛 설정(그때의 기본 없음이 저장돼 있다)은 점이 되고, 고른 것은 그대로다', () => {
+    expect(parsePrefs({ ...DEFAULT_PREFS, bullet: 'none', bulletPicked: undefined })).toMatchObject({ bullet: 'dot', bulletPicked: false });
+    expect(parsePrefs({ bullet: 'number' })).toMatchObject({ bullet: 'dot', bulletPicked: false });
+    for (const bullet of ['none', 'number', 'dot'] as const) expect(parsePrefs({ bullet, bulletPicked: true })).toMatchObject({ bullet, bulletPicked: true });
+    expect(parsePrefs({ bullet: 'x', bulletPicked: true })).toMatchObject({ bullet: 'dot', bulletPicked: true });
   });
 
   it('저장하고 다시 읽는다. 깨진 글은 기본값이다', () => {

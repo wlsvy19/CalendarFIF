@@ -151,7 +151,7 @@ export function mountDesktopSettings(
   notice.hidden = true;
 
   const set = <K extends keyof Appearance>(key: K, value: Appearance[K]): void => {
-    cur = { ...cur, [key]: value };
+    cur = { ...cur, [key]: value, ...(key === 'bullet' ? { bulletPicked: true } : {}) };
     const stored = props.onAppearance(cur);
     notice.textContent = stored === false ? SAVE_FAILED : '';
     notice.hidden = stored !== false;

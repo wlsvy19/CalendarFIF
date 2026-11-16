@@ -1275,7 +1275,7 @@ describe('위젯을 눌렀을 때 여는 곳(매개변수 inapp)', () => {
       const log = withWebView();
       const host = make({ runsInApp: true, keychain, queryParameters: { open: 'calendar' } });
       await run(host, cfg, now);
-      expect([log.loaded, log.presented, host.state.alerts.length, host.state.requests.length]).toEqual([['https://example.test/'], [true], 0, 0]);
+      expect([log.loaded, log.presented, host.state.alerts.length, host.state.requests.length]).toEqual([['https://example.test/?via=widget'], [true], 0, 0]);
     }
   });
 
@@ -1310,7 +1310,7 @@ describe('위젯을 눌렀을 때 여는 곳(매개변수 inapp)', () => {
     const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
     expect('WebView' in host).toBe(false);
     await run(host, { ...cfg, version: '0.9.1 (2026-11-16)', handedOver: true, baseVersion: '0.9.0 (2026-11-16)' }, now);
-    expect([log.loaded, log.presented, host.state.requests.length]).toEqual([['https://example.test/'], [true], 0]);
+    expect([log.loaded, log.presented, host.state.requests.length]).toEqual([['https://example.test/?via=widget'], [true], 0]);
   });
 
   it('예약만 하러 온 주소(schedule=1)와 같이 오면 달력을 연다. 웹앱의 단추는 schedule=1만 보낸다', async () => {
@@ -1347,7 +1347,7 @@ describe('위젯을 눌렀을 때 여는 곳(매개변수 inapp)', () => {
       const log = withWebView();
       const host = make({ runsInApp: true, keychain: loggedIn, widgetParameter });
       await run(host, cfg, now);
-      expect([log.loaded, log.presented, host.state.alerts.length]).toEqual([['https://example.test/'], [true], 0]);
+      expect([log.loaded, log.presented, host.state.alerts.length]).toEqual([['https://example.test/?via=widget'], [true], 0]);
     }
     // 매개변수에 inapp이 없으면 전처럼 메뉴다.
     const log = withWebView();
