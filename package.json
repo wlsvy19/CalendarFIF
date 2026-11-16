@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && tsx scripts/build-widget.ts && tsx scripts/build-push.ts && vite build",
+    "icons": "tsx scripts/make-icons.ts",
     "push:build": "tsx scripts/build-push.ts",
     "dev:emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && vite --mode emulator\"",
     "dev:desktop-emu": "tsx scripts/build-rules.ts --uid owner-test-uid && tsx scripts/emu.ts \"tsx scripts/seed-emulator.ts && vite --mode desktop-emu\"",

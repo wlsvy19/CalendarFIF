@@ -15,7 +15,10 @@ let tray: Tray | null = null;
 let menu: Menu | null = null;
 
 export function createTray(rendererDir: string, state: () => MenuState, run: (a: MenuAction) => void, onLeftClick: () => void): void {
-  const icon = nativeImage.createFromPath(join(rendererDir, 'icons', 'icon-192.png')).resize({ width: 16, height: 16 });
+  // 트레이용 작은 그림을 쓴다(tray.png와 화면 배율별 tray@1.25x, @1.5x, @2x.png를 Electron이 함께 읽는다).
+  // 큰 그림을 16px로 줄이면 불꽃이 뭉개진다. 작은 그림이 없으면 예전처럼 큰 그림을 줄여 쓴다.
+  const small = nativeImage.createFromPath(join(rendererDir, 'icons', 'tray.png'));
+  const icon = small.isEmpty() ? nativeImage.createFromPath(join(rendererDir, 'icons', 'icon-192.png')).resize({ width: 16, height: 16 }) : small;
   tray = new Tray(icon);
   tray.setToolTip('CalendarFIF');
   tray.on('click', onLeftClick);

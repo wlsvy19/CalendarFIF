@@ -157,6 +157,8 @@ const made = await packager({
   dir: stage,
   out: resolve(root, out),
   name: 'CalendarFIF',
+  // 실행 파일의 아이콘. npx tsx scripts/make-icons.ts가 만든다.
+  icon: resolve(root, 'public/favicon.ico'),
   platform: 'win32',
   arch: 'x64',
   electronVersion: readJson('node_modules/electron/package.json').version,

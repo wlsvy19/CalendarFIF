@@ -42,6 +42,8 @@ const pwa = VitePWA({
   },
   workbox: {
     globPatterns: ['**/*.{js,css,html,png,svg,webmanifest}'],
+    // 트레이 그림은 PC 앱만 쓴다. 아이폰이 미리 받아 둘 필요가 없다.
+    globIgnores: ['**/node_modules/**/*', 'icons/tray*.png'],
     navigateFallback: 'index.html',
     // Firebase가 쓰는 주소(/__/..., 예: 비밀번호 재설정 링크)에는 앱의 페이지로 답하지 않는다.
     navigateFallbackDenylist: [/^\/__\//],
