@@ -13,6 +13,26 @@ const pushImports = existsSync(PUSH_SW)
 // 설정의 맨 아래에 보일 앱 버전(src/web/version.ts).
 const APP_VERSION = (JSON.parse(readFileSync('package.json', 'utf8')) as { version: string }).version;
 
+// 아이폰은 홈 화면 아이콘(apple-touch-icon)을 주소로 기억해 두고 그림이 바뀌어도 다시 받지 않는다(2026-11-16에 사용자가
+// 새 아이콘을 넣은 뒤에도 "홈 화면에 추가"에 옛 그림이 나왔다). 그래서 빌드할 때 파일 내용의 해시를 이름에 넣은 사본을 만들고
+// index.html이 그것을 가리키게 한다. 그림이 바뀌면 주소도 바뀐다. 개발 서버에서는 하지 않는다.
+const TOUCH_ICON = 'public/icons/apple-touch-icon.png';
+const TOUCH_ICON_LINK = 'href="/icons/apple-touch-icon.png"';
+const touchIcon: PluginOption = {
+  name: 'calfif-touch-icon',
+  apply: 'build',
+  generateBundle() {
+    this.emitFile({ type: 'asset', fileName: touchIconName(), source: readFileSync(TOUCH_ICON) });
+  },
+  transformIndexHtml(html) {
+    if (!html.includes(TOUCH_ICON_LINK)) throw new Error('index.html에 apple-touch-icon 연결이 없다');
+    return html.replace(TOUCH_ICON_LINK, `href="/${touchIconName()}"`);
+  },
+};
+function touchIconName(): string {
+  return `icons/apple-touch-icon-${createHash('sha256').update(readFileSync(TOUCH_ICON)).digest('hex').slice(0, 10)}.png`;
+}
+
 // PC 앱(desktop, desktop-emu 모드)은 앱 안의 파일을 읽으므로 서비스 워커와 매니페스트가 없다.
 const DESKTOP_OUT: Record<string, string> = { desktop: 'dist-desktop', 'desktop-emu': 'dist-desktop-emu' };
 
@@ -59,6 +79,6 @@ export default defineConfig(({ mode }) => {
     define: { __APP_VERSION__: JSON.stringify(APP_VERSION) },
     server: { port: 5173, strictPort: true },
     ...(outDir ? { build: { outDir } } : {}),
-    plugins: [outDir ? deskClass : pwa],
+    plugins: [touchIcon, outDir ? deskClass : pwa],
   };
 });

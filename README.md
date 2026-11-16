@@ -402,7 +402,7 @@ Windows PC에서도 쓰는 사용자에게는 꾸린 폴더(`release\CalendarFIF
 | `public/icons/tray.png`, `tray@1.25x.png`, `tray@1.5x.png`, `tray@2x.png` | PC 앱의 트레이(화면 배율별). 작은 크기에서 뭉개지지 않게 단순하게 그린 그림이다. |
 | `public/favicon.ico` | 브라우저 탭과 PC 앱 실행 파일(`npm run desktop:pack`이 넣는다) |
 
-그림을 고치면 `npm run icons`를 돌리고 웹앱을 배포하고 PC 앱을 다시 꾸린다. 아이폰 홈 화면의 아이콘은 추가할 때의 그림으로 굳는다. 바꾸려면 홈 화면 앱을 지우고 Safari에서 다시 홈 화면에 추가한다(로그인과 설정의 `알림 받기`를 다시 해야 한다).
+그림을 고치면 `npm run icons`를 돌리고 웹앱을 배포하고 PC 앱을 다시 꾸린다. 아이폰 홈 화면의 아이콘은 추가할 때의 그림으로 굳는다. 바꾸려면 홈 화면 앱을 지우고 Safari에서 다시 홈 화면에 추가한다(로그인과 설정의 `알림 받기`를 다시 해야 한다). 아이폰은 아이콘 그림을 주소로 기억해 두고 다시 받지 않으므로, 빌드할 때 `index.html`의 아이콘 연결을 내용 해시가 든 이름(`icons/apple-touch-icon-<해시>.png`)으로 바꾼다(`vite.config.ts`의 `touchIcon`). 다시 추가하기 전에 Safari에서 웹앱을 한 번 새로 고쳐 새 `index.html`을 받게 한다.
 
 ## 무료 한도 (2026-11-13 확인)
 
