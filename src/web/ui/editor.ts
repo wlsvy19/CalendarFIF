@@ -135,6 +135,7 @@ export function mountEditor(
   const strip = sheet.querySelector<HTMLElement>('.ev-strip')!;
   const nowOf = (): Date => events?.now?.() ?? new Date();
   let eventSheet: { destroy(): void } | null = null;
+  let eventSaved = false; // 열려 있는 알림 시트에서 저장을 했다
   const openEventSheet = (type: 'alarm' | 'countdown', id?: string): void => {
     if (!events || eventSheet) return;
     eventSheet = mountEventSheet(root, {
@@ -146,11 +147,26 @@ export function mountEditor(
       defaultText: '',
       now: nowOf,
       iosHint: events.iosHint,
-      onSave: (eid, rec) => events.save(eid, rec),
-      onDelete: (eid) => events.remove(eid),
+      onSave: (eid, rec) => {
+        events.save(eid, rec);
+        eventSaved = true;
+      },
+      onDelete: (eid) => {
+        events.remove(eid);
+        eventSaved = false; // 저장한 뒤 지웠으면(지금 예약 뒤의 삭제) 남은 것이 없으므로 편집 화면에 남는다
+      },
       flush: events.flush ? () => events.flush!() : undefined,
       onClose: () => {
         eventSheet = null;
+        // 알림이나 카운트다운을 저장했으면 편집 화면으로 돌아오지 않고 달력으로 나간다(2026-11-16 사용자: "알람도 하나의 메모니까,
+        // 메모 안 뜨고 캘린더 보이는 곳으로 나가게"). 적던 메모가 있으면 같이 저장한다(아래로 끌어 닫을 때와 같다).
+        // 취소하거나 지웠을 때는 전처럼 편집 화면에 남는다.
+        if (eventSaved) {
+          eventSaved = false;
+          if (changed()) save();
+          else cancel();
+          return;
+        }
         // 폰에서는 열 때와 같이 시트에 초점을 둔다. 메모 칸에 두면 닫을 때마다 글자판이 올라온다.
         if (env?.focusText || window.innerWidth >= WIDE_PX) area.focus({ preventScroll: true });
         else sheet.focus({ preventScroll: true });
@@ -167,7 +183,8 @@ export function mountEditor(
     for (const line of lines) {
       const chip = document.createElement('button');
       chip.type = 'button';
-      chip.className = `ev-chip ${line.type}${line.done ? ' done' : ''}`;
+      // 앞의 작은 그림(종, 모래시계, 케이크)은 달력 칸의 줄과 같다(styles.css의 .ev-chip::before).
+      chip.className = `ev-chip ${line.type}${line.kind === 'birthday' ? ' birthday' : ''}${line.done ? ' done' : ''}`;
       chip.dataset.id = line.id;
       let label = line.type === 'alarm' ? `${line.time} ${line.text}` : line.text;
       const rec = items[line.id];

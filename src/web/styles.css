@@ -617,7 +617,8 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
 .calendar[data-bullet="dot"] .ln:not(.more):not(.ev)::before { content: "• "; }
 
 /* 알림과 카운트다운 줄: 메모 줄과 같은 줄이고 앞에 작은 그림(종, 모래시계, 케이크)이 붙는다. 그림은 글자색을 따른다. */
-.ln.ev::before {
+/* 편집 화면의 알림·카운트다운 칩(.ev-chip)도 같은 그림을 앞에 붙인다(2026-11-16 사용자: "조그마한 종 모양 넣자"). */
+.ln.ev::before, .ev-chip::before {
   content: "";
   display: inline-block;
   width: 0.95em;
@@ -628,9 +629,9 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
   -webkit-mask: var(--ev-icon) center / contain no-repeat;
   mask: var(--ev-icon) center / contain no-repeat;
 }
-.ln.ev.alarm { --ev-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 17V11a6 6 0 0 1 12 0v6l2 2H4z'/%3E%3Cpath d='M10 21h4'/%3E%3C/svg%3E"); }
-.ln.ev.countdown { --ev-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 3h12M6 21h12M7 3c0 6 5 6 5 9s-5 3-5 9M17 3c0 6-5 6-5 9s5 3 5 9'/%3E%3C/svg%3E"); }
-.ln.ev.countdown.birthday { --ev-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 21h16v-7H4zM4 17c3 2 5-2 8 0s5-2 8 0M12 14V9M12 6v1'/%3E%3C/svg%3E"); }
+.ln.ev.alarm, .ev-chip.alarm { --ev-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 17V11a6 6 0 0 1 12 0v6l2 2H4z'/%3E%3Cpath d='M10 21h4'/%3E%3C/svg%3E"); }
+.ln.ev.countdown, .ev-chip.countdown { --ev-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 3h12M6 21h12M7 3c0 6 5 6 5 9s-5 3-5 9M17 3c0 6-5 6-5 9s5 3 5 9'/%3E%3C/svg%3E"); }
+.ln.ev.countdown.birthday, .ev-chip.countdown.birthday { --ev-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 21h16v-7H4zM4 17c3 2 5-2 8 0s5-2 8 0M12 14V9M12 6v1'/%3E%3C/svg%3E"); }
 
 /* 달력 아래 줄: 다가오는 카운트다운. 폰에서는 한 줄로 옆으로 스크롤한다(스크롤바는 숨긴다). */
 .cd-bar {
@@ -895,20 +896,23 @@ button { touch-action: manipulation; }
 .login-error.ok { color: var(--muted); }
 
 /* 편집 화면의 알림·카운트다운 띠와 시트 */
-.ev-strip { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 칩의 글은 자르지 않는다. 길면 여러 줄로 다 보인다(2026-11-16: 길게 적은 알림이 어디서도 다 보이지 않았다).
+   긴 것이 여럿이어도 메모 칸을 다 밀어내지 않게 띠의 높이를 막고 그 안에서 넘긴다. */
+.ev-strip { display: flex; flex-wrap: wrap; gap: 6px; max-height: 40vh; overflow-y: auto; overscroll-behavior: contain; }
 .ev-chip {
   max-width: 100%;
   min-height: 32px;
-  padding: 0 12px;
+  padding: 5px 12px;
   border: 1px solid var(--hairline);
   border-radius: 16px;
   background: var(--surface-2);
   color: var(--ink);
   font: inherit;
   font-size: 14px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
@@ -948,6 +952,8 @@ button { touch-action: manipulation; }
 }
 .ev-row > .ev-input { flex: 1 1 auto; max-width: 70%; text-align: right; }
 .ev-row.stack > .ev-input { max-width: none; text-align: left; }
+/* 알림과 카운트다운의 글: 적는 만큼 아래로 늘어난다(eventSheet.ts가 높이를 맞춘다). 여섯 줄쯤에서 멈추고 그 뒤로는 칸 안에서 넘긴다. */
+.ev-text { display: block; width: 100%; max-height: 152px; line-height: 1.35; resize: none; overflow-y: auto; }
 .ev-input[hidden] { display: none; }
 .ev-advance { display: flex; flex-wrap: wrap; gap: 6px; }
 .ev-check {

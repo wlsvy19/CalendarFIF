@@ -621,13 +621,13 @@ it('웹앱: 알림 시트가 열려 있으면 알림 상자의 줄을 눌러도 
     await vi.waitFor(() => expect(day()?.querySelector('h3')?.textContent).toBe(title('2000-01-03')));
     day()!.querySelector('textarea')!.value = '적던 메모';
     day()!.querySelector<HTMLElement>('button.tool.alarm')!.click();
-    const input = root.querySelector<HTMLInputElement>('.event-sheet input.ev-text')!;
+    const input = root.querySelector<HTMLTextAreaElement>('.event-sheet textarea.ev-text')!;
     input.value = '적던 알림';
     root.querySelector<HTMLElement>('.alarm-banner .alarm-item')!.click();
     await tick();
     expect(root.querySelector('.alarm-banner')).toBeNull();
     expect(location.hash).toBe('#2000-01-03');
-    expect(root.querySelector<HTMLInputElement>('.event-sheet input.ev-text')).toBe(input);
+    expect(root.querySelector<HTMLTextAreaElement>('.event-sheet textarea.ev-text')).toBe(input);
     expect(input.value).toBe('적던 알림');
     expect([day()?.querySelector('h3')?.textContent, day()?.querySelector('textarea')?.value]).toEqual([title('2000-01-03'), '적던 메모']);
     expect(localStorage.getItem('calfif.outbox.banner-sheet')).toBeNull();

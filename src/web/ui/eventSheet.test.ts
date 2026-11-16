@@ -25,7 +25,7 @@ function mount(over: Partial<EventSheetProps> = {}) {
   });
   const q = <T extends HTMLElement>(s: string) => root.querySelector<T>(s)!;
   const button = (label: string) => [...root.querySelectorAll('button')].find((b) => b.textContent!.trim() === label)!;
-  const type = (el: HTMLInputElement | HTMLSelectElement, value: string) => {
+  const type = (el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string) => {
     el.value = value;
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -64,7 +64,7 @@ it('글이 비면 메모 첫 줄을 쓰고 둘 다 없으면 저장하지 않는
   expect(rec).toMatchObject({ type: 'alarm', date: '2026-11-20', text: '회의', done: false, time: '09:00', advance: [0], repeat: { freq: 'none' }, editedAt: 0, editedBy: '' });
   expect(dflt.onClose).toHaveBeenCalledTimes(1);
   const typed = mount({ defaultText: '회의' });
-  typed.type(typed.q<HTMLInputElement>('input.ev-text'), '  병원  ');
+  typed.type(typed.q<HTMLTextAreaElement>('textarea.ev-text'), '  병원  ');
   typed.button('저장').click();
   expect(typed.onSave.mock.calls[0][1].text).toBe('병원');
 });
@@ -127,7 +127,7 @@ it('반복과 끝을 고르면 rule에 들어가고 반복 없음이면 끝이 �
 it('고치기면 값이 채워지고 삭제가 보인다', () => {
   const m = mount({ id: 'abc123', record: alarmRec, dateKey: '2026-11-27' });
   expect(m.root.querySelector('h3')!.textContent).toBe('알림 편집');
-  expect(m.q<HTMLInputElement>('input.ev-text').value).toBe('약');
+  expect(m.q<HTMLTextAreaElement>('textarea.ev-text').value).toBe('약');
   expect(m.q<HTMLInputElement>('input[type="time"]').value).toBe('08:30');
   expect(m.q<HTMLSelectElement>('select.ev-repeat').value).toBe('weekly');
   expect(m.q<HTMLInputElement>('input.ev-count').value).toBe('4');
@@ -169,13 +169,13 @@ it('삭제를 한 번 누른 뒤 다른 것을 하면 처음으로 돌아간다'
   const del = m.q<HTMLButtonElement>('.ev-delete');
   const armed = () => [del.textContent, del.classList.contains('armed')];
   del.click();
-  m.type(m.q<HTMLInputElement>('input.ev-text'), '약 먹기'); // 글을 고친다
+  m.type(m.q<HTMLTextAreaElement>('textarea.ev-text'), '약 먹기'); // 글을 고친다
   expect(armed()).toEqual(['삭제', false]);
   del.click();
   m.q('select.ev-repeat').dispatchEvent(new Event('pointerdown', { bubbles: true })); // 다른 칸을 누른다
   expect(armed()).toEqual(['삭제', false]);
   del.click();
-  m.q('input.ev-text').dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+  m.q('textarea.ev-text').dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
   expect(armed()).toEqual(['삭제', false]);
   del.click();
   m.q('.event-scrim').dispatchEvent(new Event('pointerdown', { bubbles: true })); // 바깥을 누른다(고친 것이 있어 닫히지 않는다)
@@ -310,11 +310,11 @@ it('Esc와 바깥 누르기로 닫히고, 고친 것이 있으면 바깥 누르�
   m.q('.event-scrim').click();
   expect(m.onClose).toHaveBeenCalledTimes(1);
   const edited = mount();
-  edited.type(edited.q<HTMLInputElement>('input.ev-text'), 'x');
+  edited.type(edited.q<HTMLTextAreaElement>('textarea.ev-text'), 'x');
   edited.q('.event-scrim').click();
   expect(edited.onClose).not.toHaveBeenCalled();
   const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
-  edited.q('input.ev-text').dispatchEvent(esc);
+  edited.q('textarea.ev-text').dispatchEvent(esc);
   expect(edited.onClose).toHaveBeenCalledTimes(1);
   expect(edited.onSave).not.toHaveBeenCalled();
 });

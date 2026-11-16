@@ -141,14 +141,25 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps, env?:
 
   const body = el('div', 'ev-body');
 
-  // 글
-  const text = el('input', 'ev-input ev-text');
-  text.type = 'text';
+  // 글. 길게 적어도 다 보이게, 적는 만큼 아래로 늘어나는 칸이다(늘어나는 끝은 styles.css의 .ev-text가 막고 그 뒤로는 칸 안에서 넘긴다).
+  // 글은 한 줄짜리다: Enter는 줄을 바꾸지 않고 저장하고, 붙여 넣은 줄 바꿈은 빈칸으로 바꾼다.
+  const text = el('textarea', 'ev-input ev-text');
+  text.rows = 1;
   text.maxLength = 200;
   text.placeholder = props.defaultText || (isAlarm ? '무엇을 알릴까요' : '무엇까지 셀까요');
   text.setAttribute('enterkeyhint', 'done');
   text.value = rec?.text ?? '';
-  body.append(labelled('글', text));
+  const fitText = (): void => {
+    text.style.height = 'auto';
+    // 칸은 border-box라 scrollHeight에 테두리를 더해야 한 줄일 때 넘김 막대가 생기지 않는다.
+    const height = text.scrollHeight;
+    if (height > 0) text.style.height = `${height + text.offsetHeight - text.clientHeight}px`;
+  };
+  text.addEventListener('input', () => {
+    if (/[\r\n]/.test(text.value)) text.value = text.value.replace(/\s*[\r\n]+\s*/g, ' ');
+    fitText();
+  });
+  body.append(labelled('글', text, 'ev-row stack'));
 
   // 알림: 시각과 미리 알림
   let time: HTMLInputElement | null = null;
@@ -426,13 +437,14 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps, env?:
       close();
       return;
     }
-    if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT' && (e.target as HTMLInputElement).type === 'text') {
+    // 글 칸(여러 줄로 늘어나지만 한 줄짜리 글이다)과 한 줄 입력 칸의 Enter는 저장이다.
+    if (e.key === 'Enter' && (e.target === text || ((e.target as HTMLElement).tagName === 'INPUT' && (e.target as HTMLInputElement).type === 'text'))) {
       e.preventDefault();
       save();
       return;
     }
     if (e.key !== 'Tab') return;
-    const stops = [...sheet.querySelectorAll<HTMLElement>('button, input, select, a[href]')].filter(
+    const stops = [...sheet.querySelectorAll<HTMLElement>('button, input, textarea, select, a[href]')].filter(
       (x) => x.tabIndex >= 0 && !(x as HTMLInputElement).disabled && !x.closest('[hidden]') && !x.hidden,
     );
     if (stops.length === 0) return;
@@ -474,6 +486,7 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps, env?:
   viewport?.addEventListener('scroll', followViewport);
 
   root.append(scrim, sheet);
+  fitText(); // 이미 적힌 긴 글이 처음부터 다 보이게(높이는 화면에 붙은 뒤에야 잴 수 있다)
   // 시트 자신에 초점을 둔다. 뒤의 메모 칸에 초점이 남아 Tab이 시트 밖으로 새지 않게 하고, 글자판이 저절로 뜨지 않게 한다.
   sheet.focus({ preventScroll: true });
 

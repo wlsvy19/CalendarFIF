@@ -763,24 +763,34 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     `바깥 (${dimX}, ${dimY})px(가림막 ${onDim ? '맞음' : '아님'}), 첫 누르기 뒤 상자 ${afterDim.palette ? '남음' : '닫힘'}·편집 화면 ${afterDim.day ? '그대로' : '닫힘'}, 두 번째 누르기 뒤 편집 화면 ${dimClosed ? '닫힘' : '남음'}`,
   );
 
-  // 알림: 편집 화면의 알림 단추로 만들면 띠와 달력 칸에 보인다.
-  const alarmText = '약 먹기';
+  // 알림: 편집 화면의 알림 단추로 만들어 저장하면 편집 화면까지 닫히고(2026-11-16 사용자: 알림도 메모이니 달력으로 나가게)
+  // 달력 칸에 보인다. 다시 열면 띠에 칩으로 보이고, 칩 앞에 작은 종이 있고, 긴 글은 잘리지 않고 여러 줄로 보인다.
+  const alarmText = '약 먹기 아침 식사 뒤에 비타민과 같이 물 한 컵 마시고 산책 나가기 전에 확인';
   const alarmTime = '08:45';
   const dayOpened = await openKey(alarmKey);
   await sleep(700);
   const alarmUp = await openEventSheet('alarm');
-  await typeInto('.event-sheet input.ev-text', alarmText);
+  await typeInto('.event-sheet textarea.ev-text', alarmText);
   await cdp.evaluate(`(() => { const t = document.querySelector('.event-sheet input[type=time]'); t.value = ${JSON.stringify(alarmTime)}; t.dispatchEvent(new Event('input', { bubbles: true })); t.dispatchEvent(new Event('change', { bubbles: true })); })()`);
   await tap(await center($('.event-sheet .textbtn.end'))); // 저장
-  const sheetGone = await waitFor("!document.querySelector('.event-sheet, .event-scrim')");
-  const stripOk = await waitFor(`[...document.querySelectorAll('.sheet .ev-strip button.ev-chip')].some((c) => c.textContent === ${JSON.stringify(`${alarmTime} ${alarmText}`)})`);
-  const cellOk = await waitFor(`[...document.querySelectorAll('.grid.current .cell[data-key="${alarmKey}"] .ln.ev.alarm')].some((l) => l.textContent.includes(${JSON.stringify(alarmText)}))`);
+  const sheetGone = await waitFor("!document.querySelector('.sheet, .scrim')"); // 알림 시트와 편집 화면이 함께 닫힌다
+  await sleep(300);
+  const cellOk = await waitFor(`[...document.querySelectorAll('.grid.current .cell[data-key="${alarmKey}"] .ln.ev.alarm')].some((l) => l.textContent.includes('약 먹기'))`);
   const cellLine = await cdp.evaluate<string>(`document.querySelector('.grid.current .cell[data-key="${alarmKey}"] .ln.ev.alarm')?.textContent ?? ''`);
-  const dayStillOpen = await cdp.evaluate<boolean>("!!document.querySelector('.sheet:not(.event-sheet)')");
+  const dayReopened = await openKey(alarmKey);
+  await sleep(700);
+  const stripOk = await waitFor(`[...document.querySelectorAll('.sheet .ev-strip button.ev-chip')].some((c) => c.textContent === ${JSON.stringify(`${alarmTime} ${alarmText}`)})`);
+  const chipLook = await cdp.evaluate<{ bell: boolean; whole: boolean; lines: number }>(`(() => {
+    const c = [...document.querySelectorAll('.sheet .ev-strip button.ev-chip.alarm')][0];
+    if (!c) return { bell: false, whole: false, lines: 0 };
+    const before = getComputedStyle(c, '::before');
+    const lh = parseFloat(getComputedStyle(c).lineHeight) || 19;
+    return { bell: before.content !== 'none' && before.width !== '0px' && (before.maskImage || before.webkitMaskImage || '').includes('svg'), whole: c.scrollWidth <= c.clientWidth + 1, lines: Math.round((c.clientHeight - 10) / lh) };
+  })()`);
   record(
-    '편집 화면의 알림 단추로 알림을 만들면 띠와 달력 칸에 보인다',
-    dayOpened && alarmUp && sheetGone && dayStillOpen && stripOk && cellOk,
-    `${alarmKey}에 ${alarmTime} ${alarmText}: 알림 시트 ${alarmUp ? '열림' : '안 열림'}, 저장 뒤 시트 ${sheetGone ? '닫힘' : '남음'}, 편집 화면 ${dayStillOpen ? '그대로' : '없음'}, 띠의 칩 ${stripOk ? '있음' : '없음'}, 달력 칸 줄 ${cellOk ? `"${cellLine}"` : '없음'}`,
+    '편집 화면의 알림 단추로 알림을 만들어 저장하면 편집 화면까지 닫히고 달력 칸에 보인다. 다시 열면 칩 앞에 종이 있고 긴 글이 다 보인다',
+    dayOpened && alarmUp && sheetGone && cellOk && dayReopened && stripOk && chipLook.bell && chipLook.whole && chipLook.lines >= 2,
+    `${alarmKey}에 ${alarmTime} ${alarmText}: 알림 시트 ${alarmUp ? '열림' : '안 열림'}, 저장 뒤 ${sheetGone ? '편집 화면까지 닫힘' : '남음'}, 칩의 종 ${chipLook.bell ? '있음' : '없음'}, 칩 ${chipLook.whole ? '잘리지 않음' : '잘림'}(${chipLook.lines}줄), 다시 열어 띠의 칩 ${stripOk ? '있음' : '없음'}, 달력 칸 줄 ${cellOk ? `"${cellLine}"` : '없음'}`,
   );
 
   // 알림 시트 바깥 누르기: 고친 것이 없으면 시트만 닫히고 편집 화면은 그대로다. 고친 것이 있으면 시트도 그대로다. 시트를 닫으면 편집 화면으로 돌아온다.
@@ -789,7 +799,7 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   const sheetOpenedAgain = await openEventSheet('alarm');
   const outsideY = await cdp.evaluate<number>("Math.max(6, Math.round(document.querySelector('.event-sheet').getBoundingClientRect().top / 2))");
   const hitScrim = await cdp.evaluate<boolean>(`document.elementFromPoint(${Math.round(PHONE.width / 2)}, ${outsideY})?.classList.contains('event-scrim') ?? false`);
-  await typeInto('.event-sheet input.ev-text', '시험');
+  await typeInto('.event-sheet textarea.ev-text', '시험');
   await tap({ x: Math.round(PHONE.width / 2), y: outsideY });
   await sleep(500);
   const dirtyStays = await cdp.evaluate<boolean>(eventSheetUp);
@@ -818,10 +828,10 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   const cdDayOpened = await openKey(countdownKey);
   await sleep(700);
   const cdUp = await openEventSheet('countdown');
-  await typeInto('.event-sheet input.ev-text', cdText);
+  await typeInto('.event-sheet textarea.ev-text', cdText);
   await tap(await center($('.event-sheet .textbtn.end')));
-  const cdSheetGone = await waitFor("!document.querySelector('.event-sheet, .event-scrim')");
-  await closeDay();
+  const cdSheetGone = await waitFor("!document.querySelector('.sheet, .scrim')"); // 저장하면 편집 화면까지 닫힌다
+  await sleep(300);
   const chipJs = `[...document.querySelectorAll('.cd-bar .cd-chip')].find((c) => c.textContent.includes(${JSON.stringify(cdText)}))`;
   const chipShown = await waitFor(`!!(${chipJs})`);
   const chip = await cdp.evaluate<{ days: string; hidden: boolean; below: boolean; key: string } | null>(

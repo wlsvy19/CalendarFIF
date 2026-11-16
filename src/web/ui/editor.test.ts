@@ -118,10 +118,12 @@ it('그날의 알림과 카운트다운이 띠에 칩으로 보이고 누르면 
   const chips = [...root.querySelectorAll<HTMLElement>('.ev-strip button.ev-chip')];
   expect(root.querySelector<HTMLElement>('.ev-strip')!.hidden).toBe(false);
   expect(chips.map((c) => c.textContent)).toEqual(['09:30 약', '시험 오늘']);
+  // 앞의 작은 그림은 칸의 줄과 같은 class로 고른다(알림은 종, 카운트다운은 모래시계).
+  expect(chips.map((c) => c.className)).toEqual(['ev-chip alarm', 'ev-chip countdown']);
   chips[0].click();
   const sheet = root.querySelector('.event-sheet')!;
   expect(sheet.querySelector('h3')!.textContent).toBe('알림 편집');
-  expect(sheet.querySelector<HTMLInputElement>('input.ev-text')!.value).toBe('약');
+  expect(sheet.querySelector<HTMLTextAreaElement>('textarea.ev-text')!.value).toBe('약');
   expect(sheet.closest('.sheet:not(.event-sheet)')).toBeNull(); // 편집 화면 안이 아니라 root에 뜬다
 });
 it('알림을 저장하면 save가 불리고 띠가 다시 그려진다', () => {
@@ -129,7 +131,7 @@ it('알림을 저장하면 save가 불리고 띠가 다시 그려진다', () => 
   const { root, area } = mount({ text: '', color: '' }, { events: ev });
   area.value = '병원' + String.fromCharCode(10) + '둘째 줄';
   root.querySelector<HTMLElement>('button.tool.alarm')!.click();
-  const text = root.querySelector<HTMLInputElement>('.event-sheet input.ev-text')!;
+  const text = root.querySelector<HTMLTextAreaElement>('.event-sheet textarea.ev-text')!;
   // 메모의 첫 줄을 미리 넣거나 안내 글로 보이지 않는다. 비우고 저장하면 막는다.
   expect(text.value).toBe('');
   expect(text.placeholder).toBe('무엇을 알릴까요');
@@ -145,21 +147,45 @@ it('알림을 저장하면 save가 불리고 띠가 다시 그려진다', () => 
   const chips = [...root.querySelectorAll('.ev-strip button.ev-chip')];
   expect(chips).toHaveLength(1);
   expect(chips[0].textContent).toMatch(/^\d\d:\d\d 병원$/);
-  expect(document.activeElement).toBe(area);
 });
-it('편집 화면을 취소해도 저장한 알림은 남는다(save가 이미 불렸다)', () => {
+it('알림을 저장하면 편집 화면도 닫고 달력으로 나간다. 적던 메모가 있으면 같이 저장하고, 없으면 취소로 닫는다', () => {
+  const typed = mount({ text: '', color: '' }, { events: eventsProp() });
+  typed.area.value = '병원';
+  typed.root.querySelector<HTMLElement>('button.tool.alarm')!.click();
+  typed.root.querySelector<HTMLTextAreaElement>('.event-sheet textarea.ev-text')!.value = '약';
+  [...typed.root.querySelectorAll<HTMLElement>('.event-sheet button')].find((b) => b.textContent === '저장')!.click();
+  expect([typed.onSave.mock.calls, typed.onCancel.mock.calls.length]).toEqual([[[{ text: '병원', color: '' }]], 0]);
+  const plain = mount({ text: '그대로', color: '' }, { events: eventsProp() });
+  plain.root.querySelector<HTMLElement>('button.tool.countdown')!.click();
+  plain.root.querySelector<HTMLTextAreaElement>('.event-sheet textarea.ev-text')!.value = '디데이';
+  [...plain.root.querySelectorAll<HTMLElement>('.event-sheet button')].find((b) => b.textContent === '저장')!.click();
+  expect([plain.onSave.mock.calls.length, plain.onCancel.mock.calls.length]).toEqual([0, 1]);
+});
+it('알림 시트를 취소하면 편집 화면에 남는다. 저장한 뒤 같은 시트에서 지워도(지금 예약 뒤의 삭제) 남는다', () => {
+  const m = mount({ text: '', color: '' }, { events: eventsProp() });
+  m.root.querySelector<HTMLElement>('button.tool.alarm')!.click();
+  [...m.root.querySelectorAll<HTMLElement>('.event-sheet button')].find((b) => b.textContent === '취소')!.click();
+  expect([m.onSave.mock.calls.length, m.onCancel.mock.calls.length, m.root.querySelector('.event-sheet'), !!m.root.querySelector('.sheet:not(.event-sheet)')]).toEqual([0, 0, null, true]);
+  // 아이폰의 지금 예약은 시트를 둔 채 저장한다. 이어서 그 시트에서 지우면 편집 화면에 남는다.
+  const ev = { ...eventsProp(), iosHint: true, flush: vi.fn(async () => {}) };
+  const d = mount({ text: '', color: '' }, { events: ev });
+  d.root.querySelector<HTMLElement>('button.tool.alarm')!.click();
+  d.root.querySelector<HTMLTextAreaElement>('.event-sheet textarea.ev-text')!.value = '약';
+  d.root.querySelector<HTMLElement>('.event-sheet .ev-schedule')!.click();
+  expect(ev.save).toHaveBeenCalledTimes(1);
+  const buttons = () => [...d.root.querySelectorAll<HTMLElement>('.event-sheet button')];
+  buttons().find((b) => b.textContent === '삭제')!.click();
+  buttons().find((b) => b.textContent === '한 번 더 누르면 삭제')!.click();
+  expect([ev.remove.mock.calls.length, d.onSave.mock.calls.length, d.onCancel.mock.calls.length, d.root.querySelector('.event-sheet')]).toEqual([1, 0, 0, null]);
+});
+it('알림을 저장해 편집 화면이 (취소로) 닫혀도 저장한 알림은 남는다(save가 이미 불렸다)', () => {
   const ev = eventsProp();
-  const { root, area, button, onCancel } = mount({ text: '', color: '' }, { events: ev });
-  area.value = 'x';
+  const { root, onCancel } = mount({ text: '', color: '' }, { events: ev });
   root.querySelector<HTMLElement>('button.tool.countdown')!.click();
   const sheet = root.querySelector('.event-sheet')!;
-  sheet.querySelector<HTMLInputElement>('input.ev-text')!.value = '디데이';
+  sheet.querySelector<HTMLTextAreaElement>('textarea.ev-text')!.value = '디데이';
   [...sheet.querySelectorAll('button')].find((b) => b.textContent === '저장')!.click();
-  expect(ev.save).toHaveBeenCalledTimes(1);
-  button('취소').click();
-  expect(onCancel).toHaveBeenCalledTimes(1);
-  expect(ev.save).toHaveBeenCalledTimes(1);
-  expect(Object.keys(ev.view.items())).toHaveLength(1);
+  expect([ev.save.mock.calls.length, onCancel.mock.calls.length, Object.keys(ev.view.items()).length]).toEqual([1, 1, 1]);
 });
 it('시트가 닫히면 넓은 창에서는 메모 칸에, 폰에서는 편집 화면 시트에 초점이 간다', () => {
   const close = (root: HTMLElement) => {
@@ -433,7 +459,7 @@ it('아이폰의 지금 예약은 저장한 뒤 events.flush로 서버가 받기
   document.body.append(root);
   const handle = mountEditor(root, { dateKey: '2026-11-13', value: { text: '병원', color: '' }, events: ev, onSave: vi.fn(), onCancel: vi.fn() });
   root.querySelector<HTMLElement>('button.tool.alarm')!.click();
-  root.querySelector<HTMLInputElement>('.event-sheet input.ev-text')!.value = '병원';
+  root.querySelector<HTMLTextAreaElement>('.event-sheet textarea.ev-text')!.value = '병원';
   root.querySelector<HTMLElement>('.event-sheet .ev-schedule')!.click();
   expect(ev.save).toHaveBeenCalledTimes(1);
   expect(ev.save.mock.calls[0][1]).toMatchObject({ type: 'alarm', text: '병원' });
