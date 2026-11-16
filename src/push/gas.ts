@@ -459,7 +459,7 @@ export function setup(host: GasHost): string[] {
     }
     host.ScriptApp.newTrigger('tick').timeBased().everyMinutes(1).create();
     host.PropertiesService.getScriptProperties().setProperty(START_PROPERTY, String(host.now()));
-    say('설정이 끝났습니다. 이제 1분마다 알림을 확인해 보냅니다. 아이폰의 CalendarFIF 앱 → 설정 → 아이폰 알림에서 "시험 알림 보내기"를 눌러 보세요.');
+    say('설정이 끝났습니다. 이제 1분마다 알림을 확인해 보냅니다. 아이폰의 CalendarFIF 앱 → 설정 → 알림에서 "알림 받기"를 켜세요.');
   } catch (e) {
     say(`설정하지 못했습니다: ${e instanceof Error ? e.message : String(e)}`);
   }

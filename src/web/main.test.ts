@@ -92,7 +92,7 @@ const feed: { starts: number; deps?: import('./holidayFeed').HolidayFeedDeps } =
 // 푸시 알림: 가짜 Firestore로는 문서를 들을 수 없으므로 아무것도 오지 않는 것으로 바꾼다(푸시를 켜지 않은 기기).
 vi.mock('./push', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./push')>()),
-  firestorePushRemote: () => ({ watch: () => () => {}, saveDevice: async () => {}, removeDevice: async () => {}, requestTest: async () => {} }),
+  firestorePushRemote: () => ({ watch: () => () => {}, saveDevice: async () => {}, removeDevice: async () => {} }),
   browserPushPlatform: () => ({ supported: false, standalone: false, ios: false, permission: () => 'default', requestPermission: async () => 'default', token: async () => '', dropToken: async () => {} }),
 }));
 vi.mock('./holidayFeed', async (importOriginal) => ({

@@ -217,7 +217,7 @@ it('푸시 알림을 켠 기기는 푸시로 온다고만 알리고 Scriptable �
   expect(m.root.querySelector('.ev-hint')!.textContent).toContain('푸시 알림이 옵니다');
   expect(m.root.querySelector('.ev-schedule')).toBeNull();
   const ios = mount({ iosHint: true });
-  expect(ios.root.querySelector('.ev-hint')!.textContent).toContain('설정 → 아이폰 알림');
+  expect(ios.root.querySelector('.ev-hint')!.textContent).toContain('설정 → 알림 받기');
 });
 it('아이폰 안내는 iosHint일 때만', () => {
   const off = mount({ iosHint: false });

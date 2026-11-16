@@ -234,7 +234,7 @@ export function mountSettings(
     widget?: WidgetInstallDeps;
     /** 주면 맨 위에 화면·달력·메모 칸을 보인다. 고르면 바로 onChange에 새 설정을 준다. 웹앱의 설정 화면만 준다. */
     prefs?: { value: Prefs; onChange(next: Prefs): void };
-    /** 주면 "아이폰 알림" 칸(푸시 알림 켜기, 시험, 알림 서버 만들기)을 보인다. 웹앱의 설정 화면만 준다. */
+    /** 주면 "알림" 칸(푸시 알림 켜기/끄기 스위치)을 보인다. 웹앱의 설정 화면만 준다. */
     push?: PushSectionDeps;
   },
 ): { destroy(): void; setManageUsers: AccountSection['setManageUsers'] } {

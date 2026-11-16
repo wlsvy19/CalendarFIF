@@ -277,7 +277,7 @@ export function mountEventSheet(root: HTMLElement, props: EventSheetProps, env?:
   if (isAlarm && props.iosHint === 'push') {
     body.append(el('p', 'ev-hint', '이 기기로 푸시 알림이 옵니다. 앱을 닫거나 화면을 잠가도 그 시각에 옵니다.'));
   } else if (isAlarm && props.iosHint) {
-    hintText = el('span', 'ev-hint-text', '아이폰 알림을 받으려면 홈 화면 앱의 설정 → 아이폰 알림을 켜세요. 켜기 전에는 Scriptable 위젯이 예약합니다. 바로 예약하려면 누르세요. ');
+    hintText = el('span', 'ev-hint-text', '아이폰 알림을 받으려면 홈 화면 앱의 설정 → 알림 받기를 켜세요. 켜기 전에는 Scriptable 위젯이 예약합니다. 바로 예약하려면 누르세요. ');
     scheduleBtn = el('button', 'ev-link ev-schedule', '지금 예약');
     scheduleBtn.type = 'button';
     const now = scheduleBtn;

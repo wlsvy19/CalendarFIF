@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PushDevice, PushDoc } from '../push/doc';
-import { DEVICE_KEY, PushClient, TEST_WAIT_MS, type PushPlatform, type PushRemote } from './push';
+import { DEVICE_KEY, PushClient, type PushPlatform, type PushRemote } from './push';
 import { senderIdFromAppId } from './firebase';
 
 afterEach(() => { vi.useRealTimers(); });
@@ -26,7 +26,6 @@ function setup(opts: { platform?: Partial<PushPlatform>; doc?: PushDoc; deviceId
     watch: (onDoc) => { push = onDoc; onDoc(current); return () => {}; },
     saveDevice: vi.fn(async (id: string, d: PushDevice) => { current = { ...current, devices: { ...current.devices, [id]: d } }; push(current); }),
     removeDevice: vi.fn(async (id: string) => { const { [id]: _gone, ...rest } = current.devices; current = { ...current, devices: rest }; push(current); }),
-    requestTest: vi.fn(async (at: number) => { current = { ...current, testAt: at }; push(current); }),
   };
   const storage = memoryStore();
   if (opts.deviceId) storage.setItem(DEVICE_KEY, opts.deviceId);
@@ -53,7 +52,8 @@ describe('PushClient', () => {
     expect(id).toMatch(/^[A-Za-z0-9]{20}$/);
     expect(s.remote.saveDevice).toHaveBeenCalledWith(id, { token: 'tok-new', label: '아이폰', at: 1_000_000 });
     expect(s.client.view().mode).toBe('on');
-    expect(s.client.view().message).toContain('켰습니다');
+    // 잘 되면 글을 남기지 않는다(설정에는 스위치만 있다).
+    expect(s.client.view().message).toBe('');
   });
 
   it('허용하지 않으면 적지 않는다', async () => {
@@ -135,21 +135,6 @@ describe('PushClient', () => {
     gone.setPerm('granted');
     gone.client.start();
     await vi.waitFor(() => expect(gone.remote.saveDevice).toHaveBeenCalledTimes(1));
-  });
-
-  it('시험 알림: 부탁하고, 보낸 기록이 오면 알리고, 오지 않으면 2분 반 뒤에 알림 서버를 보라고 한다', async () => {
-    vi.useFakeTimers();
-    const s = setup({ deviceId: 'AAAAAAAAAAAAAAAAAAAA', doc: { devices: { AAAAAAAAAAAAAAAAAAAA: { token: 'tok-new', label: '', at: 1_000_000 } }, testAt: 0, sender: null } });
-    s.setPerm('granted');
-    s.client.start();
-    await s.client.test();
-    expect(s.remote.requestTest).toHaveBeenCalledWith(1_000_000);
-    expect(s.client.view().message).toContain('1분 안에');
-    s.setDoc({ ...(s.client.view().doc as PushDoc), sender: { at: 1_000_050, testAt: 1_000_000, error: '' } });
-    expect(s.client.view().message).toContain('시험 알림을 보냈습니다');
-    await s.client.test();
-    vi.advanceTimersByTime(TEST_WAIT_MS);
-    expect(s.client.view().message).toContain('응답하지 않습니다');
   });
 
   it('푸시가 켜져 있고 알림 서버가 살아 있을 때만 화면 안 알림을 맡는다', () => {

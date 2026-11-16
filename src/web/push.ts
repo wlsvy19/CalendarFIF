@@ -7,8 +7,6 @@ import type { KeyValueStore } from '../sync/outbox';
 // 아이폰은 홈 화면에 추가한 앱에서만 푸시를 받는다(Safari 탭에서는 켤 수 없다).
 
 export const DEVICE_KEY = 'calfif.pushDevice';
-/** 시험 알림을 요청한 뒤 이만큼 지나도 보낸 기록이 없으면 알림 서버가 응답하지 않는다고 알린다. */
-export const TEST_WAIT_MS = 150_000;
 /** 토큰을 이보다 오래 적지 않았으면 열 때 다시 적는다(FCM은 오래 쓰지 않은 토큰을 지운다). */
 const REFRESH_MS = 7 * 86_400_000;
 const TOKEN_WAIT_MS = 20_000;
@@ -35,11 +33,11 @@ export type PushRemote = {
   watch(onDoc: (doc: PushDoc) => void, onError: (e: unknown) => void): () => void;
   saveDevice(id: string, device: PushDevice): Promise<void>;
   removeDevice(id: string): Promise<void>;
-  requestTest(at: number): Promise<void>;
 };
 
 /** install: 아이폰의 Safari 탭이라 홈 화면 앱에서 켜야 한다. off: 켤 수 있다. on: 이 기기로 온다. */
 export type PushMode = 'unsupported' | 'install' | 'denied' | 'off' | 'on';
+/** message는 켜지 못했거나 끄지 못했을 때의 까닭이다(잘 되면 빈 글). */
 export type PushView = { mode: PushMode; doc: PushDoc | null; busy: boolean; message: string };
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : typeof e === 'string' ? e : '알 수 없는 오류');
@@ -60,8 +58,6 @@ export class PushClient {
   private message = '';
   private listeners = new Set<() => void>();
   private refreshed = false;
-  private pendingTest = 0;
-  private testTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private readonly deps: { platform: PushPlatform; remote: PushRemote; storage: KeyValueStore; now: () => number; label: string }) {}
 
@@ -70,7 +66,6 @@ export class PushClient {
     const stop = this.deps.remote.watch(
       (d) => {
         this.doc = d;
-        this.checkTest();
         this.emit();
         if (!this.refreshed) {
           this.refreshed = true;
@@ -81,10 +76,7 @@ export class PushClient {
         // 듣기가 끊겨도 마지막 문서로 보인다.
       },
     );
-    return () => {
-      stop();
-      clearTimeout(this.testTimer);
-    };
+    return stop;
   }
 
   onChange(fn: () => void): () => void {
@@ -145,7 +137,7 @@ export class PushClient {
       this.set(false, permission === 'denied' ? '알림을 허용하지 않았습니다. 아이폰 설정 → 알림 → CalendarFIF에서 켤 수 있습니다.' : '알림을 허용하지 않았습니다.');
       return;
     }
-    this.set(true, '등록하는 중…');
+    this.set(true, '');
     try {
       const token = await withTimeout(platform.token(), TOKEN_WAIT_MS, '등록이 제때 끝나지 않았습니다. 연결을 확인하고 다시 눌러 주세요.');
       let id = this.deviceId();
@@ -166,7 +158,7 @@ export class PushClient {
         for (const old of drop) await remote.removeDevice(old);
         await remote.saveDevice(id, { token, label, at: now() });
       })(), WRITE_WAIT_MS, SLOW);
-      this.set(false, '켰습니다. 아래 "시험 알림 보내기"로 확인해 보세요.');
+      this.set(false, '');
     } catch (e) {
       this.set(false, `알림을 켜지 못했습니다: ${errorText(e)}`);
     }
@@ -175,7 +167,7 @@ export class PushClient {
   async disable(): Promise<void> {
     if (this.busy) return;
     const id = this.deviceId();
-    this.set(true, '끄는 중…');
+    this.set(true, '');
     // 이 기기의 이름과 토큰을 먼저 지운다. 서버 쓰기가 늦어도 다음에 열 때 다시 적지 않는다(쓰기는 연결되면 올라간다).
     try {
       this.deps.storage.removeItem(DEVICE_KEY);
@@ -185,39 +177,10 @@ export class PushClient {
     await this.deps.platform.dropToken().catch(() => undefined);
     try {
       if (id) await withTimeout(this.deps.remote.removeDevice(id), WRITE_WAIT_MS, SLOW);
-      this.set(false, '껐습니다. 이 기기로는 알림이 오지 않습니다.');
+      this.set(false, '');
     } catch (e) {
       this.set(false, `끄지 못했습니다: ${errorText(e)}`);
     }
-  }
-
-  /** 알림 서버에 시험 알림을 부탁한다. 보낸 기록이 문서에 오면 알린다. */
-  async test(): Promise<void> {
-    if (this.busy) return;
-    const at = this.deps.now();
-    this.set(true, '시험 알림을 부탁하는 중…');
-    try {
-      await withTimeout(this.deps.remote.requestTest(at), WRITE_WAIT_MS, SLOW);
-    } catch (e) {
-      this.set(false, `부탁하지 못했습니다: ${errorText(e)}`);
-      return;
-    }
-    this.pendingTest = at;
-    clearTimeout(this.testTimer);
-    this.testTimer = setTimeout(() => {
-      if (this.pendingTest !== at) return;
-      this.pendingTest = 0;
-      this.set(false, '알림 서버가 2분 넘게 응답하지 않습니다. PC에서 아래 "알림 서버 만들기"를 했는지, Apps Script의 실행 기록에 오류가 없는지 보세요.');
-    }, TEST_WAIT_MS);
-    this.set(false, '부탁했습니다. 1분 안에 알림이 옵니다. 화면을 잠그고 기다려 보세요.');
-  }
-
-  private checkTest(): void {
-    const s = this.doc?.sender;
-    if (!this.pendingTest || !s || s.testAt < this.pendingTest) return;
-    this.pendingTest = 0;
-    clearTimeout(this.testTimer);
-    this.message = s.error ? `알림 서버가 보내지 못했습니다: ${s.error}` : '알림 서버가 시험 알림을 보냈습니다. 오지 않았으면 아이폰 설정 → 알림 → CalendarFIF를 확인하세요.';
   }
 
   /** 열 때: 이 기기가 켜져 있으면 토큰을 새로 받아 바뀌었거나 오래됐으면 적는다. 서버가 지운(쓸 수 없게 된) 기기도 다시 적는다. */
@@ -246,7 +209,6 @@ export function firestorePushRemote(db: Firestore, uid: string): PushRemote {
       if ((e as { code?: string })?.code === 'not-found') return;
       throw e;
     }),
-    requestTest: (at) => setDoc(ref, { testAt: at }, { merge: true }),
   };
 }
 

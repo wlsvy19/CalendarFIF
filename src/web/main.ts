@@ -200,18 +200,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     },
     copy: (text) => (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error('클립보드를 쓸 수 없습니다.'))),
   };
-  const pushInstall: PushSectionDeps | undefined = push
-    ? {
-        client: push,
-        loadScript: async () => {
-          const response = await fetch('/push/calendarfif-push.js');
-          if (!response.ok) throw new Error(`알림 서버 스크립트를 받지 못했습니다 (${response.status})`);
-          return response.text();
-        },
-        copy: widgetInstall.copy,
-        now: () => Date.now(),
-      }
-    : undefined;
+  const pushInstall: PushSectionDeps | undefined = push ? { client: push } : undefined;
   // 설정에서 바꾼 모양은 바로 달력과 <html>에 반영하고 이 기기에 저장한다. 저장하지 못하면 false(값은 화면에 그대로 둔다).
   const changeAppearance = (next: Appearance): boolean => {
     appearance = next;

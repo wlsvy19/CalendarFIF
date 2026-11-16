@@ -10,7 +10,7 @@ import { versionText } from './build-widget';
 const GAS_HOST = ['UrlFetchApp', 'PropertiesService', 'CacheService', 'LockService', 'Utilities', 'ScriptApp', 'Session', 'Logger'] as const;
 
 const gasHeader = (version: string): string => `// CalendarFIF 알림 보내기 ${version}
-// Google Apps Script(script.google.com)에 이 내용을 그대로 붙여 넣는다. 설치 방법은 웹앱의 설정 → 아이폰 알림에 있다.
+// Google Apps Script(script.google.com)에 이 내용을 그대로 붙여 넣는다. 설치 방법은 CalendarFIF 저장소 README의 "아이폰 푸시 알림"에 있다.
 // 처음 한 번 setup을 실행하면 1분마다 tick이 돌며 시각이 된 알림을 아이폰으로 보낸다.
 // 필요한 것: 프로젝트 설정의 시간대 (GMT+09:00) 서울, 스크립트 속성 SERVICE_ACCOUNT(Firebase 서비스 계정 키).
 `;
