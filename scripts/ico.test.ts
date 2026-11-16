@@ -39,16 +39,17 @@ it('.ico: 그림이 없거나, PNG가 아니거나, 적은 크기와 실제 크�
   expect(() => buildIco([{ size: 512, png: fakePng(512, 512) }])).toThrow('실제 크기');
 });
 
-it('아이콘 그림: 큰 것은 달력 고리가 있고 불씨가 0.8배이며, 작은 것은 고리 없이 단순하고 불씨를 한 가지 색으로 줄이지 않고 칠한다', () => {
+it('아이콘 그림: 큰 것은 달력 고리가 있고 속불꽃이 시안 크기(1배)의 밝은 하늘색이며, 작은 것은 고리 없이 단순하고 속불꽃을 한 가지 색으로 칠한다', () => {
   const full = appIconSvg({ rounded: false });
   const rounded = appIconSvg({ rounded: true });
   const small = smallIconSvg();
-  expect(CORE_SCALE).toBe(0.8);
+  expect(CORE_SCALE).toBe(1);
   for (const s of [full, rounded, small]) expect(s.startsWith('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">')).toBe(true);
   for (const s of [full, rounded]) {
-    expect(s).toContain('fill="url(#warm)" transform="translate(50 93) scale(0.8)');
+    expect(s).toContain('fill="url(#core)" transform="translate(50 93) scale(1)');
+    expect(s).not.toContain('#FF6B3A');
   }
-  expect(small).toContain('fill="#FF7A2E" transform="translate(50 93) scale(1.05)');
+  expect(small).toContain('fill="#E4F8FF" transform="translate(50 93) scale(1.05)');
   // 꽉 찬 네모(아이폰, 웹앱)에는 모서리 깎기가 없고, Windows용에는 있다.
   expect(full).toContain('<rect width="512" height="512" fill="url(#navy)"/>');
   expect(rounded).toContain('<rect width="512" height="512" rx="112" fill="url(#navy)"/>');

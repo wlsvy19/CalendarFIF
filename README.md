@@ -393,7 +393,7 @@ Windows PC에서도 쓰는 사용자에게는 꾸린 폴더(`release\CalendarFIF
 
 ## 아이콘
 
-남색 바탕에 흰 달력, 날짜 자리에 파란 불꽃과 그 속의 따뜻한 불씨다. FIF는 Flame in Frozen(차가운 불꽃: 머리는 차갑게, 가슴은 뜨겁게)이다. 그림은 `scripts/icon-art.ts`에 SVG로 있고, `npm run icons`가 헤드리스 Edge로 그려 파일을 만든다(만든 파일은 git에 올린다).
+남색 바탕에 흰 달력, 날짜 자리에 파란 불꽃과 그 속의 밝은 하늘색 속불꽃이다. FIF는 Flame in Frozen(차가운 불꽃: 머리는 차갑게, 가슴은 뜨겁게)이다. 그림은 `scripts/icon-art.ts`에 SVG로 있고, `npm run icons`가 헤드리스 Edge로 그려 파일을 만든다(만든 파일은 git에 올린다).
 
 | 파일 | 쓰는 곳 |
 |---|---|
