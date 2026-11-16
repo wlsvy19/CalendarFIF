@@ -83,7 +83,7 @@ PC(Windows)와 아이폰에서 날짜별 메모를 양방향으로 동기화하�
 - DesktopCal의 데이터 파일(`%APPDATA%\CalendarTask\Db\calendar.db`) 원본에 쓰거나 잠그지 않는다. 복사본만 읽는다.
 - 사용자의 실제 메모, `calendar.db`, 상태 파일, 로그인 정보를 저장소, 테스트 자료, 로그에 넣지 않는다. 테스트 자료는 지어낸 것만 쓴다.
 - DesktopCal의 서버에 접속하지 않고, 그 프로그램의 코드나 이미지를 가져다 쓰지 않는다.
-- `.mcp.json`은 사용자 파일이다. 커밋하지 않는다. `git add`는 경로를 적어서 한다.
+- `.mcp.json`은 사용자 파일이다. 커밋하지 않는다(2026-11-16에 `.gitignore`에 넣어 변경 목록에 나오지 않게 했다). `git add`는 경로를 적어서 한다.
 - 사용자가 시키지 않으면 실제 프로젝트에 닿는 명령을 실행하지 않는다. `npm run import -- --upload`, `npm run import -- --follow`, 실제 프로젝트에 붙는 `npm run dev`와 `npm run desktop`, 꾸린 실행 파일이 그렇다. 웹앱 배포(`npm run deploy`)만은 세션이 판단해서 한다. 에뮬레이터 명령(`npm run dev:emu`, `npm run test:emu`)은 실제 프로젝트에 닿지 않는다.
 - 사용자의 로그인 비밀번호를 묻거나 받지 않는다. 비밀번호가 필요한 명령(가져오기의 올리기와 따라가기)은 사용자가 자기 PowerShell 창에서 실행한다.
 - 사용자의 이메일 주소, 프로젝트 ID가 든 주소, API 키, 계정 ID를 추적 파일, 테스트, 로그, 커밋 메시지에 적지 않는다. 저장소가 공개다. 지어낸 값(`test@example.com`, `demo-calfif`, `owner-test-uid`)만 쓴다.

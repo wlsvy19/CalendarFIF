@@ -15,3 +15,4 @@ coverage/
 public/widget/
 public/push/
 public/push-sw.js
+.mcp.json
