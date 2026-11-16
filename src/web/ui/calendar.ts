@@ -3,6 +3,7 @@ import { countdownChips, countdownLabel, eventsByDate, type CountdownChip, type 
 import { holidayDataVersion, holidayLabel } from '../../core/holidays';
 import { buildPage, pageMonths, stepPage, type Page } from '../../core/layout';
 import { lunarLabel, lunarShort } from '../../core/lunar';
+import { seasonNames } from '../../core/solarTerms';
 import type { Point } from '../../desktop/api';
 import { parseLine, splitLines } from '../../core/text';
 import type { SyncStatus } from '../../sync/engine';
@@ -185,9 +186,12 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
         const header = spanOf('head', '');
         header.append(spanOf('num', String(c.dayOfMonth)));
         if (holiday !== '') header.append(spanOf('hname', holiday));
+        // 절기나 복날이면 음력 자리에 그 이름을 적는다(DesktopCal처럼). 웹의 좁은 칸에는 하나만 적는다(둘이 겹치면 절기).
+        const season = a.solarTerms ? seasonNames(c.dateKey) : [];
         // 음력 표 밖의 날짜는 적지 않는다. 웹의 좁은 칸에는 '음'을 뺀 짧은 꼴을 쓴다.
-        const lunar = a.lunar ? (custom ? lunarLabel(c.dateKey) : lunarShort(c.dateKey)) : '';
-        if (lunar !== '') header.append(spanOf('lunar', lunar));
+        const lunar = season.length > 0 || !a.lunar ? '' : custom ? lunarLabel(c.dateKey) : lunarShort(c.dateKey);
+        if (season.length > 0) header.append(spanOf('lunar term', custom ? season.join('·') : season[0]));
+        else if (lunar !== '') header.append(spanOf('lunar', lunar));
         button.append(header);
         children.push(button);
         const evLines: CellLine[] = (dayEvents?.get(c.dateKey) ?? []).map((e) => ({
@@ -246,7 +250,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
       if (more > 0) memo.append(spanOf('ln more', `+${more}`));
       button.append(memo);
     }
-    if (!custom && a.lunar) fitLunar(target);
+    if (!custom && (a.lunar || a.solarTerms)) fitLunar(target);
     // 잘린 줄 표시: 폭을 모두 읽은 뒤에 표시를 붙인다(줄마다 배치를 다시 계산하지 않게).
     const cut = [...target.querySelectorAll<HTMLElement>('.ln:not(.more)')].filter((ln) => ln.scrollWidth > ln.clientWidth);
     for (const ln of cut) ln.classList.add('cut');

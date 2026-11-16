@@ -163,7 +163,7 @@ export function mountDesktopSettings(
     return row;
   };
 
-  const toggleRow = (page: SettingsPage, label: string, key: 'monthGap' | 'weekNumbers' | 'shadow' | 'titleBar' | 'holidays' | 'lunar' | 'doneToBottom' | 'showDone' | 'showRestDays' | 'showAlarmTime', help?: string): Row => {
+  const toggleRow = (page: SettingsPage, label: string, key: 'monthGap' | 'weekNumbers' | 'shadow' | 'titleBar' | 'holidays' | 'lunar' | 'solarTerms' | 'doneToBottom' | 'showDone' | 'showRestDays' | 'showAlarmTime', help?: string): Row => {
     const row = add(page, makeRow(label));
     row.ctl.append(switchInput(label, cur[key], (on) => set(key, on)));
     if (help) row.help(help);
@@ -198,6 +198,7 @@ export function mountDesktopSettings(
   toggleRow('calendar', '제목 표시줄 표시', 'titleBar');
   toggleRow('calendar', '공휴일', 'holidays', '대한민국 공휴일 이름을 칸에 표시합니다.');
   toggleRow('calendar', '음력', 'lunar', '칸에 음력 날짜를 표시합니다.');
+  toggleRow('calendar', '절기와 복날', 'solarTerms', '24절기(입춘, 동지 등)와 삼복(초복, 중복, 말복)의 이름을 칸에 표시합니다.');
 
   // 셀 쪽
   add('cell', makeRow('줄 머리')).ctl.append(radioGroup('줄 머리', [['none', '없음'], ['number', '번호'], ['dot', '점']], cur.bullet, (v) => set('bullet', v as Bullet)));

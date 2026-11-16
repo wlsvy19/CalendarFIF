@@ -566,12 +566,14 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   await rest();
 
   // 설정: 고르면 바로 바뀌고 이 기기에 저장된다. 다시 고르면 처음으로 돌아온다.
-  type Look = { theme: string | null; accent: string; lunars: number; dow: string; memoSize: string; weeks: number; saved: Record<string, unknown> | null };
+  type Look = { theme: string | null; accent: string; lunars: number; terms: number; dow: string; memoSize: string; weeks: number; saved: Record<string, unknown> | null };
   const look = () =>
     cdp.evaluate<Look>(`(() => ({
       theme: document.documentElement.getAttribute('data-theme'),
       accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim().toUpperCase(),
-      lunars: document.querySelectorAll('.grid.current .lunar').length,
+      // 음력 날짜와, 그 자리에 적는 절기와 복날의 이름을 따로 센다. 음력을 꺼도 이름은 남는다.
+      lunars: document.querySelectorAll('.grid.current .lunar:not(.term)').length,
+      terms: document.querySelectorAll('.grid.current .lunar.term').length,
       dow: [...document.querySelectorAll('.dow span')].map((s) => s.textContent).join(''),
       memoSize: document.querySelector('.calendar').style.getPropertyValue('--memo-size'),
       weeks: document.querySelectorAll('.grid.current .wk').length,
@@ -595,12 +597,12 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   const lookBack = await look();
   const savedChanged = lookChanged.saved ?? {};
   record(
-    '설정에서 고르면 달력이 바로 바뀌고 저장된다(밝기, 색상, 음력, 한 주의 시작, 글자 크기, 주 번호). 다시 고르면 처음과 같다',
-    lookChanged.theme === 'dark' && lookChanged.accent === '#FF8FB8' && lookBefore.lunars > 0 && lookChanged.lunars === 0 && lookBefore.dow === '일월화수목금토' && lookChanged.dow === '월화수목금토일' &&
+    '설정에서 고르면 달력이 바로 바뀌고 저장된다(밝기, 색상, 음력, 한 주의 시작, 글자 크기, 주 번호). 음력을 꺼도 절기 이름은 남는다. 다시 고르면 처음과 같다',
+    lookChanged.theme === 'dark' && lookChanged.accent === '#FF8FB8' && lookBefore.lunars > 0 && lookChanged.lunars === 0 && lookBefore.terms > 0 && lookChanged.terms === lookBefore.terms && lookBefore.dow === '일월화수목금토' && lookChanged.dow === '월화수목금토일' &&
       lookChanged.memoSize === '12px' && lookBefore.weeks === 0 && lookChanged.weeks > 0 &&
       savedChanged.theme === 'dark' && savedChanged.accent === 'pink' && savedChanged.lunar === false && savedChanged.weekStart === 1 && savedChanged.memoSize === 'large' && savedChanged.weekNumbers === true &&
       lookBack.theme === null && lookBack.accent === lookBefore.accent && lookBack.lunars === lookBefore.lunars && lookBack.dow === lookBefore.dow && lookBack.memoSize === '10px' && lookBack.weeks === 0,
-    `바꾼 뒤: 밝기 ${lookChanged.theme}, 강조색 ${lookChanged.accent}, 음력 ${lookBefore.lunars} -> ${lookChanged.lunars}칸, 요일 줄 ${lookChanged.dow}, 메모 글자 ${lookChanged.memoSize}, 주 번호 ${lookChanged.weeks}칸, 저장 ${JSON.stringify(lookChanged.saved)} / 되돌린 뒤: 밝기 ${lookBack.theme ?? '자동'}, 강조색 ${lookBack.accent}, 음력 ${lookBack.lunars}칸, 요일 줄 ${lookBack.dow}, 메모 글자 ${lookBack.memoSize}`,
+    `바꾼 뒤: 밝기 ${lookChanged.theme}, 강조색 ${lookChanged.accent}, 음력 ${lookBefore.lunars} -> ${lookChanged.lunars}칸(절기 ${lookBefore.terms} -> ${lookChanged.terms}칸), 요일 줄 ${lookChanged.dow}, 메모 글자 ${lookChanged.memoSize}, 주 번호 ${lookChanged.weeks}칸, 저장 ${JSON.stringify(lookChanged.saved)} / 되돌린 뒤: 밝기 ${lookBack.theme ?? '자동'}, 강조색 ${lookBack.accent}, 음력 ${lookBack.lunars}칸, 요일 줄 ${lookBack.dow}, 메모 글자 ${lookBack.memoSize}`,
   );
   // 목록이 내려가 있어도 닫기는 위에 붙어 있으므로 그대로 누른다.
   await tap(await center($('.sheet .sheet-bar .textbtn.end')));

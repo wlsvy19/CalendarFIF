@@ -16,6 +16,7 @@ export type Prefs = {
   theme: ThemeMode;
   accent: Accent;
   lunar: boolean;
+  solarTerms: boolean; // 24절기와 삼복
   holidays: boolean;
   weekNumbers: boolean;
   weekStart: number; // 0(일요일)~6(토요일)
@@ -33,7 +34,7 @@ export type Prefs = {
 export const PREFS_KEY = 'calfif.prefs';
 
 export const DEFAULT_PREFS: Prefs = {
-  version: 1, theme: 'auto', accent: 'blue', lunar: true, holidays: true, weekNumbers: false, weekStart: 0,
+  version: 1, theme: 'auto', accent: 'blue', lunar: true, solarTerms: true, holidays: true, weekNumbers: false, weekStart: 0,
   memoSize: 'medium', showDone: true, doneToBottom: false, bullet: 'none',
   cellGap: 'narrow', lineSpacing: 'normal', showAlarmTime: true, doneTone: 'none', alarmTone: 'chime',
 };
@@ -74,6 +75,7 @@ export function parsePrefs(input: unknown): Prefs {
     theme: choice(raw.theme, ['auto', 'light', 'dark'] as const, d.theme),
     accent: choice(raw.accent, Object.keys(ACCENTS) as Accent[], d.accent),
     lunar: bool(raw.lunar, d.lunar),
+    solarTerms: bool(raw.solarTerms, d.solarTerms),
     holidays: bool(raw.holidays, d.holidays),
     weekNumbers: bool(raw.weekNumbers, d.weekNumbers),
     weekStart: choice(raw.weekStart, [0, 1, 2, 3, 4, 5, 6] as const, d.weekStart),
@@ -106,7 +108,7 @@ export function savePrefs(store: KeyValueStore, prefs: Prefs): void {
 export function prefsAppearance(p: Prefs): Appearance {
   return {
     ...WEB_APPEARANCE,
-    lunar: p.lunar, holidays: p.holidays, weekNumbers: p.weekNumbers, weekStart: p.weekStart,
+    lunar: p.lunar, solarTerms: p.solarTerms, holidays: p.holidays, weekNumbers: p.weekNumbers, weekStart: p.weekStart,
     showDone: p.showDone, doneToBottom: p.doneToBottom, bullet: p.bullet,
     showAlarmTime: p.showAlarmTime, alarmTone: p.alarmTone, doneTone: p.doneTone,
   };

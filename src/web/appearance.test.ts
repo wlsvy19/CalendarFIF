@@ -6,7 +6,7 @@ describe('appearance', () => {
   it('기본값은 설계 8절의 표와 같다', () => {
     expect(DEFAULT_APPEARANCE).toEqual({
       version: 1, layout: 'floating', maxRows: 5, pastWeeks: 1, monthGap: true, weekNumbers: false, shadow: true,
-      titleBar: true, holidays: true, lunar: false, bullet: 'none', cellGap: 4, lineSpacing: 1.35, doneToBottom: false,
+      titleBar: true, holidays: true, lunar: false, solarTerms: true, bullet: 'none', cellGap: 4, lineSpacing: 1.35, doneToBottom: false,
       showDone: true, doneTone: 'none', calendarFont: { color: 'FFFFFF', size: 13 }, memoFont: { color: 'FFFFFF', size: 14 },
       calendarBg: '141820', restBg: '3A1F24', todayBorder: '6AA6FF', titleButton: 'FFFFFF', holidayInk: 'FF6B6B',
       lunarInk: '9FB3C8', transparency: 60, weekStart: 0, firstWeek: 'jan1', showRestDays: true, restDays: [0, 6],
@@ -27,8 +27,8 @@ describe('appearance', () => {
     const store = new MemoryStorage();
     store.setItem(APPEARANCE_KEY, '{not json');
     expect(loadAppearance(store)).toEqual(DEFAULT_APPEARANCE);
-    saveAppearance(store, { ...DEFAULT_APPEARANCE, lunar: true });
-    expect(loadAppearance(store).lunar).toBe(true);
+    saveAppearance(store, { ...DEFAULT_APPEARANCE, lunar: true, solarTerms: false });
+    expect([loadAppearance(store).lunar, loadAppearance(store).solarTerms]).toEqual([true, false]);
   });
 });
 it('설정을 CSS 변수로 바꾼다', () => {

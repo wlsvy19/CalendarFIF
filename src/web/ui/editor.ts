@@ -51,7 +51,7 @@ export function mountEditor(
     dateKey: string;
     value: DayValue;
     /** 제목 아래에 적을 그날의 음력과 공휴일 이름. 빈 글은 적지 않는다. */
-    note?: { lunar: string; holiday: string };
+    note?: { lunar: string; holiday: string; season?: string };
     /** 완료를 누를 때 소리. */
     doneTone?: 'none' | 'short';
     /**
@@ -95,7 +95,7 @@ export function mountEditor(
     </div>`;
   sheet.querySelector('h3')!.textContent = titleOf(props.dateKey);
   const noteEl = sheet.querySelector<HTMLElement>('.sheet-note')!;
-  for (const [className, text] of [['note-lunar', props.note?.lunar ?? ''], ['note-holiday', props.note?.holiday ?? '']]) {
+  for (const [className, text] of [['note-lunar', props.note?.lunar ?? ''], ['note-season', props.note?.season ?? ''], ['note-holiday', props.note?.holiday ?? '']]) {
     if (text === '') continue;
     const span = document.createElement('span');
     span.className = className;

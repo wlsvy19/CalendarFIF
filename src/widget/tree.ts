@@ -2,6 +2,7 @@ import { isColor } from '../core/color';
 import { holidayLabel } from '../core/holidays';
 import { buildPage } from '../core/layout';
 import { lunarLabel, lunarShort } from '../core/lunar';
+import { seasonNames } from '../core/solarTerms';
 import type { GridCell } from '../core/dates';
 import type { DayValue } from '../core/types';
 import type { MonthData } from './scene';
@@ -71,7 +72,8 @@ function dayCell(cell: GridCell, day: DayValue | undefined, today: string, lay: 
   const numberColor = cell.dateKey === today ? C.onAccent : hasColor ? C.ink : holiday !== '' ? C.sun : dowColor(cell.dow);
   const numberText = text(String(cell.dayOfMonth), 11, 'semibold', numberColor, 1, cell.inMonth ? {} : { opacity: 0.4 });
   // 머리 줄: 숫자는 앞쪽, 음력은 뒤쪽 가장자리. 이번 달의 칸에만 음력과 공휴일 이름을 적는다.
-  const lunar = lay.lunar && cell.inMonth ? lunarShort(cell.dateKey) : '';
+  // 절기나 복날이면 음력 대신 그 이름을 적는다(둘이 겹치면 절기).
+  const lunar = lay.lunar && cell.inMonth ? seasonNames(cell.dateKey)[0] ?? lunarShort(cell.dateKey) : '';
   // 오늘 표시: 음력을 같이 적는 두 자리 날은 옆 여백을 줄인다. 칸의 안쪽 폭이 40pt쯤이라 숫자 상자가 넓으면 음력이 잘린다.
   const pillPad = lunar !== '' && cell.dayOfMonth >= 10 ? 2.5 : 4;
   const number: Node = cell.dateKey === today
@@ -138,8 +140,8 @@ function smallTree(input: TreeInput): Tree {
   const { today, month, offline } = input;
   const dow = weekdayOfKey(today);
   const holiday = holidayLabel(today);
-  // 날짜 아래 한 줄: 음력과 공휴일 이름. 둘 다 없으면 줄을 두지 않는다.
-  const under = [input.lunar !== false ? lunarLabel(today) : '', holiday].filter((t) => t !== '').join(' · ');
+  // 날짜 아래 한 줄: 음력, 절기와 복날, 공휴일 이름. 모두 없으면 줄을 두지 않는다.
+  const under = [...(input.lunar !== false ? [lunarLabel(today), ...seasonNames(today)] : []), holiday].filter((t) => t !== '').join(' · ');
   const day = month.days[today.slice(8, 10)];
   const color = validColor(day);
   const lines = day ? memoLines(day.text) : [];

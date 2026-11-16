@@ -8,9 +8,9 @@ function memory(initial: Record<string, string> = {}) {
 }
 
 describe('웹앱 설정(기기마다 따로 저장한다)', () => {
-  it('기본값: 자동 밝기, 파랑, 음력과 공휴일을 보이고 일요일에 시작한다', () => {
+  it('기본값: 자동 밝기, 파랑, 음력과 절기와 공휴일을 보이고 일요일에 시작한다', () => {
     expect(DEFAULT_PREFS).toEqual({
-      version: 1, theme: 'auto', accent: 'blue', lunar: true, holidays: true, weekNumbers: false, weekStart: 0,
+      version: 1, theme: 'auto', accent: 'blue', lunar: true, solarTerms: true, holidays: true, weekNumbers: false, weekStart: 0,
       memoSize: 'medium', showDone: true, doneToBottom: false, bullet: 'none',
       cellGap: 'narrow', lineSpacing: 'normal', showAlarmTime: true, doneTone: 'none', alarmTone: 'chime',
     });
@@ -19,9 +19,9 @@ describe('웹앱 설정(기기마다 따로 저장한다)', () => {
   });
 
   it('읽을 때 값마다 따로 확인하고, 틀린 값은 기본값으로 둔다', () => {
-    const good: Prefs = { version: 1, theme: 'dark', accent: 'gold', lunar: false, holidays: false, weekNumbers: true, weekStart: 1, memoSize: 'large', showDone: false, doneToBottom: true, bullet: 'dot', cellGap: 'wide', lineSpacing: 'loose', showAlarmTime: false, doneTone: 'short', alarmTone: 'bell' };
+    const good: Prefs = { version: 1, theme: 'dark', accent: 'gold', lunar: false, solarTerms: false, holidays: false, weekNumbers: true, weekStart: 1, memoSize: 'large', showDone: false, doneToBottom: true, bullet: 'dot', cellGap: 'wide', lineSpacing: 'loose', showAlarmTime: false, doneTone: 'short', alarmTone: 'bell' };
     expect(parsePrefs(good)).toEqual(good);
-    expect(parsePrefs({ theme: 'neon', accent: 'red', lunar: 'yes', weekStart: 7, memoSize: 12, bullet: null, weekNumbers: true })).toEqual({ ...DEFAULT_PREFS, weekNumbers: true });
+    expect(parsePrefs({ theme: 'neon', accent: 'red', lunar: 'yes', solarTerms: 0, weekStart: 7, memoSize: 12, bullet: null, weekNumbers: true })).toEqual({ ...DEFAULT_PREFS, weekNumbers: true });
     expect(parsePrefs({ ...good, weekStart: 6, extra: 1 })).toEqual({ ...good, weekStart: 6 });
   });
 
@@ -37,8 +37,8 @@ describe('웹앱 설정(기기마다 따로 저장한다)', () => {
 
   it('달력에 넘길 설정으로 바꾼다: 웹의 기본 배치에 고른 값만 얹는다', () => {
     expect(prefsAppearance(DEFAULT_PREFS)).toEqual(WEB_APPEARANCE);
-    const a = prefsAppearance({ ...DEFAULT_PREFS, lunar: false, holidays: false, weekNumbers: true, weekStart: 1, showDone: false, doneToBottom: true, bullet: 'number' });
-    expect(a).toEqual({ ...WEB_APPEARANCE, lunar: false, holidays: false, weekNumbers: true, weekStart: 1, showDone: false, doneToBottom: true, bullet: 'number' });
+    const a = prefsAppearance({ ...DEFAULT_PREFS, lunar: false, solarTerms: false, holidays: false, weekNumbers: true, weekStart: 1, showDone: false, doneToBottom: true, bullet: 'number' });
+    expect(a).toEqual({ ...WEB_APPEARANCE, lunar: false, solarTerms: false, holidays: false, weekNumbers: true, weekStart: 1, showDone: false, doneToBottom: true, bullet: 'number' });
     expect(a.layout).toBe('month');
     expect(DEFAULT_APPEARANCE.layout).toBe('floating'); // PC 앱의 기본값과는 다르다
   });

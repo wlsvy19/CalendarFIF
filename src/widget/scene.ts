@@ -1,6 +1,7 @@
 import { holidayLabel } from '../core/holidays';
 import { buildPage } from '../core/layout';
 import { lunarLabel, lunarShort } from '../core/lunar';
+import { seasonNames } from '../core/solarTerms';
 import type { GridCell } from '../core/dates';
 import type { DayValue } from '../core/types';
 import type { Family, Size } from './sizes';
@@ -50,10 +51,10 @@ const validColor = (day: DayValue | undefined): string => (day && day.color !== 
 
 // 머리 줄의 작은 글(오늘 칸의 음력, 공휴일 이름)은 자리가 모자라면 여기까지 줄인다. 다른 글은 8 아래로 줄이지 않는다.
 const TIGHT_MIN_FONT = 6.5;
-/** 음력 글('10.5', '윤6.15')의 폭을 글자 크기의 배수로 어림한다. 숫자는 0.6, 점은 0.3, '윤'은 1이다. */
+/** 음력 글('10.5', '윤6.15')이나 절기 이름('입동')의 폭을 글자 크기의 배수로 어림한다. 숫자는 0.6, 점은 0.3, 한글은 1이다. */
 function lunarUnits(text: string): number {
   let units = 0;
-  for (const ch of text) units += ch === '.' ? 0.3 : ch === '윤' ? 1 : 0.6;
+  for (const ch of text) units += ch === '.' ? 0.3 : ch >= '가' && ch <= '힣' ? 1 : 0.6;
   return units;
 }
 
@@ -109,7 +110,8 @@ function drawCell(c: Ctx, cell: GridCell, x: number, y: number, w: number, h: nu
   if (!cell.inMonth) return;
 
   // 음력: 머리 줄의 오른쪽. 오늘 칸은 숫자 상자가 넓어서 자리가 모자라면 글자를 6.5까지 줄인다. 그래도 숫자와 겹치면 적지 않는다.
-  const lunar = c.lunar ? lunarShort(cell.dateKey) : '';
+  // 절기나 복날이면 음력 대신 그 이름을 적는다(둘이 겹치면 절기).
+  const lunar = c.lunar ? seasonNames(cell.dateKey)[0] ?? lunarShort(cell.dateKey) : '';
   if (lunar !== '') {
     const isToday = cell.dateKey === today;
     // 오늘 칸의 숫자 상자는 안쪽 여백보다 1만큼 앞에서 시작하므로, 그만큼이 숫자와 음력 사이의 틈이 된다.
@@ -194,8 +196,8 @@ function buildSmall(input: Parameters<typeof buildScene>[0], p: Palette): Scene 
   pushText(draws, labelX, pad + 4 * s, labelW, 15 * s, `${Number(today.slice(5, 7))}월`, { size: 12 * s, color: p.muted });
   pushText(draws, labelX, pad + 19 * s, labelW, 15 * s, `${WEEKDAYS[dow]}요일`, { size: 12 * s, weight: 'semibold', color: p.muted });
 
-  // 날짜 아래 한 줄: 음력과 공휴일 이름. 둘 다 없으면 줄을 두지 않고 메모가 그 자리에서 시작한다.
-  const under = [input.lunar !== false ? lunarLabel(today) : '', holiday].filter((t) => t !== '').join(' · ');
+  // 날짜 아래 한 줄: 음력, 절기와 복날, 공휴일 이름. 모두 없으면 줄을 두지 않고 메모가 그 자리에서 시작한다.
+  const under = [...(input.lunar !== false ? [lunarLabel(today), ...seasonNames(today)] : []), holiday].filter((t) => t !== '').join(' · ');
   let memoTop = 62 * s;
   if (under !== '') {
     pushText(draws, pad, 54 * s, size.width - 2 * pad, 13 * s, under, { size: 10 * s, color: holiday !== '' ? p.sun : p.muted });

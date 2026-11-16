@@ -6,7 +6,7 @@ export type AlarmTone = 'none' | 'chime' | 'bell';
 export type FontSetting = { color: string; size: number };
 export type Appearance = {
   version: 1; layout: Layout; maxRows: number; pastWeeks: number; monthGap: boolean; weekNumbers: boolean;
-  shadow: boolean; titleBar: boolean; holidays: boolean; lunar: boolean; bullet: Bullet; cellGap: number;
+  shadow: boolean; titleBar: boolean; holidays: boolean; lunar: boolean; solarTerms: boolean; bullet: Bullet; cellGap: number;
   lineSpacing: number; doneToBottom: boolean; showDone: boolean; doneTone: 'none' | 'short';
   calendarFont: FontSetting; memoFont: FontSetting; calendarBg: string; restBg: string; todayBorder: string;
   titleButton: string; holidayInk: string; lunarInk: string; transparency: number; weekStart: number;
@@ -18,7 +18,7 @@ export const APPEARANCE_KEY = 'calfif.appearance';
 
 export const DEFAULT_APPEARANCE: Appearance = {
   version: 1, layout: 'floating', maxRows: 5, pastWeeks: 1, monthGap: true, weekNumbers: false, shadow: true,
-  titleBar: true, holidays: true, lunar: false, bullet: 'none', cellGap: 4, lineSpacing: 1.35, doneToBottom: false,
+  titleBar: true, holidays: true, lunar: false, solarTerms: true, bullet: 'none', cellGap: 4, lineSpacing: 1.35, doneToBottom: false,
   showDone: true, doneTone: 'none', calendarFont: { color: 'FFFFFF', size: 13 }, memoFont: { color: 'FFFFFF', size: 14 },
   calendarBg: '141820', restBg: '3A1F24', todayBorder: '6AA6FF', titleButton: 'FFFFFF', holidayInk: 'FF6B6B',
   lunarInk: '9FB3C8', transparency: 60, weekStart: 0, firstWeek: 'jan1', showRestDays: true, restDays: [0, 6],
@@ -82,6 +82,7 @@ export function parseAppearance(input: unknown): Appearance {
     titleBar: readBool(raw.titleBar, d.titleBar),
     holidays: readBool(raw.holidays, d.holidays),
     lunar: readBool(raw.lunar, d.lunar),
+    solarTerms: readBool(raw.solarTerms, d.solarTerms),
     bullet: readChoice(raw.bullet, ['none', 'number', 'dot'] as const, d.bullet),
     cellGap: readInt(raw.cellGap, 0, 12, d.cellGap),
     lineSpacing: readLineSpacing(raw.lineSpacing, d.lineSpacing),

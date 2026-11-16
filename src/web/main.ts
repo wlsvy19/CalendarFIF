@@ -43,6 +43,7 @@ import { applyPrefs, loadPrefs, prefsAppearance, savePrefs, type Prefs } from '.
 import { fetchHolidayFile, startHolidayFeed } from './holidayFeed';
 import { holidayLabel } from '../core/holidays';
 import { lunarLong } from '../core/lunar';
+import { seasonNames } from '../core/solarTerms';
 import { splitDateKey, todayKey } from '../core/dates';
 import { EMPTY_DAY } from '../core/types';
 import { FirestoreMonthStore } from '../sync/firestoreStore';
@@ -224,10 +225,14 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       // 저장소가 막힌 브라우저: 창을 닫으면 기본값으로 돌아간다.
     }
   };
-  // 편집 화면의 제목 아래에 적을 음력과 공휴일 이름. 설정에서 끈 것은 적지 않는다.
-  const dayNote = (dateKey: string): { lunar: string; holiday: string } => {
+  // 편집 화면의 제목 아래에 적을 음력, 절기와 복날, 공휴일 이름. 설정에서 끈 것은 적지 않는다.
+  const dayNote = (dateKey: string): { lunar: string; holiday: string; season: string } => {
     const show = prefs ?? appearance;
-    return { lunar: show?.lunar ? lunarLong(dateKey) : '', holiday: show?.holidays ? holidayLabel(dateKey) : '' };
+    return {
+      lunar: show?.lunar ? lunarLong(dateKey) : '',
+      season: show?.solarTerms ? seasonNames(dateKey).join(' · ') : '',
+      holiday: show?.holidays ? holidayLabel(dateKey) : '',
+    };
   };
   const changeMyPassword = async (current: string, next: string): Promise<{ ok: boolean; message: string }> => {
     const result = await changePassword(firebasePasswordDeps(auth), current, next);

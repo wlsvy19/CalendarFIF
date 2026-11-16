@@ -20,7 +20,7 @@ const change = (el: HTMLInputElement | HTMLSelectElement, value: string, type = 
 it('다섯 쪽과 설계 8절의 문구', () => {
   const { root } = mount();
   expect([...root.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toEqual(['캘린더', '셀', '글꼴 및 색상', '고급', '계정']);
-  expect(labels(root)).toEqual(['배치', '최대 행', '지나간 주 표시', '월 간격', '주 번호', '그림자', '제목 표시줄 표시', '공휴일', '음력']);
+  expect(labels(root)).toEqual(['배치', '최대 행', '지나간 주 표시', '월 간격', '주 번호', '그림자', '제목 표시줄 표시', '공휴일', '음력', '절기와 복날']);
   tab(root, '셀').click();
   expect(labels(root)).toEqual(['줄 머리', '셀 간격', '줄 간격', '완료 작업 자동으로 맨 아래 줄로 이동', '완료된 작업 표시', '알림 시각 표시', '편집 완료 알람', '리마인드 알람']);
   tab(root, '글꼴 및 색상').click();
@@ -223,6 +223,15 @@ it('계정 쪽의 사용자 관리 단추는 상자가 열린 뒤에도 생기�
   handle.setManageUsers(undefined);
   expect(manage()).toBeUndefined();
   handle.destroy();
+});
+
+it('캘린더 쪽의 절기와 복날 스위치는 켜진 채로 시작하고, 끄면 바로 알린다', () => {
+  const { root, onAppearance } = mount();
+  const r = row(root, '절기와 복날');
+  const sw = r.querySelector<HTMLInputElement>('input[role="switch"]')!;
+  expect([sw.checked, r.textContent!.includes('삼복(초복, 중복, 말복)')]).toEqual([true, true]);
+  sw.click();
+  expect(onAppearance).toHaveBeenLastCalledWith({ ...DEFAULT_APPEARANCE, solarTerms: false });
 });
 
 it('셀 쪽에 알림 시각 표시와 리마인드 알람이 있다', () => {

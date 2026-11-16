@@ -190,11 +190,11 @@ body {
   min-height: 44px;
 }
 .sheet-bar h3 { margin: 0; font-size: 16px; font-weight: 600; }
-/* 편집 화면의 제목과 그 아래 한 줄(음력, 공휴일 이름) */
+/* 편집 화면의 제목과 그 아래 한 줄(음력, 절기와 복날, 공휴일 이름) */
 .sheet-title { min-width: 0; text-align: center; }
 .sheet-note { margin: 1px 0 0; font-size: 12px; line-height: 1.3; color: var(--muted); }
 .sheet-note .note-holiday { color: var(--sun); font-weight: 600; }
-.sheet-note .note-lunar + .note-holiday::before { content: " · "; color: var(--muted); font-weight: 400; }
+.sheet-note span + span::before { content: " · "; color: var(--muted); font-weight: 400; }
 .textbtn {
   border: 0;
   border-radius: 8px;

@@ -21,7 +21,7 @@ function mount(prefs: Prefs = DEFAULT_PREFS) {
 it('칸은 화면, 달력, 메모, 셀 넷이고 지금 설정을 보여 준다', () => {
   const m = mount({ ...DEFAULT_PREFS, theme: 'dark', accent: 'gold', lunar: false, weekStart: 1, memoSize: 'large', bullet: 'dot' });
   expect([...m.el.querySelectorAll('.field-label')].map((l) => l.textContent)).toEqual(['화면', '달력', '메모', '셀']);
-  expect([...m.el.querySelectorAll('.pref-name')].map((l) => l.textContent)).toEqual(['밝기', '색상', '음력', '공휴일', '주 번호', '한 주의 시작', '글자 크기', '줄 머리', '셀 간격', '줄 간격', '완료된 작업 표시', '완료 작업 맨 아래로', '알림 시각 표시', '편집 완료 알람', '리마인드 알람']);
+  expect([...m.el.querySelectorAll('.pref-name')].map((l) => l.textContent)).toEqual(['밝기', '색상', '음력', '절기와 복날', '공휴일', '주 번호', '한 주의 시작', '글자 크기', '줄 머리', '셀 간격', '줄 간격', '완료된 작업 표시', '완료 작업 맨 아래로', '알림 시각 표시', '편집 완료 알람', '리마인드 알람']);
   expect([m.checked('prefTheme'), m.checked('prefAccent'), m.checked('prefWeekStart'), m.checked('prefMemoSize'), m.checked('prefBullet')]).toEqual(['dark', 'gold', '1', 'large', 'dot']);
   expect([m.switchOf('음력').checked, m.switchOf('공휴일').checked, m.switchOf('주 번호').checked, m.switchOf('완료된 작업 표시').checked, m.switchOf('완료 작업 맨 아래로').checked]).toEqual([false, true, false, true, false]);
   expect(m.radios('prefTheme').map((b) => b.textContent)).toEqual(['자동', '밝게', '어둡게']);
@@ -35,6 +35,9 @@ it('고르면 바로 새 설정을 준다. 바꾼 것들이 쌓인다', () => {
   expect(m.last()).toEqual({ ...DEFAULT_PREFS, theme: 'dark' });
   m.switchOf('음력').click();
   expect(m.last()).toEqual({ ...DEFAULT_PREFS, theme: 'dark', lunar: false });
+  m.switchOf('절기와 복날').click();
+  expect(m.last()).toEqual({ ...DEFAULT_PREFS, theme: 'dark', lunar: false, solarTerms: false });
+  m.switchOf('절기와 복날').click();
   m.radios('prefWeekStart')[1].click();
   m.radios('prefMemoSize')[0].click();
   m.radios('prefBullet')[1].click();

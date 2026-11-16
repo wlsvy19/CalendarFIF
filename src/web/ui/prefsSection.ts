@@ -118,6 +118,7 @@ export function prefsSection(props: { prefs: Prefs; onChange(next: Prefs): void 
     ]),
     field('달력', [
       row('음력', toggle(prefs.lunar, (on) => set('lunar', on))),
+      row('절기와 복날', toggle(prefs.solarTerms, (on) => set('solarTerms', on))),
       row('공휴일', toggle(prefs.holidays, (on) => set('holidays', on))),
       row('주 번호', toggle(prefs.weekNumbers, (on) => set('weekNumbers', on))),
       row('한 주의 시작', segmented('prefWeekStart', [{ value: 0, label: '일요일' }, { value: 1, label: '월요일' }], prefs.weekStart, (v) => set('weekStart', v)), 'prefWeekStart'),

@@ -347,7 +347,7 @@ it('끌기 연결 함수를 받았을 때만(PC 앱) 시트와 제목 줄을 넘
 });
 
 it('제목 아래에 그날의 음력과 공휴일 이름을 적는다. 둘 다 없으면 줄을 숨긴다', () => {
-  const noteOf = (note?: { lunar: string; holiday: string }) => {
+  const noteOf = (note?: { lunar: string; holiday: string; season?: string }) => {
     const root = document.createElement('div');
     document.body.append(root);
     mountEditor(root, { dateKey: '2026-10-05', value: { text: '', color: '' }, note, onSave: vi.fn(), onCancel: vi.fn() });
@@ -357,6 +357,9 @@ it('제목 아래에 그날의 음력과 공휴일 이름을 적는다. 둘 다 
   expect(noteOf({ lunar: '음력 8월 25일', holiday: '대체공휴일' })).toEqual([false, [['note-lunar', '음력 8월 25일'], ['note-holiday', '대체공휴일']]]);
   expect(noteOf({ lunar: '', holiday: '대체공휴일' })).toEqual([false, [['note-holiday', '대체공휴일']]]);
   expect(noteOf({ lunar: '음력 8월 25일', holiday: '' })).toEqual([false, [['note-lunar', '음력 8월 25일']]]);
+  // 절기와 복날은 음력과 공휴일 사이에 적는다.
+  expect(noteOf({ lunar: '음력 6월 28일', season: '입추 · 말복', holiday: '' })).toEqual([false, [['note-lunar', '음력 6월 28일'], ['note-season', '입추 · 말복']]]);
+  expect(noteOf({ lunar: '', season: '동지', holiday: '' })).toEqual([false, [['note-season', '동지']]]);
   expect(noteOf({ lunar: '', holiday: '' })).toEqual([true, []]);
   expect(noteOf()).toEqual([true, []]);
 });

@@ -236,6 +236,11 @@ describe('화면 설정', () => {
     const xmas = cell(root, '2026-12-25');
     expect([has(xmas, 'holiday'), has(xmas, 'rest'), xmas.querySelector('.hname')!.textContent, xmas.querySelector('.lunar')!.textContent]).toEqual([true, true, '성탄절', '음 11.17']);
     expect([has(cell(root, '2026-12-06'), 'rest'), has(cell(root, '2026-12-07'), 'rest')]).toEqual([true, false]);
+    // 절기와 복날: PC 앱은 음력이 꺼진 것이 기본이라 이름만 나온다. 음력을 켜도 그날은 이름을 적고, 겹치는 날은 둘 다 적는다.
+    const terms = mountA({ layout: 'month' });
+    expect([cell(terms, '2026-11-07').querySelector('.lunar')!.textContent, cell(terms, '2026-11-08').querySelector('.lunar')]).toEqual(['입동', null]);
+    expect(cell(mountA({ layout: 'month', lunar: true }, '2031-08-10'), '2031-08-08').querySelector('.lunar.term')!.textContent).toBe('입추·말복');
+    expect(cell(mountA({ layout: 'month', lunar: true, solarTerms: false }), '2026-11-07').querySelector('.lunar')!.textContent).toBe('음 9.28');
     const off = mountA({ layout: 'month', holidays: false, showRestDays: false }, '2026-12-10');
     expect([off.querySelector('.hname'), off.querySelector('.cell.rest')]).toEqual([null, null]);
   });
@@ -276,10 +281,11 @@ describe('웹(아이폰 화면)의 음력과 공휴일', () => {
       [true, ['한글날'], ['8.29']],
     ]);
   });
-  it('윤달은 윤을 붙이고, 음력 표 밖의 해는 음력을 적지 않는다', () => {
+  it('윤달은 윤을 붙이고, 음력 표 밖의 해는 음력을 적지 않는다(절기와 복날은 2100년까지 적는다)', () => {
     expect(texts(cell(mountWeb('2025-07-25'), '2025-07-25'), '.lunar')).toEqual(['윤6.1']);
     const far = mountWeb('2060-08-15');
-    expect([texts(cell(far, '2060-08-15'), '.lunar'), texts(cell(far, '2060-08-15'), '.hname')]).toEqual([[], ['광복절']]);
+    // 2060년 8월 15일은 말복이기도 하다. 16일에는 아무것도 없다.
+    expect([texts(cell(far, '2060-08-16'), '.lunar'), texts(cell(far, '2060-08-15'), '.lunar'), texts(cell(far, '2060-08-15'), '.hname')]).toEqual([[], ['말복'], ['광복절']]);
   });
   it('음력이 칸보다 넓으면 그 쪽의 음력을 모두 좁은 꼴로 바꾸고, 그래도 넘치는 칸은 숨긴다(앞쪽이 잘린 채 보이지 않게)', () => {
     // 가짜 폭: 음력 상자는 boxWidth, 글은 글자마다 5.5(좁은 꼴에서는 4.5)다.
@@ -308,9 +314,22 @@ describe('웹(아이폰 화면)의 음력과 공휴일', () => {
     expect(state(mountWeb('2026-11-13'))).toEqual([true, []]);
     vi.restoreAllMocks();
     // 더 좁은 칸: 좁은 꼴로도 다섯 글자는 넘쳐서 숨기고, 네 글자는 보인다. 2026년 11월의 쪽은 음력 9.22부터 10.27까지다.
+    // 11월 22일(음력 10.14)은 소설이라 음력 대신 두 글자 이름이 들어가 있고, 숨기지 않는다.
     fake(20);
-    const [tight, hidden] = state(mountWeb('2026-11-13')) as [boolean, string[]];
-    expect([tight, hidden[0], hidden.at(-1), hidden.length, hidden.every((t) => t.length === 5)]).toEqual([true, '10.10', '10.27', 18, true]);
+    const narrowRoot = mountWeb('2026-11-13');
+    const [tight, hidden] = state(narrowRoot) as [boolean, string[]];
+    expect(has(cell(narrowRoot, '2026-11-22').querySelector('.lunar')!, 'hidden')).toBe(false);
+    expect([tight, hidden[0], hidden.at(-1), hidden.length, hidden.every((t) => t.length === 5)]).toEqual([true, '10.10', '10.27', 17, true]);
+  });
+  it('절기와 복날이면 음력 자리에 그 이름을 적는다. 둘이 겹치면 좁은 칸에는 절기만 적는다', () => {
+    const nov = mountWeb('2026-11-13');
+    const label = (root: HTMLElement, key: string) => { const l = cell(root, key).querySelector('.lunar')!; return [l.textContent, has(l, 'term')]; };
+    expect([label(nov, '2026-11-07'), label(nov, '2026-11-22'), label(nov, '2026-11-08')]).toEqual([['입동', true], ['소설', true], ['9.29', false]]);
+    // 2026년 7월 15일 초복, 23일 대서, 25일 중복. 칸마다 음력 자리는 하나다.
+    const july = mountWeb('2026-07-10');
+    expect([texts(cell(july, '2026-07-15'), '.lunar'), texts(cell(july, '2026-07-23'), '.lunar'), texts(cell(july, '2026-07-25'), '.lunar')]).toEqual([['초복'], ['대서'], ['중복']]);
+    // 2031년 8월 8일은 입추이면서 말복이다.
+    expect(texts(cell(mountWeb('2031-08-01'), '2031-08-08'), '.lunar')).toEqual(['입추']);
   });
   it('공휴일 이름이 한 줄을 쓰므로 그 칸은 메모를 한 줄 덜 보여 준다', () => {
     // 넓은 화면(happy-dom의 기본 폭): 줄 높이 17, 숫자 자리 30, 이름 줄 16. 칸 높이 115면 평일 5줄, 공휴일 4줄이다.
@@ -338,11 +357,18 @@ describe('웹앱의 설정(모양은 웹, 동작은 설정)', () => {
     const { root, cal } = mountPrefs({});
     expect([cell(root, '2026-11-13').querySelector('.lunar')!.textContent, cal.style.getPropertyValue('--desk-cal-ink'), cells(root).length]).toEqual(['10.5', '', 35]);
   });
-  it('시작 요일, 주 번호, 음력과 공휴일 끄기, 완료한 줄, 줄 머리 기호를 따른다', () => {
-    const { root, cal } = mountPrefs({ weekStart: 1, weekNumbers: true, lunar: false, holidays: false, showDone: false, bullet: 'dot' });
+  it('시작 요일, 주 번호, 음력과 절기와 공휴일 끄기, 완료한 줄, 줄 머리 기호를 따른다', () => {
+    const { root, cal } = mountPrefs({ weekStart: 1, weekNumbers: true, lunar: false, solarTerms: false, holidays: false, showDone: false, bullet: 'dot' });
     expect([root.querySelector('.dow span:nth-child(2)')!.textContent, root.querySelectorAll('.grid.current .wk').length > 0, root.querySelector('.lunar'), cal.dataset.bullet]).toEqual(['월', true, null, 'dot']);
     expect(lines(root)).toEqual(['b', 'c', 'd', 'e', 'f', 'g', 'h']);
     expect(lines(mountPrefs({ doneToBottom: true }).root).at(-1)).toBe('a');
+  });
+  it('음력과 절기는 따로 켜고 끈다: 음력만 끄면 절기와 복날의 이름만 남고, 절기만 끄면 그날도 음력을 적는다', () => {
+    const lunarTexts = (root: HTMLElement) => [...root.querySelectorAll('.grid.current .lunar')].map((l) => l.textContent);
+    // 2026년 11월의 쪽(11월 1일~12월 5일)에는 입동(7일)과 소설(22일)이 있다.
+    expect(lunarTexts(mountPrefs({ lunar: false }).root)).toEqual(['입동', '소설']);
+    const noTerms = mountPrefs({ solarTerms: false }).root;
+    expect([cell(noTerms, '2026-11-07').querySelector('.lunar')!.textContent, noTerms.querySelector('.lunar.term')]).toEqual(['9.28', null]);
   });
   it('글자 크기에 따라 줄 높이와 보이는 줄 수가 달라진다', () => {
     // 넓은 화면(happy-dom의 기본 폭)에서 칸 높이 115: 작게는 줄 높이 15라 5줄, 크게는 20이라 4줄이 들어간다.
@@ -354,7 +380,7 @@ describe('웹앱의 설정(모양은 웹, 동작은 설정)', () => {
   });
   it('열어 둔 채로 설정과 글자 크기를 바꾼다', () => {
     const { root, handle, cal } = mountPrefs({});
-    handle.setAppearance({ ...WEB_APPEARANCE, lunar: false, weekStart: 1 }, { memoSize: 'large' });
+    handle.setAppearance({ ...WEB_APPEARANCE, lunar: false, solarTerms: false, weekStart: 1 }, { memoSize: 'large' });
     expect([root.querySelector('.lunar'), root.querySelector('.dow span')!.textContent, cal.style.getPropertyValue('--memo-size'), cal.style.getPropertyValue('--desk-cal-ink')]).toEqual([null, '월', '15px', '']);
     // 글자 크기를 주지 않으면 그대로 둔다.
     handle.setAppearance({ ...WEB_APPEARANCE, lunar: true });

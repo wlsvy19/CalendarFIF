@@ -263,6 +263,16 @@ describe('holidays and lunar dates in the grid', () => {
     for (const t of lunar(s)) expect(t.size).toBeGreaterThanOrEqual(8);
     expect(lunar(october({ lunar: false }))).toEqual([]);
   });
+  it('writes the solar term or dog day name in place of the lunar date', () => {
+    // 2026년 10월 8일(음력 8.28)은 한로, 23일은 상강이다.
+    expect(lunar(s).map((t) => t.text)).toEqual(expect.arrayContaining(['한로', '상강']));
+    expect(lunar(s).some((t) => t.text === '8.28')).toBe(false);
+    for (const t of lunar(s).filter((x) => x.text === '한로' || x.text === '상강')) expect(t.size).toBeGreaterThanOrEqual(8);
+    // 작은 위젯의 날짜 아래 줄에는 음력 뒤에 적는다(2026-11-07은 입동). 음력을 끄면 같이 적지 않는다.
+    const small = (over: Partial<Parameters<typeof buildScene>[0]> = {}): Scene =>
+      buildScene({ family: 'small', theme: 'light', size: sizeOf('small'), today: '2026-11-07', month: nov(), offline: false, ...over });
+    expect([texts(small()).some((x) => x.text === '음 9.28 · 입동'), texts(small({ lunar: false })).some((x) => x.text.includes('입동'))]).toEqual([true, false]);
+  });
   it('shrinks the lunar date of today beside the number pill down to 6.5, and leaves it out when it still overlaps', () => {
     // 좁은 위젯(321)에서 오늘이 23일(음력 10.15)이면 8로는 숫자 상자와 겹친다.
     const narrow = (today: string, monthId: string): Scene => buildScene({ family: 'large', theme: 'light', size: { width: 321, height: 324 }, today, month: { monthId, days: {} }, offline: false });
@@ -272,8 +282,9 @@ describe('holidays and lunar dates in the grid', () => {
     // 그날이 오늘이 아니면 8 그대로다.
     expect(lunar(narrow('2026-11-13', '2026-11')).find((t) => t.text === '10.15')!.size).toBe(8);
     // 오늘이 두 자리 날이고 음력이 윤달의 두 자리 날이면 들어가지 않아 적지 않는다(2025-08-10은 음력 윤6월 17일).
+    // 그 전날(9일)은 말복이라 음력 대신 이름이 들어가 있으므로 8일(윤6월 15일)과 견준다.
     const leap = lunar(narrow('2025-08-10', '2025-08'));
-    expect([leap.some((t) => t.text === '윤6.17'), leap.some((t) => t.text === '윤6.16')]).toEqual([false, true]);
+    expect([leap.some((t) => t.text === '윤6.17'), leap.some((t) => t.text === '윤6.15'), leap.some((t) => t.text === '말복')]).toEqual([false, true, true]);
   });
 });
 

@@ -89,6 +89,12 @@ describe('buildTree large', () => {
     for (const c of cells(off)) expect(isFlex((c.children[0] as StackNode).children.at(-1))).toBe(true);
   });
 
+  it('절기와 복날이면 음력 대신 그 이름을 적는다', () => {
+    const head = (tree: Tree, day: number): Node[] => (cellOf(tree, day).children[0] as StackNode).children;
+    // 2026년 11월 7일은 입동, 22일은 소설이다. 8일은 음력 9월 29일이다.
+    expect([head(t, 7)[2], head(t, 22)[2], head(t, 8)[2]]).toMatchObject([{ kind: 'text', text: '입동', size: 7.5, color: pair('muted') }, { text: '소설' }, { text: '9.29' }]);
+  });
+
   it('공휴일과 대체공휴일은 숫자가 빨갛고 이름 한 줄을 적는다. 그 칸은 메모를 한 줄 덜 넣는다', () => {
     // 2026년 10월: 3일 개천절(토), 5일 대체공휴일(월), 9일 한글날(금)
     const many = ['가', '나', '다', '라', '마', '바', '사', '아', '자', '차'].join('\n');
@@ -273,6 +279,9 @@ describe('buildTree small', () => {
     const plain = (today: string, monthId: string): Tree => buildTree({ family: 'small', size: widgetSize(SCREEN, 'small'), today, month: month({}, monthId), offline: false, lunar: false });
     expect(under(plain(TODAY, '2026-11'))).toEqual({ kind: 'spacer', length: 6 });
     expect(under(plain('2026-10-05', '2026-10'))).toMatchObject({ children: [{ text: '대체공휴일' }, { kind: 'spacer' }] });
+    // 절기와 복날은 음력 뒤에 적는다(2026-11-07은 입동). 음력을 끄면 같이 적지 않는다.
+    expect(under(build('small', month({}), '2026-11-07'))).toMatchObject({ children: [{ text: '음 9.28 · 입동', color: pair('muted') }, { kind: 'spacer' }] });
+    expect(under(plain('2026-11-07', '2026-11'))).toEqual({ kind: 'spacer', length: 6 });
   });
 
   it('배경은 오늘 날짜 색을 따른다', () => {
