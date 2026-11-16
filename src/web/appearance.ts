@@ -9,7 +9,7 @@ export type Appearance = {
   shadow: boolean; titleBar: boolean; holidays: boolean; lunar: boolean; solarTerms: boolean; bullet: Bullet; cellGap: number;
   lineSpacing: number; doneToBottom: boolean; showDone: boolean; doneTone: 'none' | 'short';
   calendarFont: FontSetting; memoFont: FontSetting; calendarBg: string; restBg: string; todayBorder: string;
-  titleButton: string; holidayInk: string; lunarInk: string; transparency: number; weekStart: number;
+  titleButton: string; holidayInk: string; lunarInk: string; termInk: string; transparency: number; weekStart: number;
   firstWeek: WeekRule; showRestDays: boolean; restDays: number[];
   showAlarmTime: boolean; alarmTone: AlarmTone;
 };
@@ -21,7 +21,7 @@ export const DEFAULT_APPEARANCE: Appearance = {
   titleBar: true, holidays: true, lunar: false, solarTerms: true, bullet: 'none', cellGap: 4, lineSpacing: 1.35, doneToBottom: false,
   showDone: true, doneTone: 'none', calendarFont: { color: 'FFFFFF', size: 13 }, memoFont: { color: 'FFFFFF', size: 14 },
   calendarBg: '141820', restBg: '3A1F24', todayBorder: '6AA6FF', titleButton: 'FFFFFF', holidayInk: 'FF6B6B',
-  lunarInk: '9FB3C8', transparency: 60, weekStart: 0, firstWeek: 'jan1', showRestDays: true, restDays: [0, 6],
+  lunarInk: '9FB3C8', termInk: '5FD37A', transparency: 60, weekStart: 0, firstWeek: 'jan1', showRestDays: true, restDays: [0, 6],
   showAlarmTime: true, alarmTone: 'chime',
 };
 
@@ -97,6 +97,7 @@ export function parseAppearance(input: unknown): Appearance {
     titleButton: readColor(raw.titleButton, d.titleButton, false),
     holidayInk: readColor(raw.holidayInk, d.holidayInk, false),
     lunarInk: readColor(raw.lunarInk, d.lunarInk, false),
+    termInk: readColor(raw.termInk, d.termInk, false),
     transparency: readInt(raw.transparency, 0, 100, d.transparency),
     weekStart: readChoice(raw.weekStart, [0, 1, 2, 3, 4, 5, 6] as const, d.weekStart),
     firstWeek: readChoice(raw.firstWeek, ['jan1', 'iso'] as const, d.firstWeek),
@@ -148,6 +149,7 @@ export function appearanceVars(a: Appearance): Record<string, string> {
     '--desk-btn': solid(a.titleButton),
     '--desk-holiday-ink': solid(a.holidayInk),
     '--desk-lunar-ink': solid(a.lunarInk),
+    '--desk-term-ink': solid(a.termInk),
     '--desk-day-pct': `${Math.round(Math.max(0.5, alpha) * 100)}%`,
   };
 }

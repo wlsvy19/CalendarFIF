@@ -110,8 +110,9 @@ function drawCell(c: Ctx, cell: GridCell, x: number, y: number, w: number, h: nu
   if (!cell.inMonth) return;
 
   // 음력: 머리 줄의 오른쪽. 오늘 칸은 숫자 상자가 넓어서 자리가 모자라면 글자를 6.5까지 줄인다. 그래도 숫자와 겹치면 적지 않는다.
-  // 절기나 복날이면 음력 대신 그 이름을 적는다(둘이 겹치면 절기).
-  const lunar = c.lunar ? seasonNames(cell.dateKey)[0] ?? lunarShort(cell.dateKey) : '';
+  // 절기나 복날이면 음력 대신 그 이름을 초록으로 적는다(둘이 겹치면 절기).
+  const season = c.lunar ? seasonNames(cell.dateKey)[0] ?? '' : '';
+  const lunar = season !== '' ? season : c.lunar ? lunarShort(cell.dateKey) : '';
   if (lunar !== '') {
     const isToday = cell.dateKey === today;
     // 오늘 칸의 숫자 상자는 안쪽 여백보다 1만큼 앞에서 시작하므로, 그만큼이 숫자와 음력 사이의 틈이 된다.
@@ -120,7 +121,7 @@ function drawCell(c: Ctx, cell: GridCell, x: number, y: number, w: number, h: nu
     let lunarSize = Math.max(MIN_FONT, 7.5 * s);
     if (isToday && units * lunarSize > room) lunarSize = Math.max(TIGHT_MIN_FONT, room / units);
     if (units * lunarSize <= room + 1e-9) {
-      draws.push({ kind: 'text', x: r2(x + pad), y: r2(y + pad + 2.5 * s), w: r2(innerW), h: r2(10 * s), text: lunar, size: r2(lunarSize), weight: 'regular', color: p.muted, align: 'right' });
+      draws.push({ kind: 'text', x: r2(x + pad), y: r2(y + pad + 2.5 * s), w: r2(innerW), h: r2(10 * s), text: lunar, size: r2(lunarSize), weight: 'regular', color: season !== '' ? p.term : p.muted, align: 'right' });
     }
   }
   // 공휴일 이름은 메모 한 줄의 자리를 쓴다.

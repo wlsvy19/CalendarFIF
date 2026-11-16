@@ -11,11 +11,12 @@ export type Palette = {
   onAccent: string;
   sun: string;
   sat: string;
+  term: string; // 절기와 복날의 이름(초록)
 };
 
 export const PALETTES: Record<Theme, Palette> = {
-  light: { surface: '#FFFFFF', surface2: '#F3F5F8', ink: '#151B26', muted: '#5A6575', hairline: '#DCE1E8', accent: '#2550D0', onAccent: '#FFFFFF', sun: '#D4352C', sat: '#2A5FD6' },
-  dark: { surface: '#161B22', surface2: '#1D232C', ink: '#ECEFF4', muted: '#9BA6B5', hairline: '#2A313B', accent: '#8DAEFF', onAccent: '#0D1116', sun: '#FF7F76', sat: '#86ABFF' },
+  light: { surface: '#FFFFFF', surface2: '#F3F5F8', ink: '#151B26', muted: '#5A6575', hairline: '#DCE1E8', accent: '#2550D0', onAccent: '#FFFFFF', sun: '#D4352C', sat: '#2A5FD6', term: '#188038' },
+  dark: { surface: '#161B22', surface2: '#1D232C', ink: '#ECEFF4', muted: '#9BA6B5', hairline: '#2A313B', accent: '#8DAEFF', onAccent: '#0D1116', sun: '#FF7F76', sat: '#86ABFF', term: '#5FD37A' },
 };
 
 const channels = (hex: string): number[] => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));

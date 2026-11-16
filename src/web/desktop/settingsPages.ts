@@ -300,7 +300,7 @@ export function mountDesktopSettings(
   };
   fontRow('캘린더 글꼴(날짜·요일) 색과 크기', 'calendarFont', 11, 20);
   fontRow('편집 내용의 글꼴 크기 및 색상', 'memoFont', 11, 22);
-  const plainColor = (label: string, key: 'calendarBg' | 'restBg' | 'todayBorder' | 'titleButton' | 'holidayInk' | 'lunarInk'): void =>
+  const plainColor = (label: string, key: 'calendarBg' | 'restBg' | 'todayBorder' | 'titleButton' | 'holidayInk' | 'lunarInk' | 'termInk'): void =>
     colorRow(label, () => cur[key], (hex) => set(key, hex), NONE_COLOR.has(key));
   plainColor('캘린더 배경', 'calendarBg');
   plainColor('휴일 배경색', 'restBg');
@@ -308,6 +308,7 @@ export function mountDesktopSettings(
   plainColor('제목 표시줄 버튼 색상', 'titleButton');
   plainColor('휴일 텍스트 색상', 'holidayInk');
   plainColor('음력 텍스트 색상', 'lunarInk');
+  plainColor('절기 텍스트 색상', 'termInk');
   const transparency = add('font', makeRow('투명도'));
   const transparencyValue = el('span', 'srow-value', `${cur.transparency}%`);
   transparency.ctl.append(

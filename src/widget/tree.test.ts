@@ -92,7 +92,7 @@ describe('buildTree large', () => {
   it('절기와 복날이면 음력 대신 그 이름을 적는다', () => {
     const head = (tree: Tree, day: number): Node[] => (cellOf(tree, day).children[0] as StackNode).children;
     // 2026년 11월 7일은 입동, 22일은 소설이다. 8일은 음력 9월 29일이다.
-    expect([head(t, 7)[2], head(t, 22)[2], head(t, 8)[2]]).toMatchObject([{ kind: 'text', text: '입동', size: 7.5, color: pair('muted') }, { text: '소설' }, { text: '9.29' }]);
+    expect([head(t, 7)[2], head(t, 22)[2], head(t, 8)[2]]).toMatchObject([{ kind: 'text', text: '입동', size: 7.5, color: pair('term') }, { text: '소설', color: pair('term') }, { text: '9.29', color: pair('muted') }]);
   });
 
   it('공휴일과 대체공휴일은 숫자가 빨갛고 이름 한 줄을 적는다. 그 칸은 메모를 한 줄 덜 넣는다', () => {

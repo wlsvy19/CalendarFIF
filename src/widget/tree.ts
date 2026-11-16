@@ -22,11 +22,11 @@ export type Tree = { background: Dyn; padding: Pad; spacing: number; children: N
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const MONTH_OPTS = { layout: 'month', maxRows: 6, pastWeeks: 0, weekStart: 0, firstWeek: 'jan1' } as const;
 
-type Colors = { surface: Dyn; ink: Dyn; muted: Dyn; hairline: Dyn; accent: Dyn; onAccent: Dyn; sun: Dyn; sat: Dyn };
+type Colors = { surface: Dyn; ink: Dyn; muted: Dyn; hairline: Dyn; accent: Dyn; onAccent: Dyn; sun: Dyn; sat: Dyn; term: Dyn };
 const pair = (key: keyof Palette): Dyn => ({ light: PALETTES.light[key], dark: PALETTES.dark[key] });
 const C: Colors = {
   surface: pair('surface'), ink: pair('ink'), muted: pair('muted'), hairline: pair('hairline'),
-  accent: pair('accent'), onAccent: pair('onAccent'), sun: pair('sun'), sat: pair('sat'),
+  accent: pair('accent'), onAccent: pair('onAccent'), sun: pair('sun'), sat: pair('sat'), term: pair('term'),
 };
 
 const dowColor = (dow: number): Dyn => (dow === 0 ? C.sun : dow === 6 ? C.sat : C.ink);
@@ -72,8 +72,9 @@ function dayCell(cell: GridCell, day: DayValue | undefined, today: string, lay: 
   const numberColor = cell.dateKey === today ? C.onAccent : hasColor ? C.ink : holiday !== '' ? C.sun : dowColor(cell.dow);
   const numberText = text(String(cell.dayOfMonth), 11, 'semibold', numberColor, 1, cell.inMonth ? {} : { opacity: 0.4 });
   // 머리 줄: 숫자는 앞쪽, 음력은 뒤쪽 가장자리. 이번 달의 칸에만 음력과 공휴일 이름을 적는다.
-  // 절기나 복날이면 음력 대신 그 이름을 적는다(둘이 겹치면 절기).
-  const lunar = lay.lunar && cell.inMonth ? seasonNames(cell.dateKey)[0] ?? lunarShort(cell.dateKey) : '';
+  // 절기나 복날이면 음력 대신 그 이름을 초록으로 적는다(둘이 겹치면 절기).
+  const season = lay.lunar && cell.inMonth ? seasonNames(cell.dateKey)[0] ?? '' : '';
+  const lunar = season !== '' ? season : lay.lunar && cell.inMonth ? lunarShort(cell.dateKey) : '';
   // 오늘 표시: 음력을 같이 적는 두 자리 날은 옆 여백을 줄인다. 칸의 안쪽 폭이 40pt쯤이라 숫자 상자가 넓으면 음력이 잘린다.
   const pillPad = lunar !== '' && cell.dayOfMonth >= 10 ? 2.5 : 4;
   const number: Node = cell.dateKey === today
@@ -81,7 +82,7 @@ function dayCell(cell: GridCell, day: DayValue | undefined, today: string, lay: 
     : numberText;
   const head: Node[] = [number, flex()];
   // 폭이 모자라면 iOS가 글자를 이만큼까지 줄인다. 그래도 안 들어가면 "…"로 자른다.
-  if (lunar !== '') head.push(text(lunar, 7.5, 'regular', C.muted, 1, { minScale: 0.7 }));
+  if (lunar !== '') head.push(text(lunar, 7.5, 'regular', season !== '' ? C.term : C.muted, 1, { minScale: 0.7 }));
   const children: Node[] = [{ kind: 'stack', dir: 'h', align: 'center', children: head }];
   // 공휴일 이름은 메모 한 줄의 자리를 쓴다.
   let capacity = lay.capacity;

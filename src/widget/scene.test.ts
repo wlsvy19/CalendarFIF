@@ -236,6 +236,8 @@ describe('holidays and lunar dates in the grid', () => {
   const p = PALETTES.light;
   const number = (scene: Scene, day: number): Text => texts(scene).find((t) => t.weight === 'semibold' && t.text === String(day) && t.alpha === undefined)!;
   const lunar = (scene: Scene): Text[] => texts(scene).filter((t) => t.align === 'right' && t.color === p.muted);
+  /** 음력 자리에 초록으로 적은 절기와 복날의 이름. */
+  const terms = (scene: Scene): Text[] => texts(scene).filter((t) => t.align === 'right' && t.color === p.term);
 
   it('colours holidays and substitute holidays red, whatever the weekday', () => {
     expect([number(s, 3).color, number(s, 5).color, number(s, 6).color, number(s, 4).color]).toEqual([p.sun, p.sun, p.ink, p.sun]);
@@ -259,15 +261,17 @@ describe('holidays and lunar dates in the grid', () => {
   });
   it('writes the lunar date at the right of the number row, for days of this month only', () => {
     expect(lunar(s).map((t) => t.text)).toEqual(expect.arrayContaining(['8.23', '8.25', '9.1']));
-    expect(lunar(s)).toHaveLength(31);
+    // 31일 가운데 8일(한로)과 23일(상강)은 음력 대신 이름이 들어간다.
+    expect(lunar(s)).toHaveLength(29);
     for (const t of lunar(s)) expect(t.size).toBeGreaterThanOrEqual(8);
     expect(lunar(october({ lunar: false }))).toEqual([]);
   });
   it('writes the solar term or dog day name in place of the lunar date', () => {
     // 2026년 10월 8일(음력 8.28)은 한로, 23일은 상강이다.
-    expect(lunar(s).map((t) => t.text)).toEqual(expect.arrayContaining(['한로', '상강']));
+    expect(terms(s).map((t) => t.text)).toEqual(['한로', '상강']);
     expect(lunar(s).some((t) => t.text === '8.28')).toBe(false);
-    for (const t of lunar(s).filter((x) => x.text === '한로' || x.text === '상강')) expect(t.size).toBeGreaterThanOrEqual(8);
+    for (const t of terms(s)) expect([t.size >= 8, t.weight]).toEqual([true, 'regular']);
+    expect(terms(october({ lunar: false }))).toEqual([]);
     // 작은 위젯의 날짜 아래 줄에는 음력 뒤에 적는다(2026-11-07은 입동). 음력을 끄면 같이 적지 않는다.
     const small = (over: Partial<Parameters<typeof buildScene>[0]> = {}): Scene =>
       buildScene({ family: 'small', theme: 'light', size: sizeOf('small'), today: '2026-11-07', month: nov(), offline: false, ...over });
@@ -284,7 +288,7 @@ describe('holidays and lunar dates in the grid', () => {
     // 오늘이 두 자리 날이고 음력이 윤달의 두 자리 날이면 들어가지 않아 적지 않는다(2025-08-10은 음력 윤6월 17일).
     // 그 전날(9일)은 말복이라 음력 대신 이름이 들어가 있으므로 8일(윤6월 15일)과 견준다.
     const leap = lunar(narrow('2025-08-10', '2025-08'));
-    expect([leap.some((t) => t.text === '윤6.17'), leap.some((t) => t.text === '윤6.15'), leap.some((t) => t.text === '말복')]).toEqual([false, true, true]);
+    expect([leap.some((t) => t.text === '윤6.17'), leap.some((t) => t.text === '윤6.15'), terms(narrow('2025-08-10', '2025-08')).some((t) => t.text === '말복')]).toEqual([false, true, true]);
   });
 });
 
