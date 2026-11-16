@@ -1145,3 +1145,67 @@ describe('alarmReport의 특별한 경우', () => {
     expect(stuck).not.toContain('알림 허용');
   });
 });
+
+describe('자동 업데이트를 이어 붙인 run', () => {
+  const versioned: Config = { ...cfg, version: '0.9.0 (2026-11-16)' };
+  const NEWER = '0.9.1 (2026-11-20)';
+  // 지어낸 새 위젯 코드: 받은 버전과 붙여 넣은 버전을 적은 위젯을 둔다.
+  const libCode = `module.exports = { version: ${JSON.stringify(NEWER)}, run: async (host, cfg) => { const w = new host.ListWidget(); w.addText("받아 둔 " + cfg.version + " / " + cfg.baseVersion); host.Script.setWidget(w); } };\n// CalendarFIF widget code end\n`;
+  const cached = () => ({
+    '/docs/calendarfif-widget-lib.js': libCode,
+    '/docs/calendarfif-update.json': JSON.stringify({ version: NEWER, checkedAt: now().getTime(), triedAt: now().getTime(), unfinished: {}, skipUntil: 0, note: '', libNote: '' }),
+  });
+
+  it('받아 둔 새 코드가 있으면 그것이 위젯을 두고, 붙여 넣은 것은 그리지 않는다', async () => {
+    const host = makeNative({ keychain: loggedIn, files: cached() });
+    await run(host, versioned, now);
+    expect(host.state.setWidgets).toHaveLength(1);
+    expect(textsOf(lastWidget(host))).toEqual([`받아 둔 ${NEWER} / 0.9.0 (2026-11-16)`]);
+    expect(host.state.requests).toEqual([]); // 방금 확인했으므로 묻지 않고, 달도 읽지 않는다(새 코드가 할 일이다)
+  });
+
+  it('받아 둔 것이 없으면 붙여 넣은 것으로 그리고, 그 뒤에 새 버전을 묻는다', async () => {
+    const host = makeNative({ keychain: loggedIn });
+    await run(host, versioned, now);
+    expect(host.state.setWidgets).toHaveLength(1);
+    expect(textsOf(lastWidget(host))).not.toContain(`받아 둔 ${NEWER} / 0.9.0 (2026-11-16)`);
+    const urls = host.state.requests.map((r) => r.url);
+    expect(urls.at(-1)).toBe(`https://example.test/widget/version.json?t=${now().getTime()}`);
+    expect(urls.findIndex((u) => u.includes('/months/'))).toBeLessThan(urls.length - 1); // 달을 읽어 그린 뒤에 묻는다
+  });
+
+  it('버전을 모르는 스크립트는 업데이트를 묻지 않는다', async () => {
+    const host = makeNative({ keychain: loggedIn, files: cached() });
+    await run(host, cfg, now);
+    expect(host.state.requests.some((r) => r.url.includes('/widget/'))).toBe(false);
+    expect(textsOf(lastWidget(host))).not.toContain(`받아 둔 ${NEWER} / undefined`);
+  });
+
+  it('넘겨받은 실행이 오류를 내면 오류 위젯을 두지 않고 던진다(붙여 넣은 스크립트가 자기 것으로 그린다)', async () => {
+    const host = makeNative({ keychain: loggedIn });
+    host.Keychain.get = () => { throw new Error('깨짐'); };
+    await expect(run(host, { ...versioned, handedOver: true, baseVersion: '0.8.3 (2026-11-16)' }, now)).rejects.toThrow('깨짐');
+    expect(host.state.setWidgets).toEqual([]);
+    // 붙여 넣은 스크립트 자신은 전처럼 오류 위젯을 둔다.
+    const base = makeNative({ keychain: loggedIn });
+    base.Keychain.get = () => { throw new Error('깨짐'); };
+    await run(base, versioned, now);
+    expect(textsOf(lastWidget(base))).toEqual(['오류', '깨짐', '(0.9.0 (2026-11-16))']);
+  });
+
+  it('받아 둔 새 코드가 오류를 내면 붙여 넣은 것으로 그린다', async () => {
+    const failing = `module.exports = { version: ${JSON.stringify(NEWER)}, run: async () => { throw new Error("새 버전의 잘못"); } };\n// CalendarFIF widget code end\n`;
+    const host = makeNative({ keychain: loggedIn, files: { ...cached(), '/docs/calendarfif-widget-lib.js': failing } });
+    await run(host, versioned, now);
+    expect(host.state.setWidgets).toHaveLength(1);
+    expect(textsOf(lastWidget(host))).not.toContain('오류');
+    expect(host.state.requests.some((r) => r.url.includes('/months/'))).toBe(true); // 붙여 넣은 것이 달을 읽어 그렸다
+  });
+
+  it('Scriptable 앱의 메뉴에 스스로 받는다는 줄을 적는다', async () => {
+    const host = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }] });
+    await run(host, versioned, now);
+    expect(host.state.alerts[0].title).toBe('CalendarFIF 위젯 0.9.0 (2026-11-16) · 알림 0개 예약됨');
+    expect(host.state.alerts[0].message.split('\n\n')).toEqual(['앞으로 7일 안에 울릴 알림이 없습니다.', expect.stringContaining('새 버전이 나오면 스스로 받습니다.')]);
+  });
+});

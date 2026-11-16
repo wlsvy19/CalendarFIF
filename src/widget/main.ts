@@ -12,6 +12,7 @@ import { buildScene, messageScene, type MonthData, type Scene } from './scene';
 import { widgetSize, type Family, type Size } from './sizes';
 import type { Theme } from './theme';
 import { buildTree, messageTree, type Tree } from './tree';
+import { runWithUpdate, updateLine } from './update';
 
 const REFRESH_KEY = 'calendarfif.refreshToken';
 const UID_KEY = 'calendarfif.uid';
@@ -512,7 +513,7 @@ async function runInApp(host: Host, cfg: Config, now: () => Date): Promise<void>
   const base = cfg.version ? `CalendarFIF 위젯 ${cfg.version}` : 'CalendarFIF 위젯';
   const count = verifiedCount(result.scheduled, status);
   menu.title = result.source === 'push' ? `${base} · 푸시 알림 사용 중` : count === null ? base : `${base} · 알림 ${count}개 예약됨`;
-  menu.message = alarmReport(result, status);
+  menu.message = [alarmReport(result, status), updateLine(host, cfg)].filter((t) => t !== '').join('\n\n');
   menu.addAction('미리 보기');
   menu.addAction('시험 알림 (1분 뒤)');
   menu.addAction('로그아웃');
@@ -596,7 +597,12 @@ async function deliverError(host: Host, cfg: Config, now: () => Date, error: unk
   }
 }
 
+/** 위젯의 시작. 받아 둔 새 코드가 있으면 그것에 넘기고(update.ts), 없으면 이 스크립트의 것으로 돈다. */
 export async function run(host: Host, cfg: Config, now: () => Date = () => new Date()): Promise<void> {
+  await runWithUpdate(host, cfg, now, () => runSelf(host, cfg, now));
+}
+
+async function runSelf(host: Host, cfg: Config, now: () => Date): Promise<void> {
   const inApp = host.config.runsInApp;
   try {
     if (inApp) {
@@ -607,6 +613,8 @@ export async function run(host: Host, cfg: Config, now: () => Date = () => new D
       host.Script.setWidget(toWidget(host, env, await load(host, cfg, env, at), cfg.appUrl, at));
     }
   } catch (e) {
+    // 넘겨받은 실행이면 오류 위젯을 두지 않고 붙여 넣은 스크립트에 돌려준다. 그쪽이 자기 것으로 그리고 고친 버전을 찾는다(update.ts).
+    if (cfg.handedOver) throw e;
     await deliverError(host, cfg, now, e);
   }
 }

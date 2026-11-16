@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FAKE_HOST_MARKER, makeFakeHost } from '../src/widget/fakeHost';
-import { bundleProblems, finishBundle, startProblems, versionText } from './build-widget';
+import { LIB_END } from '../src/widget/update';
+import { bundleProblems, escapeProblems, finishBundle, finishLib, libProblems, startProblems, versionFile, versionText } from './build-widget';
 
 const iife = 'var CalendarFIFWidget = (function(exports) {\n\texports.run = async () => {};\n\treturn exports;\n})({});';
 const VERSION = '0.4.0 (2026-11-14)';
@@ -21,7 +22,7 @@ describe('finishBundle', () => {
     expect(script).toContain(iife);
     const lines = script.trimEnd().split('\n');
     expect(lines.at(-1)).toBe('Script.complete();');
-    expect(lines.at(-2)).toBe('await CalendarFIFWidget.run({ Keychain, Request, Alert, DrawContext, ListWidget, FileManager, Script, Notification, config, args, Device, Color, Font, Size, Rect, Point, Path, Timer }, { projectId: "__PROJECT_ID__", apiKey: "__API_KEY__", appUrl: "__APP_URL__", holidayUrl: "__HOLIDAY_URL__", version: "0.4.0 (2026-11-14)" });');
+    expect(lines.at(-2)).toBe('await CalendarFIFWidget.run({ Keychain, Request, Alert, DrawContext, ListWidget, FileManager, Script, Notification, config, args, Device, Color, Font, Size, Rect, Point, Path, Timer, importModule: typeof importModule === "function" ? importModule : undefined }, { projectId: "__PROJECT_ID__", apiKey: "__API_KEY__", appUrl: "__APP_URL__", holidayUrl: "__HOLIDAY_URL__", version: "0.4.0 (2026-11-14)" });');
   });
 
   it('버전은 JSON 글자열로 들어가 따옴표가 있어도 글이 깨지지 않는다', () => {
@@ -90,7 +91,8 @@ describe('bundleProblems', () => {
 describe('시작 줄과 Host', () => {
   it('시작 줄이 넘기는 이름은 가짜 호스트의 키(state 빼고)와 같다', () => {
     const line = finishBundle(iife, VERSION).split('\n').find((l) => l.startsWith('await CalendarFIFWidget.run('))!;
-    const names = /^await CalendarFIFWidget\.run\(\{ ([^}]*) \}/.exec(line)![1].split(', ');
+    // importModule은 있는지 보고 넘기므로 '이름: 값' 꼴이다. 이름만 본다.
+    const names = /^await CalendarFIFWidget\.run\(\{ ([^}]*) \}/.exec(line)![1].split(', ').map((n) => n.split(':')[0]);
     expect(names).toHaveLength(new Set(names).size);
     expect([...names].sort()).toEqual(Object.keys(makeFakeHost()).filter((k) => k !== 'state').sort());
   });
@@ -169,5 +171,60 @@ describe('startProblems: 묶은 파일을 가짜 Scriptable에서 한 번 실행
 
   it('run이 던지면', async () => {
     expect(await problems(finishBundle(good.replace('const w = ', 'throw new Error("시작 시험 오류"); const w = '), VERSION))).toContain('시작 시험 오류');
+  });
+});
+
+describe('받아 쓰는 위젯 코드(자동 업데이트)', () => {
+  const bundle = (body: string[]): string =>
+    ['var CalendarFIFWidget = (function(exports) {', '\texports.run = async (host, cfg) => {', ...body.map((l) => `\t\t${l}`), '\t};', '\treturn exports;', '})({});'].join('\n');
+  const good = bundle(['const w = new host.ListWidget();', 'w.addText("로그인이 필요합니다");', 'host.Script.setWidget(w);']);
+  const problems = async (lib: string): Promise<string> => (await libProblems(lib, VERSION)).join('\n');
+
+  it('머리말, 묶은 글, module.exports, 끝 줄의 차례다. 설정값의 자리표시자와 시작 줄은 없다', () => {
+    const lib = finishLib(good, VERSION);
+    const lines = lib.trimEnd().split('\n');
+    expect(lines[0]).toBe('// CalendarFIF widget code 0.4.0 (2026-11-14). The pasted widget script downloads this file by itself. Do not paste it into Scriptable.');
+    expect(lines.slice(-2)).toEqual(['module.exports = { version: "0.4.0 (2026-11-14)", run: CalendarFIFWidget.run };', LIB_END]);
+    // 한글은 \uXXXX로 적혀 ASCII 글자만 남는다. 그래서 글자 수와 바이트 수가 같다.
+    expect(lib).toContain(good.replace('로그인이 필요합니다', '\\ub85c\\uadf8\\uc778\\uc774 \\ud544\\uc694\\ud569\\ub2c8\\ub2e4'));
+    expect([/[^\x00-\x7f]/.test(lib), Buffer.byteLength(lib, 'utf8') === lib.length, LIB_END]).toEqual([false, true, '// CalendarFIF widget code end']);
+    expect([lib.includes('__APP_URL__'), lib.includes('Script.complete()'), lib.includes('await CalendarFIFWidget.run(')]).toEqual([false, false, false]);
+  });
+
+  it('버전 파일에는 버전과 위젯 코드의 글자 수가 있다', () => {
+    const lib = finishLib(good, VERSION);
+    expect(JSON.parse(versionFile(lib, VERSION))).toEqual({ version: VERSION, chars: lib.length });
+  });
+
+  it('잘 만든 파일은 문제가 없다', async () => {
+    expect(await libProblems(finishLib(good, VERSION), VERSION)).toEqual([]);
+  });
+
+  it('자리표시자, 시험용 값, 끊긴 파일, 읽히지 않는 글, 다른 버전을 가려낸다', async () => {
+    expect(await problems(finishLib(good.replace('"로그인이 필요합니다"', '"로그인이 필요합니다" + "__API_KEY__"'), VERSION))).toContain('자리표시자 __API_KEY__가 들어 있다');
+    expect(await problems(finishLib(`${good}\n// demo-calfif`, VERSION))).toContain('시험용 값 demo-calfif이 들어 있다');
+    expect(await problems(finishLib(good, VERSION).replace(LIB_END, ''))).toContain('끝 줄이 없다');
+    expect(await problems(finishLib('var CalendarFIFWidget = (', VERSION))).toContain('읽다가 오류가 났다');
+    expect(await problems(finishLib(good, '0.4.1 (2026-11-15)'))).toContain('module.exports에 그 버전과 run이 없다');
+  });
+
+  it('ASCII로 바꾸면 뜻이 달라지는 글을 가려낸다: 역슬래시 뒤의 한글, 줄 나눔 글자, String.raw', () => {
+    expect(escapeProblems(good)).toEqual([]);
+    expect(escapeProblems('const a = "\\가";')).toEqual(['역슬래시 바로 뒤에 ASCII가 아닌 글자가 있다']);
+    expect(escapeProblems('// 주석\u2028b')).toEqual(['줄 나눔 글자 U+2028이나 U+2029가 있다']);
+    expect(escapeProblems('const b = String.raw`가`;')).toEqual(['String.raw를 쓴다']);
+  });
+
+  it('ASCII가 아닌 글자나 CR이 든 파일, Script.complete()를 부르는 코드는 문제다', async () => {
+    expect(await problems(`${finishLib(good, VERSION)}// 한글\n${LIB_END}\n`)).toContain('ASCII가 아닌 글자가 있다');
+    expect(await problems(finishLib(good, VERSION).replace(/\n/g, '\r\n'))).toContain('CR 글자가 있다');
+    expect(await problems(finishLib(good.replace('host.Script.setWidget(w);', 'host.Script.setWidget(w); host.Script.complete();'), VERSION))).toContain('넘겨받은 실행이 Script.complete()를 불렀다');
+  });
+
+  it('넘겨받아 돌 때 위젯을 두지 않거나, 로그인 안내가 없거나, 네트워크를 쓰면 문제다', async () => {
+    expect(await problems(finishLib(good.replace('host.Script.setWidget(w);', ''), VERSION))).toContain('위젯을 0번 두었다');
+    expect(await problems(finishLib(good.replace('로그인이 필요합니다', '오류'), VERSION))).toContain('"로그인이 필요합니다"가 없다');
+    const fetching = bundle(['try { await new host.Request("https://example.invalid/x").loadString(); } catch {}', 'const w = new host.ListWidget();', 'w.addText("로그인이 필요합니다");', 'host.Script.setWidget(w);']);
+    expect(await problems(finishLib(fetching, VERSION))).toContain('넘겨받은 실행이 네트워크를 썼다');
   });
 });

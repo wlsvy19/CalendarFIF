@@ -72,6 +72,7 @@ export type Host = {
   Request: new (url: string) => {
     method: string; headers: Record<string, string>; body: string; timeoutInterval: number;
     loadJSON(): Promise<unknown>;
+    loadString(): Promise<string>;
     response: { statusCode?: number } | null;
   };
   Alert: new () => {
@@ -99,4 +100,6 @@ export type Host = {
   Rect: new (x: number, y: number, width: number, height: number) => unknown;
   Point: new (x: number, y: number) => unknown;
   Path: new () => { move(p: unknown): void; addLine(p: unknown): void; addRoundedRect(rect: unknown, cornerWidth: number, cornerHeight: number): void };
+  /** Scriptable의 importModule. 받아 둔 위젯 코드(update.ts)를 읽을 때 쓴다. 이름으로 찾아 module.exports를 준다. */
+  importModule?: (name: string) => unknown;
 };

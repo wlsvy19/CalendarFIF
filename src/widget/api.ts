@@ -12,6 +12,10 @@ export type Config = {
   firestoreBase?: string; // 기본 'https://firestore.googleapis.com'
   /** 스크립트의 버전과 만든 날짜(예: '0.4.0 (2026-11-14)'). 앱의 메뉴 제목과 오류 줄에 보인다. */
   version?: string;
+  /** 붙여 넣은 스크립트가 받아 둔 새 코드에 실행을 넘겼다(update.ts). 넘겨받은 쪽은 다시 넘기지 않는다. */
+  handedOver?: boolean;
+  /** 넘겨받았을 때, 붙여 넣은 스크립트의 버전. */
+  baseVersion?: string;
   /** 공휴일 자료 파일(holidays.json)의 주소. 비었으면 받지 않고 계산한 공휴일(과 받아 둔 것)만 쓴다. */
   holidayUrl?: string;
 };

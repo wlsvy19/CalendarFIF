@@ -34,6 +34,8 @@ export type FakeOptions = {
   dark?: boolean;
   keychain?: Record<string, string>;
   files?: Record<string, string>;
+  /** true면 importModule이 오류를 낸다(Scriptable이 받아 둔 코드를 못 찾는 경우). */
+  failImport?: boolean;
   /** 처음 이만큼의 DrawContext는 만들 때 오류를 낸다. */
   failDrawing?: number;
   /** 처음 이만큼의 ListWidget은 만들 때 오류를 낸다. */
@@ -100,6 +102,9 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
     response: { statusCode?: number } | null = null;
     constructor(public url: string) {}
     async loadJSON(): Promise<unknown> {
+      return JSON.parse(await this.loadString()) as unknown;
+    }
+    async loadString(): Promise<string> {
       const req: FakeRequest = { url: this.url, method: this.method, headers: { ...this.headers }, body: this.body, timeoutInterval: this.timeoutInterval };
       state.requests.push(req);
       let status: number | undefined;
@@ -114,7 +119,7 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
         text = await res.text();
       }
       this.response = { statusCode: status };
-      return JSON.parse(text) as unknown;
+      return text;
     }
   }
 
@@ -311,6 +316,15 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
       },
     },
     FileManager: { local: () => local },
+    // Scriptable의 importModule을 흉내 낸다: 문서 폴더의 '<이름>.js'를 module을 받는 함수로 돌려 exports를 준다.
+    importModule: (name: string) => {
+      if (opts.failImport) throw new Error('모듈을 찾지 못했다');
+      const code = state.files.get(`${DOCS}/${name}.js`);
+      if (code === undefined) throw new Error('모듈을 찾지 못했다');
+      const module: { exports: unknown } = { exports: {} };
+      new Function('module', code)(module);
+      return module.exports;
+    },
     Script: { setWidget: (w) => { state.setWidgets.push(w); }, complete: () => { state.completed += 1; } },
     config: { runsInWidget: !opts.runsInApp, runsInApp: opts.runsInApp ?? false, widgetFamily: opts.widgetFamily ?? null },
     args: { widgetParameter: opts.widgetParameter ?? null, queryParameters: opts.queryParameters ?? {} },

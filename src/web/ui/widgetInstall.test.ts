@@ -120,6 +120,7 @@ it('설치 방법 여섯 단계가 순서대로 있다', () => {
   expect(steps[5]).toBe('추가한 위젯을 길게 눌러 "위젯 편집"에서 Script를 CalendarFIF로 고릅니다.');
   const notes = [...m.el.querySelectorAll('details > p.settings-note')].map((p) => p.textContent);
   expect(notes).toEqual([
+    '한 번 붙여 넣으면 그 뒤로는 위젯이 스스로 새 버전을 받습니다(세 시간에 한 번 확인합니다). 바로 받으려면 Scriptable에서 CalendarFIF를 한 번 실행합니다. 0.9.0보다 앞의 스크립트를 쓰고 있다면 이번 한 번만 다시 붙여 넣으세요.',
     '위젯은 아이폰이 정한 때(보통 15~60분마다)에 새로 그려집니다. 위젯을 누르면 Scriptable을 거쳐 Safari에서 달력이 열립니다(iOS에서는 위젯이 홈 화면 앱을 바로 열 수 없습니다). 주소창 없이 보려면 홈 화면의 CalendarFIF 아이콘을 누르세요.',
     '오류가 나오거나, 비어 보이거나, 모양이 어긋나 보이면 "위젯 편집"의 Parameter에 image dark 또는 image light를 적으면 그림 방식으로 그립니다.',
   ]);
