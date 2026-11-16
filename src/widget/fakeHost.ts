@@ -12,7 +12,7 @@ export type FakeContextRecord = { size: unknown; opaque: boolean; respectScreenS
 export type FakeNode =
   | { kind: 'text'; text: string; font?: unknown; textColor?: unknown; textOpacity?: number; lineLimit?: number; minimumScaleFactor?: number }
   | { kind: 'spacer'; length: number | null }
-  | { kind: 'stack'; layout: 'h' | 'v' | null; spacing?: number; padding?: number[]; backgroundColor?: unknown; cornerRadius?: number; align?: 'top' | 'center' | 'bottom'; children: FakeNode[] };
+  | { kind: 'stack'; layout: 'h' | 'v' | null; spacing?: number; padding?: number[]; backgroundColor?: unknown; cornerRadius?: number; size?: unknown; align?: 'top' | 'center' | 'bottom'; children: FakeNode[] };
 export type FakeWidgetRecord = { props: Record<string, unknown>; padding: number[] | null; presented: 'small' | 'medium' | 'large' | null; children: FakeNode[] };
 
 export type FakeOptions = {
@@ -247,6 +247,8 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
     set backgroundColor(v: unknown) { this.rec.backgroundColor = v; }
     get cornerRadius(): number { return this.rec.cornerRadius ?? 0; }
     set cornerRadius(v: number) { this.rec.cornerRadius = v; }
+    get size(): unknown { return this.rec.size; }
+    set size(v: unknown) { this.rec.size = v; }
     setPadding(t: number, l: number, b: number, r: number): void { this.rec.padding = [t, l, b, r]; }
     layoutVertically(): void { this.rec.layout = 'v'; }
     layoutHorizontally(): void { this.rec.layout = 'h'; }

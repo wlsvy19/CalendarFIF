@@ -34,6 +34,8 @@ export type WidgetStackLike = WidgetContainerLike & {
   spacing: number;
   backgroundColor: unknown;
   cornerRadius: number;
+  /** 고정 크기(Scriptable의 Size). */
+  size: unknown;
   setPadding(top: number, leading: number, bottom: number, trailing: number): void;
   layoutVertically(): void;
   layoutHorizontally(): void;

@@ -31,6 +31,7 @@ function addNodes(host: Host, parent: WidgetContainerLike, nodes: Node[], force:
       if (node.padding) s.setPadding(...node.padding);
       if (node.background) s.backgroundColor = dyn(node.background);
       if (node.radius !== undefined) s.cornerRadius = node.radius;
+      if (node.size) s.size = new host.Size(node.size[0], node.size[1]);
       if (node.align === 'top') s.topAlignContent();
       else if (node.align === 'center') s.centerAlignContent();
       else if (node.align === 'bottom') s.bottomAlignContent();

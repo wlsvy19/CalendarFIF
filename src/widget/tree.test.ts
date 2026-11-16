@@ -116,13 +116,16 @@ describe('buildTree large', () => {
   it('오늘 칸: 숫자가 강조색 상자 안에 있고 다른 칸에는 없다', () => {
     const pills = stacks(t).filter((s) => s.background && s.background.light === PALETTES.light.accent);
     expect(pills).toHaveLength(1);
-    // 음력을 같이 적는 두 자리 날은 옆 여백이 2.5다(음력이 들어갈 자리를 남긴다). 한 자리 날과 음력을 끈 때는 4다.
-    expect(pills[0]).toMatchObject({ radius: 7.5, padding: [1, 2.5, 1, 2.5], dir: 'h' });
+    // 크기를 정한 상자다(정하지 않으면 iOS가 머리 줄의 폭을 나눌 때 날짜가 "…"로 잘린다). 두 자리 날은 19×15, 한 자리 날은 15×15 동그라미.
+    expect(pills[0]).toMatchObject({ radius: 7.5, size: [19, 15], dir: 'h', align: 'center' });
+    expect(pills[0].padding).toBeUndefined();
     const pillOf = (tree: Tree): StackNode => stacks(tree).find((s) => s.background && s.background.light === PALETTES.light.accent)!;
-    expect(pillOf(build('large', month({}), '2026-11-05')).padding).toEqual([1, 4, 1, 4]);
-    expect(pillOf(buildTree({ family: 'large', size: widgetSize(SCREEN, 'large'), today: TODAY, month: month({}), offline: false, lunar: false })).padding).toEqual([1, 4, 1, 4]);
-    expect(pills[0].children).toHaveLength(1);
-    expect(pills[0].children[0]).toMatchObject({ kind: 'text', text: '13', color: pair('onAccent') });
+    expect(pillOf(build('large', month({}), '2026-11-05')).size).toEqual([15, 15]);
+    expect(pillOf(buildTree({ family: 'large', size: widgetSize(SCREEN, 'large'), today: TODAY, month: month({}), offline: false, lunar: false })).size).toEqual([19, 15]);
+    // 숫자는 가운데에 놓이고, 그래도 모자라면 "…" 대신 글자를 줄인다.
+    expect(pills[0].children).toHaveLength(3);
+    expect(pills[0].children[1]).toMatchObject({ kind: 'text', text: '13', color: pair('onAccent'), lines: 1, minScale: 0.6 });
+    expect([pills[0].children[0], pills[0].children[2]]).toEqual([{ kind: 'spacer', length: null }, { kind: 'spacer', length: null }]);
     expect(cellOf(t, 13).children[0]).toMatchObject({ children: [pills[0], { kind: 'spacer', length: null }, { kind: 'text', text: '10.5' }] });
   });
 
@@ -217,7 +220,7 @@ describe('buildTree medium', () => {
     expect(weeks(t)).toHaveLength(1);
     const numbers = (weeks(t)[0].children as StackNode[]).map((c) => {
       const n = (c.children[0] as StackNode).children[0];
-      return n.kind === 'text' ? n.text : ((n as StackNode).children[0] as TextNode).text;
+      return n.kind === 'text' ? n.text : ((n as StackNode).children.find((x) => x.kind === 'text') as TextNode).text;
     });
     expect(numbers).toEqual(['8', '9', '10', '11', '12', '13', '14']);
     expect(memoTexts(weeks(t)[0].children[5] as StackNode)).toEqual(['리뷰']);
@@ -305,19 +308,23 @@ describe('buildTree small', () => {
 });
 
 describe('모든 나무', () => {
-  // 나무에 고정 크기를 넣을 자리가 생기면(크기 속성이 붙으면) 이 시험이 실패한다.
+  // 칸과 줄은 크기를 정하지 않고 위젯 크기에 맞춰 늘고 준다. 크기를 정하는 것은 오늘 표시(20pt보다 작은 상자) 하나뿐이다.
   const ALLOWED: Record<Node['kind'], string[]> = {
     text: ['kind', 'text', 'size', 'weight', 'color', 'opacity', 'lines', 'minScale'],
     spacer: ['kind', 'length'],
-    stack: ['kind', 'dir', 'children', 'spacing', 'padding', 'background', 'radius', 'align'],
+    stack: ['kind', 'dir', 'children', 'spacing', 'padding', 'background', 'radius', 'align', 'size'],
   };
 
-  it('마디는 정해진 속성만 가져 고정 크기가 없고, spacer.length는 null이거나 양수', () => {
+  it('마디는 정해진 속성만 갖고, 고정 크기는 오늘 표시뿐이며, spacer.length는 null이거나 양수', () => {
     const trees = [build('large', month({ '13': { text: '가\n나', color: 'F12424' } })), build('medium', month({})), build('small', month({ '13': { text: '[+]가\n나', color: '' } }), TODAY, true), messageTree({ title: 't', lines: ['a'] })];
     for (const tr of trees) {
       for (const n of all(tr)) {
         if (n.kind === 'spacer') expect(n.length === null || n.length > 0).toBe(true);
         for (const key of Object.keys(n)) expect(ALLOWED[n.kind]).toContain(key);
+        if (n.kind === 'stack' && n.size) {
+          expect(n.background).toEqual(pair('accent'));
+          expect(Math.max(...n.size)).toBeLessThan(20);
+        }
       }
     }
   });

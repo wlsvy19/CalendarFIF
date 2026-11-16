@@ -16,7 +16,7 @@ describe('renderTree', () => {
         { kind: 'text', text: '제목', size: 17, weight: 'bold', color: D('#111111', '#EEEEEE'), lines: 1, minScale: 0.7 },
         { kind: 'spacer', length: 4 },
         {
-          kind: 'stack', dir: 'h', spacing: 8, padding: [1, 4, 1, 4], background: D('#AAAAAA', '#222222'), radius: 7.5, align: 'center',
+          kind: 'stack', dir: 'h', spacing: 8, padding: [1, 4, 1, 4], background: D('#AAAAAA', '#222222'), radius: 7.5, size: [19, 15], align: 'center',
           children: [
             { kind: 'text', text: '글', size: 9, weight: 'regular', color: D('#111111', '#EEEEEE'), opacity: 0.4, lines: 0 },
             { kind: 'spacer', length: null },
@@ -34,7 +34,7 @@ describe('renderTree', () => {
       { kind: 'text', text: '제목', font: { font: 'bold', size: 17 }, textColor: dyn('#111111', '#EEEEEE'), lineLimit: 1, minimumScaleFactor: 0.7 },
       { kind: 'spacer', length: 4 },
       {
-        kind: 'stack', layout: 'h', spacing: 8, padding: [1, 4, 1, 4], backgroundColor: dyn('#AAAAAA', '#222222'), cornerRadius: 7.5, align: 'center',
+        kind: 'stack', layout: 'h', spacing: 8, padding: [1, 4, 1, 4], backgroundColor: dyn('#AAAAAA', '#222222'), cornerRadius: 7.5, size: { width: 19, height: 15 }, align: 'center',
         children: [
           { kind: 'text', text: '글', font: { font: 'system', size: 9 }, textColor: dyn('#111111', '#EEEEEE'), textOpacity: 0.4, lineLimit: 0 },
           { kind: 'spacer', length: null },

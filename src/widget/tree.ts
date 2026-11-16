@@ -14,7 +14,7 @@ export type Dyn = { light: string; dark: string }; // 밝은 화면과 어두운
 export type Pad = [top: number, leading: number, bottom: number, trailing: number];
 export type TextNode = { kind: 'text'; text: string; size: number; weight: 'regular' | 'medium' | 'semibold' | 'bold'; color: Dyn; opacity?: number; lines: number; minScale?: number }; // lines: 줄 수 제한(0은 제한 없음)
 export type SpacerNode = { kind: 'spacer'; length: number | null }; // null은 남는 곳을 채운다
-export type StackNode = { kind: 'stack'; dir: 'h' | 'v'; children: Node[]; spacing?: number; padding?: Pad; background?: Dyn; radius?: number; align?: 'top' | 'center' | 'bottom' };
+export type StackNode = { kind: 'stack'; dir: 'h' | 'v'; children: Node[]; spacing?: number; padding?: Pad; background?: Dyn; radius?: number; align?: 'top' | 'center' | 'bottom'; size?: [width: number, height: number] }; // size: 고정 크기
 export type Node = TextNode | SpacerNode | StackNode;
 /** 위젯 하나. ListWidget 자신이 세로로 쌓는 상자다. */
 export type Tree = { background: Dyn; padding: Pad; spacing: number; children: Node[] };
@@ -35,6 +35,10 @@ const dayPair = (color: string): Dyn => ({ light: dayBackground(color, 'light'),
 
 /** 완료 줄 앞에 붙이는 표시. 결합 글자(취소선)는 한글 위에서 깨질 수 있어 쓰지 않는다. */
 const DONE_MARK = '\u2713 ';
+
+/** 오늘 표시의 높이와 두 자리 날의 폭(pt). 11pt 굵은 숫자 두 개가 14pt쯤이다. */
+const TODAY_MARK_H = 15;
+const TODAY_MARK_W2 = 19;
 
 const flex = (): SpacerNode => ({ kind: 'spacer', length: null });
 const fixed = (length: number): SpacerNode => ({ kind: 'spacer', length });
@@ -75,10 +79,15 @@ function dayCell(cell: GridCell, day: DayValue | undefined, today: string, lay: 
   // 절기나 복날이면 음력 대신 그 이름을 초록으로 적는다(둘이 겹치면 절기).
   const season = lay.lunar && cell.inMonth ? seasonNames(cell.dateKey)[0] ?? '' : '';
   const lunar = season !== '' ? season : lay.lunar && cell.inMonth ? lunarShort(cell.dateKey) : '';
-  // 오늘 표시: 음력을 같이 적는 두 자리 날은 옆 여백을 줄인다. 칸의 안쪽 폭이 40pt쯤이라 숫자 상자가 넓으면 음력이 잘린다.
-  const pillPad = lunar !== '' && cell.dayOfMonth >= 10 ? 2.5 : 4;
+  // 오늘 표시: 크기를 정한 동그라미(두 자리 날은 조금 넓은 알약). 크기를 정하지 않으면 iOS가 머리 줄의 폭을
+  // 숫자, 빈칸, 음력에 나눠 줄 때 숫자 상자가 모자라 날짜가 "…"로 잘린다(2026-11-17 아이폰에서 17일이 그랬다).
+  // 그래도 폭이 모자라면 날짜를 줄여서라도 보인다.
   const number: Node = cell.dateKey === today
-    ? { kind: 'stack', dir: 'h', background: C.accent, radius: 7.5, padding: [1, pillPad, 1, pillPad], children: [numberText] }
+    ? {
+      kind: 'stack', dir: 'h', align: 'center', background: C.accent, radius: TODAY_MARK_H / 2,
+      size: [cell.dayOfMonth >= 10 ? TODAY_MARK_W2 : TODAY_MARK_H, TODAY_MARK_H],
+      children: [flex(), { ...numberText, minScale: 0.6 }, flex()],
+    }
     : numberText;
   const head: Node[] = [number, flex()];
   // 폭이 모자라면 iOS가 글자를 이만큼까지 줄인다. 그래도 안 들어가면 "…"로 자른다.
