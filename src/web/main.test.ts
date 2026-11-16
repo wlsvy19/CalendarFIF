@@ -245,6 +245,35 @@ it('편집 화면이 열린 동안 중지되면 편집 화면을 두고, 저장�
   expect(lastInteractive()).toEqual(['setInteractive', false]);
 });
 
+it('편집 화면을 연 채 화면이 가려지면 고친 메모를 대기열에 넣고 편집 화면은 그대로 둔다. 그 뒤 취소하면 되돌린다', async () => {
+  const hide = (state: 'hidden' | 'visible'): void => {
+    Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  };
+  const pending = (): { day: string; base: { text: string }; next: { text: string } }[] => JSON.parse(localStorage.getItem('calfif.outbox.keep-hidden') ?? '[]');
+  try {
+    const { editor, openEditor } = await start('keep-hidden');
+    access.emit!(server(accessDoc()));
+    await openEditor('2026-11-03', '나가기 전에 적은 메모');
+    hide('hidden');
+    expect(pending().map((e) => [e.day, e.base.text, e.next.text])).toEqual([['03', '', '나가기 전에 적은 메모']]);
+    expect(editor()!.querySelector('textarea')!.value).toBe('나가기 전에 적은 메모');
+
+    // 돌아와 더 적고 다시 나가면 앞의 것에 이어 붙는다(base가 앞에서 저장해 둔 값이다).
+    hide('visible');
+    editor()!.querySelector('textarea')!.value = '나가기 전에 적은 메모\n한 줄 더';
+    hide('hidden');
+    expect(pending().map((e) => [e.day, e.base.text, e.next.text])).toEqual([['03', '', '나가기 전에 적은 메모\n한 줄 더']]);
+
+    hide('visible');
+    editor()!.querySelector<HTMLElement>('.textbtn.start')!.click(); // 취소
+    await vi.waitFor(() => expect(editor()).toBeNull());
+    expect(pending()).toEqual([]);
+  } finally {
+    hide('visible');
+  }
+});
+
 it('편집 화면이 열린 동안 허가가 없어지면 취소한 뒤에 안내로 바꾼다', async () => {
   const { root, editor, notice, openEditor } = await start('hold-cancel');
   access.emit!(server(accessDoc()));

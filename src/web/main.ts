@@ -312,7 +312,8 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   const openEditor = (dateKey: string): void => {
     const { monthId, day } = splitDateKey(dateKey)!;
     // 편집 화면이 처음 보여 준 값이 base다. 서버 문서를 따로 읽지 않는다.
-    const base = store.days(monthId)[day] ?? EMPTY_DAY;
+    // 화면이 가려질 때 저장해 두면(onKeep) 그 값이 다음 저장의 base가 된다.
+    let base = store.days(monthId)[day] ?? EMPTY_DAY;
     const handle = mountEditor(root, {
       dateKey,
       value: base,
@@ -336,6 +337,11 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       onCancel: () => {
         closeEditor();
         afterEditor();
+      },
+      onKeep: (next) => {
+        engine.saveEdit(monthId, day, base, next);
+        base = next;
+        store.refresh();
       },
     }, DESKTOP ? { focusText: true, attachDrag: (sheet, handle) => makeDraggable(sheet, handle, editorMemory) } : undefined);
     editor = { dateKey, handle };

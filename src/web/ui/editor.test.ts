@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { playTone } from '../tones';
 import type { DayValue } from '../../core/types';
 import { mountEditor } from './editor';
@@ -475,4 +475,99 @@ it('바깥을 눌러 색 상자를 닫을 때는 초점을 배경 단추로 옮�
   document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
   expect(root.querySelectorAll('[role="radio"]')).toHaveLength(0);
   expect(document.activeElement).toBe(area);
+});
+
+/** 화면이 가려지거나 다시 보이는 것을 흉내 낸다. */
+function setVisibility(state: 'hidden' | 'visible'): void {
+  Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+  document.dispatchEvent(new Event('visibilitychange'));
+}
+
+describe('화면이 가려질 때 저장해 두기(onKeep)', () => {
+  afterEach(() => setVisibility('visible'));
+
+  it('고친 것이 있으면 지금 값을 넘기고 편집 화면은 그대로 둔다. 같은 값으로 다시 가려지면 넘기지 않는다', () => {
+    const onKeep = vi.fn();
+    const { root, area, pick, onSave, onCancel } = mount({ text: '회의', color: '' }, { onKeep });
+    setVisibility('hidden');
+    expect(onKeep).not.toHaveBeenCalled(); // 고친 것이 없다
+    setVisibility('visible');
+    area.value = '회의\n병원  ';
+    pick('F12424');
+    setVisibility('hidden');
+    expect(onKeep.mock.calls).toEqual([[{ text: '회의\n병원', color: 'F12424' }]]);
+    expect([onSave.mock.calls.length, onCancel.mock.calls.length, !!root.querySelector('.sheet')]).toEqual([0, 0, true]);
+    setVisibility('visible');
+    setVisibility('hidden');
+    expect(onKeep).toHaveBeenCalledTimes(1);
+    // 더 고치면 다시 넘긴다.
+    setVisibility('visible');
+    area.value = '회의';
+    setVisibility('hidden');
+    expect(onKeep.mock.calls[1]).toEqual([{ text: '회의', color: 'F12424' }]);
+  });
+
+  it('다시 보일 때는 넘기지 않는다', () => {
+    const onKeep = vi.fn();
+    const { area } = mount({ text: '', color: '' }, { onKeep });
+    area.value = '적는 중';
+    setVisibility('visible');
+    expect(onKeep).not.toHaveBeenCalled();
+  });
+
+  it('저장해 둔 뒤 취소하면 처음 값을 다시 넘겨 되돌리고 닫는다', () => {
+    const onKeep = vi.fn();
+    const { area, button, onSave, onCancel } = mount({ text: '회의', color: '' }, { onKeep });
+    area.value = '회의\n병원';
+    setVisibility('hidden');
+    setVisibility('visible');
+    button('취소').click();
+    expect(onKeep.mock.calls).toEqual([[{ text: '회의\n병원', color: '' }], [{ text: '회의', color: '' }]]);
+    expect([onSave.mock.calls.length, onCancel.mock.calls.length]).toEqual([0, 1]);
+  });
+
+  it('저장해 둔 것이 없으면 취소는 되돌리지 않는다', () => {
+    const onKeep = vi.fn();
+    const { area, button, onCancel } = mount({ text: '회의', color: '' }, { onKeep });
+    area.value = '회의\n병원';
+    button('취소').click();
+    expect([onKeep.mock.calls.length, onCancel.mock.calls.length]).toEqual([0, 1]);
+  });
+
+  it('저장해 둔 뒤 저장을 누르면 지금 값을 저장으로 넘긴다(되돌리지 않는다)', () => {
+    const onKeep = vi.fn();
+    const { area, button, onSave } = mount({ text: '회의', color: '' }, { onKeep });
+    area.value = '회의\n병원';
+    setVisibility('hidden');
+    setVisibility('visible');
+    area.value = '회의\n병원\n약국';
+    button('저장').click();
+    expect(onKeep).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls).toEqual([[{ text: '회의\n병원\n약국', color: '' }]]);
+  });
+
+  it('닫힌 뒤와 치운 뒤에는 넘기지 않는다', () => {
+    const onKeep = vi.fn();
+    const closed = mount({ text: '', color: '' }, { onKeep });
+    closed.area.value = '가';
+    closed.button('저장').click();
+    setVisibility('hidden');
+    expect(onKeep).not.toHaveBeenCalled();
+    setVisibility('visible');
+
+    const root = document.createElement('div');
+    document.body.append(root);
+    const handle = mountEditor(root, { dateKey: '2026-11-13', value: { text: '', color: '' }, onSave: vi.fn(), onCancel: vi.fn(), onKeep });
+    root.querySelector<HTMLTextAreaElement>('textarea')!.value = '나';
+    handle.destroy();
+    setVisibility('hidden');
+    expect(onKeep).not.toHaveBeenCalled();
+  });
+
+  it('onKeep이 없으면 가려져도 아무 일도 없다', () => {
+    const { area, onSave, onCancel } = mount({ text: '', color: '' });
+    area.value = '가';
+    setVisibility('hidden');
+    expect([onSave.mock.calls.length, onCancel.mock.calls.length]).toEqual([0, 0]);
+  });
 });

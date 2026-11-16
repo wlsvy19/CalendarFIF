@@ -61,6 +61,12 @@ export function mountEditor(
     events?: { view: EventsView; save(id: string, rec: EventRecord): void; remove(id: string): void; flush?(): Promise<void>; iosHint: boolean | 'push'; now?: () => Date };
     onSave(next: DayValue): void;
     onCancel(): void;
+    /**
+     * 편집 화면을 그대로 둔 채 지금 값을 저장한다. 화면이 가려질 때(앱을 나갈 때) 고친 것이 있으면 부른다:
+     * 편집 화면을 닫지 않고 앱을 나가면 고친 것이 저장되지 않고, 위젯에서 연 화면은 다시 열 때 사라진다.
+     * 그 뒤에 취소하면 처음 값을 이것으로 다시 넘겨 되돌린다. 없으면 가려져도 저장하지 않는다.
+     */
+    onKeep?(next: DayValue): void;
   },
   env?: { visualViewport?: VisualViewportLike | null; focusText?: boolean; attachDrag?: (sheet: HTMLElement, handle: HTMLElement) => { destroy(): void } },
 ): EditorHandle {
@@ -242,8 +248,21 @@ export function mountEditor(
   const cancel = (): void => {
     if (finished) return;
     finished = true;
+    // 가려질 때 저장해 둔 것이 있으면 처음 값으로 되돌린다. 취소는 연 뒤에 고친 것을 모두 버리는 것이다.
+    if (kept && (kept.text !== props.value.text || kept.color !== props.value.color)) props.onKeep?.(props.value);
     props.onCancel();
   };
+  // 화면이 가려질 때(앱을 나가거나 다른 앱으로 갈 때) 고친 것을 저장해 둔다. 편집 화면은 그대로다.
+  let kept: DayValue | null = null;
+  const keepIfHidden = (): void => {
+    if (finished || !props.onKeep || document.visibilityState !== 'hidden') return;
+    const now: DayValue = { text: normalizeText(area.value), color };
+    const last = kept ?? props.value;
+    if (now.text === last.text && now.color === last.color) return;
+    kept = now;
+    props.onKeep(now);
+  };
+  document.addEventListener('visibilitychange', keepIfHidden);
   const changed = (): boolean => area.value !== props.value.text || color !== props.value.color;
   doneBtn.addEventListener('click', () => {
     const r = toggleDoneInRange(area.value, area.selectionStart, area.selectionEnd);
@@ -312,6 +331,7 @@ export function mountEditor(
     close: closeKeeping,
     eventSheetOpen: () => eventSheet !== null,
     destroy() {
+      document.removeEventListener('visibilitychange', keepIfHidden);
       palette?.destroy();
       palette = null;
       stopEvents?.();
