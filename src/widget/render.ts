@@ -1,5 +1,6 @@
 import type { Host, ListWidgetLike } from './host';
 import type { Scene } from './scene';
+import { refreshAt } from './refresh';
 
 /** 장면을 Scriptable의 그림으로 그린다. */
 export function renderScene(host: Host, scene: Scene): unknown {
@@ -41,8 +42,6 @@ export function renderScene(host: Host, scene: Scene): unknown {
   return ctx.getImage();
 }
 
-const REFRESH_MS = 15 * 60 * 1000;
-
 /** 그림을 넣은 위젯을 만든다. */
 export function makeWidget(host: Host, scene: Scene, appUrl: string, now: Date): ListWidgetLike {
   const image = renderScene(host, scene);
@@ -51,6 +50,6 @@ export function makeWidget(host: Host, scene: Scene, appUrl: string, now: Date):
   widget.backgroundColor = new host.Color(scene.background);
   widget.backgroundImage = image;
   widget.url = appUrl;
-  widget.refreshAfterDate = new Date(now.getTime() + REFRESH_MS);
+  widget.refreshAfterDate = refreshAt(now);
   return widget;
 }

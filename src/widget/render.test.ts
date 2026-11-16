@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { makeFakeHost, widgetRecord } from './fakeHost';
 import { makeWidget, renderScene } from './render';
 import type { Scene } from './scene';
+import { refreshAt } from './refresh';
 
 const scene: Scene = {
   width: 100,
@@ -57,7 +58,7 @@ describe('renderScene', () => {
 });
 
 describe('makeWidget', () => {
-  it('주소, 여백 0, 그림, 15분 뒤 새로 고침', () => {
+  it('주소, 여백 0, 그림, 다음에 새로 그릴 때', () => {
     const host = makeFakeHost();
     const now = new Date('2026-11-13T09:00:00Z');
     const widget = makeWidget(host, scene, 'https://example.test/', now);
@@ -66,6 +67,6 @@ describe('makeWidget', () => {
     expect(rec.props.url).toBe('https://example.test/');
     expect(rec.props.backgroundImage).toEqual({ image: 0 });
     expect(rec.props.backgroundColor).toEqual({ hex: '#FFFFFF', alpha: 1 });
-    expect((rec.props.refreshAfterDate as Date).toISOString()).toBe('2026-11-13T09:15:00.000Z');
+    expect(rec.props.refreshAfterDate).toEqual(refreshAt(now));
   });
 });

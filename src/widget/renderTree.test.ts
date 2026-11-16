@@ -3,6 +3,7 @@ import { makeFakeHost, widgetRecord, type FakeNode } from './fakeHost';
 import { renderTree } from './renderTree';
 import { widgetSize } from './sizes';
 import { buildTree, type Dyn, type Node, type Tree } from './tree';
+import { refreshAt } from './refresh';
 
 const now = new Date(2026, 10, 13, 9, 0, 0);
 const dyn = (light: string, dark: string): unknown => ({ dynamic: { light: { hex: light, alpha: 1 }, dark: { hex: dark, alpha: 1 } } });
@@ -29,7 +30,7 @@ describe('renderTree', () => {
     const w = renderTree(host, tree, 'https://example.test/', now);
     const rec = widgetRecord(w);
     expect(rec.padding).toEqual([1, 2, 3, 4]);
-    expect(rec.props).toMatchObject({ spacing: 5, backgroundColor: dyn('#FFFFFF', '#000000'), url: 'https://example.test/', refreshAfterDate: new Date(now.getTime() + 15 * 60 * 1000), backgroundImage: null });
+    expect(rec.props).toMatchObject({ spacing: 5, backgroundColor: dyn('#FFFFFF', '#000000'), url: 'https://example.test/', refreshAfterDate: refreshAt(now), backgroundImage: null });
     const expected: FakeNode[] = [
       { kind: 'text', text: '제목', font: { font: 'bold', size: 17 }, textColor: dyn('#111111', '#EEEEEE'), lineLimit: 1, minimumScaleFactor: 0.7 },
       { kind: 'spacer', length: 4 },

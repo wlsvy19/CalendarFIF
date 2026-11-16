@@ -1,8 +1,7 @@
 import type { Host, ListWidgetLike, WidgetContainerLike } from './host';
+import { refreshAt } from './refresh';
 import type { Theme } from './theme';
 import type { Dyn, Node, Tree } from './tree';
-
-const REFRESH_MS = 15 * 60 * 1000;
 
 /** 색 한 쌍을 Scriptable의 색으로. 밝기를 정해 주면 그쪽 색, 아니면 화면 밝기를 스스로 따르는 색. */
 const colorOf = (host: Host, d: Dyn, force: Theme | undefined): unknown =>
@@ -48,6 +47,6 @@ export function renderTree(host: Host, tree: Tree, appUrl: string, now: Date, fo
   w.backgroundColor = colorOf(host, tree.background, force);
   addNodes(host, w, tree.children, force);
   w.url = appUrl;
-  w.refreshAfterDate = new Date(now.getTime() + REFRESH_MS);
+  w.refreshAfterDate = refreshAt(now);
   return w;
 }
