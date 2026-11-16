@@ -87,7 +87,8 @@ export type Host = {
   DrawContext: new () => DrawContextLike;
   ListWidget: new () => ListWidgetLike;
   FileManager: { local(): { documentsDirectory(): string; joinPath(a: string, b: string): string; fileExists(path: string): boolean; readString(path: string): string; writeString(path: string, text: string): void; remove(path: string): void } };
-  Script: { setWidget(widget: unknown): void; complete(): void };
+  /** name은 Scriptable에 넣은 이 스크립트의 이름이다(위젯을 눌러 이 스크립트를 다시 돌릴 때 쓴다). */
+  Script: { setWidget(widget: unknown): void; complete(): void; name?(): string };
   config: { runsInWidget: boolean; runsInApp: boolean; widgetFamily: string | null };
   args: { widgetParameter: unknown; queryParameters?: Record<string, string> };
   Notification: { new (): NotificationLike; allPending(): Promise<NotificationLike[]>; removePending(identifiers: string[]): Promise<void> };

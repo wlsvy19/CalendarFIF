@@ -1209,3 +1209,124 @@ describe('자동 업데이트를 이어 붙인 run', () => {
     expect(host.state.alerts[0].message.split('\n\n')).toEqual(['앞으로 7일 안에 울릴 알림이 없습니다.', expect.stringContaining('새 버전이 나오면 스스로 받습니다.')]);
   });
 });
+
+describe('위젯을 눌렀을 때 여는 곳(매개변수 inapp)', () => {
+  /** Scriptable의 WebView를 흉내 낸 것을 전역에 둔다. 무엇을 불렀는지 적어 둔다. */
+  const withWebView = (fail = false) => {
+    const log: { loaded: string[]; presented: unknown[] } = { loaded: [], presented: [] };
+    class WebView {
+      async loadURL(url: string): Promise<void> {
+        if (fail) throw new Error('연결할 수 없다');
+        log.loaded.push(url);
+      }
+      async present(fullscreen?: boolean): Promise<void> {
+        log.presented.push(fullscreen);
+      }
+    }
+    (globalThis as Record<string, unknown>).WebView = WebView;
+    return log;
+  };
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).WebView;
+  });
+
+  it('기본은 웹앱의 주소이고, inapp(또는 앱안)이면 이 스크립트를 다시 돌리는 주소다', async () => {
+    const plain = makeNative({ keychain: loggedIn });
+    await run(plain, cfg, now);
+    expect(lastWidget(plain).props.url).toBe('https://example.test/');
+    for (const widgetParameter of ['inapp', 'dark 앱안']) {
+      const host = makeNative({ keychain: loggedIn, widgetParameter, scriptName: 'CalendarFIF 달력' });
+      await run(host, cfg, now);
+      expect(lastWidget(host).props.url).toBe(`scriptable:///run/${encodeURIComponent('CalendarFIF 달력')}?open=calendar`);
+    }
+    // 그림 위젯과 로그인 안내 위젯도 같다.
+    const picture = make({ keychain: loggedIn, widgetParameter: 'image inapp' });
+    await run(picture, cfg, now);
+    expect(lastWidget(picture).props.url).toBe('scriptable:///run/CalendarFIF?open=calendar');
+    const loggedOut = makeNative({ widgetParameter: 'inapp' });
+    await run(loggedOut, cfg, now);
+    expect(lastWidget(loggedOut).props.url).toBe('scriptable:///run/CalendarFIF?open=calendar');
+  });
+
+  it('스크립트의 이름을 알 수 없으면 웹앱의 주소로 둔다', async () => {
+    const noName = makeNative({ keychain: loggedIn, widgetParameter: 'inapp' });
+    delete noName.Script.name;
+    await run(noName, cfg, now);
+    expect(lastWidget(noName).props.url).toBe('https://example.test/');
+    const throwing = makeNative({ keychain: loggedIn, widgetParameter: 'inapp' });
+    throwing.Script.name = () => { throw new Error('이름 시험 오류'); };
+    await run(throwing, cfg, now);
+    expect(lastWidget(throwing).props.url).toBe('https://example.test/');
+    const empty = makeNative({ keychain: loggedIn, widgetParameter: 'inapp', scriptName: '' });
+    await run(empty, cfg, now);
+    expect(lastWidget(empty).props.url).toBe('https://example.test/');
+    const odd = makeNative({ keychain: loggedIn, widgetParameter: 'inapp' });
+    odd.Script.name = (() => 42) as unknown as () => string;
+    await run(odd, cfg, now);
+    expect(lastWidget(odd).props.url).toBe('https://example.test/');
+    // 이름에 주소에서 뜻이 있는 글자가 있어도 깨지지 않는다.
+    const symbols = makeNative({ keychain: loggedIn, widgetParameter: 'inapp', scriptName: '달력 #1/집?' });
+    await run(symbols, cfg, now);
+    expect(lastWidget(symbols).props.url).toBe('scriptable:///run/%EB%8B%AC%EB%A0%A5%20%231%2F%EC%A7%91%3F?open=calendar');
+  });
+
+  it('그 주소로 Scriptable이 열리면 메뉴 대신 달력을 Scriptable 안에서 전체 화면으로 연다. 위젯의 로그인과는 상관없다', async () => {
+    for (const keychain of [loggedIn, {}]) {
+      const log = withWebView();
+      const host = make({ runsInApp: true, keychain, queryParameters: { open: 'calendar' } });
+      await run(host, cfg, now);
+      expect([log.loaded, log.presented, host.state.alerts.length, host.state.requests.length]).toEqual([['https://example.test/'], [true], 0, 0]);
+    }
+  });
+
+  it('WebView가 없거나 띄우지 못하면 전처럼 메뉴를 보인다', async () => {
+    const none = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' }, alerts: [{ button: -1 }] });
+    await run(none, cfg, now);
+    expect(none.state.alerts[0].actions).toEqual(['미리 보기', '시험 알림 (1분 뒤)', '로그아웃']);
+    // 만들다가, 또는 띄우다가 오류가 나는 WebView.
+    for (const broken of [class { constructor() { throw new Error('만들 수 없다'); } }, class { loadURL() { return Promise.resolve(); } present() { return Promise.reject(new Error('띄울 수 없다')); } }]) {
+      (globalThis as Record<string, unknown>).WebView = broken;
+      const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' }, alerts: [{ button: -1 }] });
+      await run(host, cfg, now);
+      expect(host.state.alerts).toHaveLength(1);
+    }
+  });
+
+  it('불러오기를 기다리지 않고 바로 띄운다: 불러오지 못하거나 끝나지 않아도 화면은 뜨고, 닫으면 끝난다', async () => {
+    const failing = withWebView(true);
+    const offline = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
+    await run(offline, cfg, now);
+    expect([failing.presented, offline.state.alerts.length]).toEqual([[true], 0]);
+    // 끝나지 않는 불러오기.
+    const presented: unknown[] = [];
+    (globalThis as Record<string, unknown>).WebView = class { loadURL() { return new Promise(() => {}); } async present(fullscreen?: boolean) { presented.push(fullscreen); } };
+    const slow = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
+    await run(slow, cfg, now);
+    expect([presented, slow.state.alerts.length]).toEqual([[true], 0]);
+  });
+
+  it('host가 아니라 Scriptable의 전역에서 WebView를 가져온다(이미 붙여 넣은 스크립트는 WebView를 넘기지 않는다). 넘겨받은 실행도 같다', async () => {
+    const log = withWebView();
+    const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
+    expect('WebView' in host).toBe(false);
+    await run(host, { ...cfg, version: '0.9.1 (2026-11-16)', handedOver: true, baseVersion: '0.9.0 (2026-11-16)' }, now);
+    expect([log.loaded, log.presented, host.state.requests.length]).toEqual([['https://example.test/'], [true], 0]);
+  });
+
+  it('예약만 하러 온 주소(schedule=1)와 같이 오면 달력을 연다. 웹앱의 단추는 schedule=1만 보낸다', async () => {
+    const log = withWebView();
+    const both = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar', schedule: '1' } });
+    await run(both, cfg, now);
+    expect([log.presented, both.state.alerts.length]).toEqual([[true], 0]);
+    const only = make({ runsInApp: true, keychain: loggedIn, queryParameters: { schedule: '1' } });
+    await run(only, cfg, now);
+    expect(log.presented).toEqual([true]); // 달력을 다시 열지 않았다
+  });
+
+  it('다른 주소 매개변수로 열리면 달력을 열지 않는다', async () => {
+    const log = withWebView();
+    const host = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }] });
+    await run(host, cfg, now);
+    expect([log.loaded, host.state.alerts.length]).toEqual([[], 1]);
+  });
+});

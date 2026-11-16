@@ -24,7 +24,7 @@ const HOLIDAY_RETRY_MS = 6 * 3_600_000; // 받지 못하면 이만큼 지나야 
 /** 위젯에 놓을 것: 기본은 기본 부품의 나무, 위젯 매개변수에 image가 있으면 그림 장면. */
 type View = { tree: Tree } | { scene: Scene };
 /** force: 매개변수로 고정한 밝기(없으면 기본 부품의 색이 화면 밝기를 스스로 따른다). pictureTheme: 그림을 그릴 밝기(그림을 그릴 때만 묻는다). */
-type Env = { family: Family; image: boolean; lunar: boolean; force: Theme | undefined; pictureTheme: () => Theme; size: Size; today: string };
+type Env = { family: Family; image: boolean; lunar: boolean; inapp: boolean; force: Theme | undefined; pictureTheme: () => Theme; size: Size; today: string };
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 const localDate = (d: Date): string => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -55,12 +55,51 @@ function makeEnv(host: Host, family: Family, now: Date): Env {
   const pictureTheme = (): Theme => force ?? (systemIsDark(host) ? 'dark' : 'light');
   // 음력은 적는 것이 기본이고, 매개변수에 nolunar(또는 음력끔)가 있으면 적지 않는다.
   const lunar = !(words.includes('nolunar') || words.includes('음력끔'));
-  return { family, image, lunar, force, pictureTheme, size: widgetSize(host.Device.screenSize(), family), today: localDate(now) };
+  // 위젯을 누르면 Safari에서 달력이 열리는 것이 기본이고, 매개변수에 inapp(또는 앱안)이 있으면 Scriptable 안에서 연다.
+  const inapp = words.includes('inapp') || words.includes('앱안');
+  return { family, image, lunar, inapp, force, pictureTheme, size: widgetSize(host.Device.screenSize(), family), today: localDate(now) };
 }
 
 function monthView(env: Env, month: MonthData, offline: boolean): View {
   const input = { family: env.family, size: env.size, today: env.today, month, offline, lunar: env.lunar };
   return env.image ? { scene: buildScene({ ...input, theme: env.pictureTheme() }) } : { tree: buildTree(input) };
+}
+
+/**
+ * 위젯을 눌렀을 때 열 주소. 기본은 웹앱의 주소다(Scriptable을 거쳐 Safari에서 열린다).
+ * 매개변수 inapp이면 이 스크립트를 다시 돌리는 주소를 준다. 그러면 Scriptable 안에서 달력을 연다(openCalendarInApp).
+ * 스크립트의 이름을 모르면 웹앱의 주소로 둔다. 오류 위젯은 늘 웹앱의 주소다(그리다 깨진 스크립트를 다시 돌리지 않게).
+ */
+function tapUrl(host: Host, env: Env, cfg: Config): string {
+  if (!env.inapp) return cfg.appUrl;
+  try {
+    const name = host.Script.name ? host.Script.name() : '';
+    if (typeof name === 'string' && name !== '') return `scriptable:///run/${encodeURIComponent(name)}?open=calendar`;
+  } catch {
+    // 아래의 웹앱 주소로 둔다.
+  }
+  return cfg.appUrl;
+}
+
+type WebViewLike = { loadURL(url: string): Promise<unknown>; present(fullscreen?: boolean): Promise<unknown> };
+/**
+ * Scriptable 안의 웹 화면(WebView)에 달력을 띄운다. 닫을 때까지 기다린다. 띄웠으면 true, WebView가 없거나 띄우지 못하면 false.
+ * 불러오기가 끝나기를 기다리지 않고 바로 띄운다: 기다리는 동안 Scriptable의 화면이 보이지 않게, 그리고 느린 연결에서 멈춰 있지 않게.
+ * WebView는 붙여 넣은 스크립트가 넘기는 이름에 없어서(0.9.0에서 굳었다) Scriptable의 전역에서 직접 가져온다.
+ */
+async function openCalendarInApp(cfg: Config): Promise<boolean> {
+  try {
+    const WebView = (globalThis as { WebView?: new () => WebViewLike }).WebView;
+    if (typeof WebView !== 'function') return false;
+    const view = new WebView();
+    void Promise.resolve(view.loadURL(cfg.appUrl)).catch(() => {
+      // 불러오지 못하면 빈 화면이 남는다. 닫으면 끝난다.
+    });
+    await view.present(true);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const toWidget = (host: Host, env: Env, view: View, appUrl: string, now: Date): ListWidgetLike =>
@@ -478,6 +517,8 @@ async function runInApp(host: Host, cfg: Config, now: () => Date): Promise<void>
   let alarmsDone = false; // 메뉴 앞에서 예약했으면 미리 보기에서 다시 하지 않는다
   // 앱이 열려 있을 때 바로 보이는 알림은 iOS가 띄우지 않을 수 있어 결과는 상자로 보인다.
   const scheduleOnly = host.args.queryParameters?.schedule === '1';
+  // 위젯을 눌러서 왔다(매개변수 inapp): 메뉴 대신 달력을 Scriptable 안에서 연다. 열지 못하면 아래의 메뉴로 간다.
+  if (host.args.queryParameters?.open === 'calendar' && (await openCalendarInApp(cfg))) return;
   const show = async (): Promise<void> => {
     const at = now();
     const env = makeEnv(host, 'large', at);
@@ -610,7 +651,7 @@ async function runSelf(host: Host, cfg: Config, now: () => Date): Promise<void> 
     } else {
       const at = now();
       const env = makeEnv(host, pickFamily(host.config.widgetFamily), at);
-      host.Script.setWidget(toWidget(host, env, await load(host, cfg, env, at), cfg.appUrl, at));
+      host.Script.setWidget(toWidget(host, env, await load(host, cfg, env, at), tapUrl(host, env, cfg), at));
     }
   } catch (e) {
     // 넘겨받은 실행이면 오류 위젯을 두지 않고 붙여 넣은 스크립트에 돌려준다. 그쪽이 자기 것으로 그리고 고친 버전을 찾는다(update.ts).

@@ -9,7 +9,7 @@
 //  - 받는 곳: <웹앱 주소>/widget/version.json(버전과 글자 수)과 /widget/calendarfif-widget-lib.js(위젯 코드, module.exports를 둔다).
 //    웹앱과 같은 주소라서 웹앱을 믿는 만큼 믿는다. https 주소가 아니면 받지 않는다.
 //  - 위젯으로 돌 때는 먼저 그리고 나서 확인한다. 받은 것은 다음에 그릴 때부터 쓴다.
-//    Scriptable 앱 안에서 돌릴 때는 먼저 확인하고 바로 새 것으로 돈다.
+//    Scriptable 앱 안에서 돌릴 때는 먼저 확인하고 바로 새 것으로 돈다(위젯을 눌러 달력을 열러 온 실행은 먼저 열고 나서 확인한다).
 //  - 확인은 세 시간에 한 번이고, 물은 지 30분 안에는 다시 묻지 않는다. 앱 안에서는 늘 확인한다.
 //  - 새 것인지는 버전으로만 본다(번호가 크거나, 번호가 같으면 만든 날이 늦은 것). 옛 버전을 다시 배포해도 위젯은 되돌아가지 않는다.
 //    잘못된 버전을 고칠 때는 늘 버전을 올려 배포한다.
@@ -72,6 +72,15 @@ function widgetKey(host: Host): string {
     return `${host.config.widgetFamily ?? ''}|${typeof parameter === 'string' ? parameter : ''}`;
   } catch {
     return '|';
+  }
+}
+
+/** 위젯을 눌러 달력을 열러 온 실행인가(주소 매개변수 open=calendar). main.ts의 runInApp이 이것을 보고 달력을 연다. */
+function opensCalendar(host: Host): boolean {
+  try {
+    return host.args.queryParameters?.open === 'calendar';
+  } catch {
+    return false;
   }
 }
 
@@ -224,7 +233,9 @@ export function loadCachedLib(host: Host, cfg: Config): Lib | null {
 export async function runWithUpdate(host: Host, cfg: Config, now: () => Date, self: () => Promise<void>): Promise<void> {
   if (cfg.handedOver || !versionKey(cfg.version) || !/^https:\/\//i.test(cfg.appUrl ?? '')) return self();
   const inApp = host.config.runsInApp;
-  if (inApp) await checkForUpdate(host, cfg, now());
+  // 앱 안에서는 먼저 확인한다. 다만 위젯을 눌러 달력을 열러 온 실행(open=calendar)은 먼저 열고 나서 확인한다(확인이 여는 것을 늦추지 않게).
+  const checkFirst = inApp && !opensCalendar(host);
+  if (checkFirst) await checkForUpdate(host, cfg, now());
   let ran = false;
   try {
     const before = readUpdateState(host);
@@ -258,7 +269,7 @@ export async function runWithUpdate(host: Host, cfg: Config, now: () => Date, se
     // 업데이트 쪽의 어떤 문제도 위젯을 막지 않는다.
   }
   if (!ran) await self();
-  if (!inApp) await checkForUpdate(host, cfg, now());
+  if (!checkFirst) await checkForUpdate(host, cfg, now());
 }
 
 /** Scriptable 앱의 메뉴에 적을 한 줄. 버전을 모르면 빈 글. */

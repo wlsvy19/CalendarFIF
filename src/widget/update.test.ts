@@ -221,6 +221,16 @@ describe('돌리기', () => {
     await runWithUpdate(h, cfg, () => at(), mine);
     expect([mine.mock.calls.length, h.state.setWidgets, h.state.requests.length]).toEqual([0, [{ ran: NEW, base: BASE, handedOver: true }], 2]);
   });
+  it('앱 안이라도 위젯을 눌러 달력을 열러 온 실행(open=calendar)은 먼저 돌고 나서 확인한다', async () => {
+    const h = make({}, { runsInApp: true, queryParameters: { open: 'calendar' } });
+    const mine = vi.fn(async () => { expect(h.state.requests).toHaveLength(0); });
+    await runWithUpdate(h, cfg, () => at(), mine);
+    expect([mine.mock.calls.length, urls(h)]).toEqual([1, ['/widget/version.json', `/widget/${LIB_NAME}.js`]]);
+    // 받아 둔 것이 있으면 그것으로 열고, 끝난 뒤에 확인한다(앱 안이므로 늘 확인한다).
+    const have = make({ version: NEW }, { runsInApp: true, queryParameters: { open: 'calendar' }, files: cached(NEW, {}, libCode(NEW, 'host.Script.setWidget(host.state.requests.length);')) });
+    await runWithUpdate(have, cfg, () => at(MIN), self());
+    expect([have.state.setWidgets, urls(have)]).toEqual([[0], ['/widget/version.json']]);
+  });
   it('넘겨받은 쪽, 버전을 모르는 스크립트, https가 아닌 주소의 스크립트는 업데이트 없이 돈다', async () => {
     for (const c of [{ ...cfg, handedOver: true }, { ...cfg, version: undefined }, { ...cfg, version: '시험' }, { ...cfg, appUrl: '' }, { ...cfg, appUrl: 'http://example.test' }]) {
       const h = make({}, { files: cached() });

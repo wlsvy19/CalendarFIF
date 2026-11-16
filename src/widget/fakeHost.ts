@@ -34,6 +34,8 @@ export type FakeOptions = {
   dark?: boolean;
   keychain?: Record<string, string>;
   files?: Record<string, string>;
+  /** Scriptable에 넣은 스크립트의 이름(Script.name()). 없으면 'CalendarFIF'. */
+  scriptName?: string;
   /** true면 importModule이 오류를 낸다(Scriptable이 받아 둔 코드를 못 찾는 경우). */
   failImport?: boolean;
   /** 처음 이만큼의 DrawContext는 만들 때 오류를 낸다. */
@@ -325,7 +327,7 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
       new Function('module', code)(module);
       return module.exports;
     },
-    Script: { setWidget: (w) => { state.setWidgets.push(w); }, complete: () => { state.completed += 1; } },
+    Script: { setWidget: (w) => { state.setWidgets.push(w); }, complete: () => { state.completed += 1; }, name: () => opts.scriptName ?? 'CalendarFIF' },
     config: { runsInWidget: !opts.runsInApp, runsInApp: opts.runsInApp ?? false, widgetFamily: opts.widgetFamily ?? null },
     args: { widgetParameter: opts.widgetParameter ?? null, queryParameters: opts.queryParameters ?? {} },
     Device: { screenSize: () => opts.screen ?? { width: 390, height: 844 }, isUsingDarkAppearance: () => opts.dark ?? false },
