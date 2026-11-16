@@ -14,7 +14,7 @@ const GLOBALS = ['Keychain', 'Request', 'Alert', 'DrawContext', 'ListWidget', 'F
 const IMPORT_MODULE = 'importModule: typeof importModule === "function" ? importModule : undefined';
 /**
  * 붙여 넣은 스크립트가 받아 온 위젯 코드에 넘기는 이름들. 0.9.0에서 굳었다: 이미 붙여 넣은 스크립트는 바뀌지 않으므로,
- * 받아 쓰는 위젯 코드는 이 이름들만 받는다고 보고 만들어야 한다. 새 전역이 필요하면 받아 쓰는 코드가 globalThis에서 직접 가져온다.
+ * 받아 쓰는 위젯 코드는 이 이름들만 받는다고 보고 만들어야 한다. 새 전역이 필요하면 받아 쓰는 코드가 전역 이름을 typeof로 확인해 직접 가져온다(src/widget/main.ts의 findWebView처럼. globalThis에서만 찾지 않는다).
  * 설정(projectId, apiKey, appUrl, holidayUrl, version)도 마찬가지로 굳었다.
  */
 export const FROZEN_HOST_KEYS: readonly string[] = [...GLOBALS, 'importModule'];
