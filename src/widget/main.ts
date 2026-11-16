@@ -82,23 +82,43 @@ function tapUrl(host: Host, env: Env, cfg: Config): string {
 }
 
 type WebViewLike = { loadURL(url: string): Promise<unknown>; present(fullscreen?: boolean): Promise<unknown> };
+// Scriptable의 전역 WebView. 붙여 넣은 스크립트가 넘기는 이름에 없어서(0.9.0에서 굳었다) 전역에서 직접 가져온다. Scriptable 밖에는 없다.
+declare const WebView: unknown;
+
 /**
- * Scriptable 안의 웹 화면(WebView)에 달력을 띄운다. 닫을 때까지 기다린다. 띄웠으면 true, WebView가 없거나 띄우지 못하면 false.
- * 불러오기가 끝나기를 기다리지 않고 바로 띄운다: 기다리는 동안 Scriptable의 화면이 보이지 않게, 그리고 느린 연결에서 멈춰 있지 않게.
- * WebView는 붙여 넣은 스크립트가 넘기는 이름에 없어서(0.9.0에서 굳었다) Scriptable의 전역에서 직접 가져온다.
+ * Scriptable의 WebView를 찾는다. 전역 이름으로 먼저 찾고(전역 객체의 속성이 아니어도 찾는다), 없으면 globalThis에서 찾는다.
+ * 없으면 null.
  */
-async function openCalendarInApp(cfg: Config): Promise<boolean> {
+function findWebView(): (new () => WebViewLike) | null {
   try {
-    const WebView = (globalThis as { WebView?: new () => WebViewLike }).WebView;
-    if (typeof WebView !== 'function') return false;
-    const view = new WebView();
+    if (typeof WebView === 'function') return WebView as new () => WebViewLike;
+  } catch {
+    // 아래에서 다시 찾는다.
+  }
+  try {
+    const found = (globalThis as { WebView?: unknown }).WebView;
+    return typeof found === 'function' ? (found as new () => WebViewLike) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Scriptable 안의 웹 화면(WebView)에 달력을 띄운다. 닫을 때까지 기다린다. 띄웠으면 빈 글, 띄우지 못하면 그 까닭을 준다.
+ * 불러오기가 끝나기를 기다리지 않고 바로 띄운다: 기다리는 동안 Scriptable의 화면이 보이지 않게, 그리고 느린 연결에서 멈춰 있지 않게.
+ */
+async function openCalendarInApp(cfg: Config): Promise<string> {
+  try {
+    const Ctor = findWebView();
+    if (!Ctor) return 'Scriptable의 WebView를 찾지 못했다';
+    const view = new Ctor();
     void Promise.resolve(view.loadURL(cfg.appUrl)).catch(() => {
       // 불러오지 못하면 빈 화면이 남는다. 닫으면 끝난다.
     });
     await view.present(true);
-    return true;
-  } catch {
-    return false;
+    return '';
+  } catch (e) {
+    return e instanceof Error && e.message !== '' ? e.message : '알 수 없는 오류';
   }
 }
 
@@ -517,8 +537,15 @@ async function runInApp(host: Host, cfg: Config, now: () => Date): Promise<void>
   let alarmsDone = false; // 메뉴 앞에서 예약했으면 미리 보기에서 다시 하지 않는다
   // 앱이 열려 있을 때 바로 보이는 알림은 iOS가 띄우지 않을 수 있어 결과는 상자로 보인다.
   const scheduleOnly = host.args.queryParameters?.schedule === '1';
-  // 위젯을 눌러서 왔다(매개변수 inapp): 메뉴 대신 달력을 Scriptable 안에서 연다. 열지 못하면 아래의 메뉴로 간다.
-  if (host.args.queryParameters?.open === 'calendar' && (await openCalendarInApp(cfg))) return;
+  // 위젯을 눌러서 왔다(매개변수 inapp): 메뉴 대신 달력을 Scriptable 안에서 연다. 열지 못하면 아래의 메뉴로 가고, 메뉴에 까닭을 적는다.
+  // 두 길로 온다: 위젯의 누르는 주소(open=calendar)로 오거나, 위젯 편집의 "When Interacting"을 "Run Script"로 둔 위젯에서 온다
+  // (그때는 위젯의 매개변수가 같이 온다. Scriptable의 목록에서 돌리면 매개변수가 없다).
+  const words = paramWords(host);
+  let calendarProblem = '';
+  if (host.args.queryParameters?.open === 'calendar' || words.includes('inapp') || words.includes('앱안')) {
+    calendarProblem = await openCalendarInApp(cfg);
+    if (calendarProblem === '') return;
+  }
   const show = async (): Promise<void> => {
     const at = now();
     const env = makeEnv(host, 'large', at);
@@ -534,6 +561,8 @@ async function runInApp(host: Host, cfg: Config, now: () => Date): Promise<void>
     await toWidget(host, env, view, cfg.appUrl, at).presentLarge();
   };
   if (!host.Keychain.contains(REFRESH_KEY)) {
+    // 로그인하지 않았으면 메뉴가 뜨지 않는다. 달력을 열지 못한 까닭은 여기서 따로 알린다.
+    if (calendarProblem !== '') await notify(host, 'CalendarFIF 위젯', `달력을 Scriptable 안에서 열지 못했습니다: ${calendarProblem}`);
     if (scheduleOnly) {
       // 예약만 하러 왔다(웹앱의 'Scriptable 열기'): 로그인 창 대신 안내만 한다.
       await notify(host, 'CalendarFIF 알림 예약', 'CalendarFIF 위젯에 먼저 로그인하세요. Scriptable에서 CalendarFIF를 실행하면 로그인 창이 나옵니다.');
@@ -554,7 +583,8 @@ async function runInApp(host: Host, cfg: Config, now: () => Date): Promise<void>
   const base = cfg.version ? `CalendarFIF 위젯 ${cfg.version}` : 'CalendarFIF 위젯';
   const count = verifiedCount(result.scheduled, status);
   menu.title = result.source === 'push' ? `${base} · 푸시 알림 사용 중` : count === null ? base : `${base} · 알림 ${count}개 예약됨`;
-  menu.message = [alarmReport(result, status), updateLine(host, cfg)].filter((t) => t !== '').join('\n\n');
+  const calendarLine = calendarProblem === '' ? '' : `달력을 Scriptable 안에서 열지 못했습니다: ${calendarProblem}`;
+  menu.message = [alarmReport(result, status), updateLine(host, cfg), calendarLine].filter((t) => t !== '').join('\n\n');
   menu.addAction('미리 보기');
   menu.addAction('시험 알림 (1분 뒤)');
   menu.addAction('로그아웃');

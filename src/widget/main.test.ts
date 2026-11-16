@@ -1323,6 +1323,39 @@ describe('위젯을 눌렀을 때 여는 곳(매개변수 inapp)', () => {
     expect(log.presented).toEqual([true]); // 달력을 다시 열지 않았다
   });
 
+  it('달력을 열지 못하면 메뉴에 까닭을 적는다. 그냥 돌렸을 때는 그 줄이 없다', async () => {
+    const lineOf = (h: FakeHost): string | undefined => h.state.alerts[0].message.split('\n\n').find((l) => l.startsWith('달력을 Scriptable 안에서 열지 못했습니다'));
+    const none = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' }, alerts: [{ button: -1 }] });
+    await run(none, cfg, now);
+    expect(lineOf(none)).toBe('달력을 Scriptable 안에서 열지 못했습니다: Scriptable의 WebView를 찾지 못했다');
+    (globalThis as Record<string, unknown>).WebView = class { loadURL() { return Promise.resolve(); } present() { return Promise.reject(new Error('띄울 수 없다')); } };
+    const failing = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' }, alerts: [{ button: -1 }] });
+    await run(failing, cfg, now);
+    expect(lineOf(failing)).toBe('달력을 Scriptable 안에서 열지 못했습니다: 띄울 수 없다');
+    const plain = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }] });
+    await run(plain, cfg, now);
+    expect(lineOf(plain)).toBeUndefined();
+    // 위젯에 로그인하지 않았으면 메뉴가 없으므로, 로그인 창 앞에 따로 알린다.
+    delete (globalThis as Record<string, unknown>).WebView;
+    const loggedOut = make({ runsInApp: true, queryParameters: { open: 'calendar' }, alerts: [{ button: 0 }, { button: -1 }] });
+    await run(loggedOut, cfg, now);
+    expect([loggedOut.state.alerts[0].title, loggedOut.state.alerts[0].message, loggedOut.state.alerts.length]).toEqual(['CalendarFIF 위젯', '달력을 Scriptable 안에서 열지 못했습니다: Scriptable의 WebView를 찾지 못했다', 2]);
+  });
+
+  it('위젯 편집의 "When Interacting"이 "Run Script"인 위젯에서 오면(앱 안의 실행에 위젯의 매개변수가 같이 온다) 달력을 연다', async () => {
+    for (const widgetParameter of ['inapp', 'dark 앱안']) {
+      const log = withWebView();
+      const host = make({ runsInApp: true, keychain: loggedIn, widgetParameter });
+      await run(host, cfg, now);
+      expect([log.loaded, log.presented, host.state.alerts.length]).toEqual([['https://example.test/'], [true], 0]);
+    }
+    // 매개변수에 inapp이 없으면 전처럼 메뉴다.
+    const log = withWebView();
+    const other = make({ runsInApp: true, keychain: loggedIn, widgetParameter: 'dark', alerts: [{ button: -1 }] });
+    await run(other, cfg, now);
+    expect([log.presented, other.state.alerts.length]).toEqual([[], 1]);
+  });
+
   it('다른 주소 매개변수로 열리면 달력을 열지 않는다', async () => {
     const log = withWebView();
     const host = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }] });
