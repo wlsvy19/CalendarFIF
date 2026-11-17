@@ -3,10 +3,16 @@
  * 위젯은 날마다 메모의 줄들을 그린다(tree.ts, scene.ts). 알림과 카운트다운은 달 문서가 아니라 따로 있는 문서에 있어서
  * (users/{uid}/data/events) 2026-11-17까지는 위젯에 나오지 않았다(읽기는 했다: 아이폰 알림을 예약하려고).
  * 여기서는 그날의 알림과 카운트다운을 메모의 앞줄들로 끼워 넣은 달을 만든다. 웹앱의 칸과 같은 차례다(알림이 시각 차례로, 그다음 카운트다운, 그다음 메모).
+ * 웹앱의 칸처럼 알림 앞에는 종을, 카운트다운 앞에는 모래시계를 붙인다(2026-11-18 사용자: "위젯에서 알람 종모양 이 안보여").
+ * 위젯의 줄은 글자뿐이라 그림 글자를 쓴다.
  */
 import { DONE_MARK } from '../core/text';
 import { eventsByDate, type EventMap } from '../core/events';
 import type { MonthData } from './scene';
+
+/** 알림 줄 앞의 종과 카운트다운 줄 앞의 모래시계. */
+export const ALARM_MARK = '\u{1F514}';
+export const COUNTDOWN_MARK = '⏳';
 
 /** 그 달의 마지막 날('YYYY-MM-DD'). */
 function lastDayOf(monthId: string): string {
@@ -16,13 +22,15 @@ function lastDayOf(monthId: string): string {
   return `${monthId}-${String(last).padStart(2, '0')}`;
 }
 
-/** 한 줄로 만든다: 알림은 "시각 글", 카운트다운은 글. 줄바꿈은 빈칸으로 바꾼다(한 항목이 한 줄이다). 끝낸 것은 메모의 완료 표시를 붙인다. */
-function lineOf(time: string, text: string, done: boolean): string {
+/**
+ * 한 줄로 만든다: 알림은 "종 시각 글", 카운트다운은 "모래시계 글". 줄바꿈은 빈칸으로 바꾼다(한 항목이 한 줄이다).
+ * 끝낸 것은 메모의 완료 표시를 붙인다. 줄이 그림으로 시작하므로, 글이 완료 표시로 시작해도 완료 줄로 읽히지 않는다.
+ */
+function lineOf(mark: string, time: string, text: string, done: boolean): string {
   const flat = text.replace(/\s*\n\s*/g, ' ').trim();
-  const line = time !== '' ? (flat === '' ? time : `${time} ${flat}`) : flat;
-  if (line === '') return '';
-  // 끝내지 않은 글이 완료 표시로 시작하면 완료 줄로 읽히지 않게 앞에 빈칸 없는 폭의 글자를 두지 않고, 표시와 떼어 놓는다.
-  if (!done && line.startsWith(DONE_MARK)) return `​${line}`;
+  const body = time !== '' ? (flat === '' ? time : `${time} ${flat}`) : flat;
+  if (body === '') return '';
+  const line = `${mark} ${body}`;
   return done ? DONE_MARK + line : line;
 }
 
@@ -42,7 +50,9 @@ export function withEventLines(month: MonthData, items: EventMap): MonthData {
   const days = { ...month.days };
   let changed = false;
   for (const [dateKey, lines] of byDate) {
-    const texts = lines.map((l) => lineOf(l.type === 'alarm' ? l.time : '', l.text, l.done)).filter((t) => t !== '');
+    const texts = lines
+      .map((l) => (l.type === 'alarm' ? lineOf(ALARM_MARK, l.time, l.text, l.done) : lineOf(COUNTDOWN_MARK, '', l.text, l.done)))
+      .filter((t) => t !== '');
     if (texts.length === 0) continue;
     const day = dateKey.slice(8, 10);
     const had = days[day];

@@ -855,8 +855,8 @@ describe('아이폰 알림 예약', () => {
     expect(host.state.setWidgets).toHaveLength(1);
   });
 
-  it('그날의 알림을 위젯의 날짜 칸에 메모 앞줄로 그린다(시각과 글). 알림 문서를 읽지 못하면 마지막으로 읽은 것을 그리고, 권한이 없으면 그리지 않는다', async () => {
-    const shown = (h: FakeHost): string[] => textsOf(lastWidget(h)).filter((t) => t.startsWith('09:30'));
+  it('그날의 알림을 위젯의 날짜 칸에 메모 앞줄로 그린다(종, 시각, 글). 알림 문서를 읽지 못하면 마지막으로 읽은 것을 그리고, 권한이 없으면 그리지 않는다', async () => {
+    const shown = (h: FakeHost): string[] => textsOf(lastWidget(h)).filter((t) => t.startsWith('🔔 09:30'));
     const host = makeNative({ keychain: loggedIn }, withEvents());
     await run(host, cfg, now);
     expect(shown(host)).toHaveLength(1);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EventMap } from '../core/events';
 import { parseEventMap } from '../core/events';
-import { withEventLines } from './eventLines';
+import { ALARM_MARK, COUNTDOWN_MARK, withEventLines } from './eventLines';
 import type { MonthData } from './scene';
 import { memoLines } from './text';
 
@@ -20,23 +20,27 @@ const items = (raw: Record<string, unknown>): EventMap => {
 const month = (days: MonthData['days'] = {}): MonthData => ({ monthId: '2026-11', days });
 
 describe('withEventLines', () => {
-  it('그날의 알림을 "시각 글"로 메모 앞줄에 끼워 넣는다. 메모와 색은 그대로다', () => {
+  it('종과 모래시계는 그림 글자다', () => {
+    expect([ALARM_MARK, COUNTDOWN_MARK]).toEqual(['🔔', '⏳']);
+  });
+
+  it('그날의 알림을 "종 시각 글"로 메모 앞줄에 끼워 넣는다. 메모와 색은 그대로다', () => {
     const before = month({ '18': { text: '장보기\n[+]세탁', color: 'F12424' } });
     const after = withEventLines(before, items({ evaaaaaaaaaaaaaaaa: alarm('2026-11-18', '08:45', '약 먹기') }));
-    expect(after.days['18']).toEqual({ text: '08:45 약 먹기\n장보기\n[+]세탁', color: 'F12424' });
+    expect(after.days['18']).toEqual({ text: '🔔 08:45 약 먹기\n장보기\n[+]세탁', color: 'F12424' });
     // 위젯이 그리는 줄로 읽으면 알림이 맨 앞이다.
-    expect(memoLines(after.days['18'].text)).toEqual([{ text: '08:45 약 먹기', done: false }, { text: '장보기', done: false }, { text: '세탁', done: true }]);
+    expect(memoLines(after.days['18'].text)).toEqual([{ text: '🔔 08:45 약 먹기', done: false }, { text: '장보기', done: false }, { text: '세탁', done: true }]);
     // 받은 달은 바꾸지 않는다.
     expect(before.days['18'].text).toBe('장보기\n[+]세탁');
   });
 
-  it('메모가 없던 날에도 생긴다(색 없는 날). 알림은 시각 차례, 그다음 카운트다운', () => {
+  it('메모가 없던 날에도 생긴다(색 없는 날). 알림은 시각 차례, 그다음 카운트다운(모래시계)', () => {
     const after = withEventLines(month(), items({
       evaaaaaaaaaaaaaaaa: alarm('2026-11-20', '17:00', '본부 회의'),
       evbbbbbbbbbbbbbbbb: alarm('2026-11-20', '09:00', '출근'),
       evcccccccccccccccc: countdown('2026-11-20', '시험'),
     }));
-    expect(after.days['20']).toEqual({ text: '09:00 출근\n17:00 본부 회의\n시험', color: '' });
+    expect(after.days['20']).toEqual({ text: '🔔 09:00 출근\n🔔 17:00 본부 회의\n⏳ 시험', color: '' });
     expect(Object.keys(after.days)).toEqual(['20']);
   });
 
@@ -46,8 +50,8 @@ describe('withEventLines', () => {
       evcccccccccccccccc: alarm('2026-11-05', '09:00', '첫 줄\n둘째 줄'),
     }));
     expect(memoLines(after.days['05'].text)).toEqual([
-      { text: '07:00 운동', done: true },
-      { text: '09:00 첫 줄 둘째 줄', done: false },
+      { text: '🔔 07:00 운동', done: true },
+      { text: '🔔 09:00 첫 줄 둘째 줄', done: false },
     ]);
   });
 
@@ -63,7 +67,7 @@ describe('withEventLines', () => {
       evcccccccccccccccc: alarm('2026-10-31', '10:00', '지난달'),
     }));
     expect(Object.keys(after.days).sort()).toEqual(['02', '09', '16', '23', '30']);
-    expect(after.days['30'].text).toBe('10:00 주간 회의');
+    expect(after.days['30'].text).toBe('🔔 10:00 주간 회의');
   });
 
   it('넣을 것이 없으면 받은 달을 그대로 돌려준다. 달의 번호가 이상해도 던지지 않는다', () => {

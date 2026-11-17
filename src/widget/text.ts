@@ -6,7 +6,10 @@ function isWide(cp: number): boolean {
     (cp >= 0x3130 && cp <= 0x318f) ||
     (cp >= 0xac00 && cp <= 0xd7a3) ||
     (cp >= 0x2e80 && cp <= 0x9fff) ||
-    (cp >= 0xff00 && cp <= 0xffef)
+    (cp >= 0xff00 && cp <= 0xffef) ||
+    // 그림 글자(알림의 종, 카운트다운의 모래시계: eventLines.ts)도 한 칸을 다 쓴다.
+    (cp >= 0x1f000 && cp <= 0x1faff) ||
+    (cp >= 0x2300 && cp <= 0x23ff)
   );
 }
 
