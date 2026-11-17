@@ -77,6 +77,12 @@ export function settlePending(monthId: string, times: Record<string, number>, st
   return edits.length === state.edits.length ? state : { ...state, edits };
 }
 
+/** applyPending이 얹을 편집의 수(메뉴의 상태에 적는다). */
+export function countPending(monthId: string, times: Record<string, number>, state: PendingState | null, uid: string, nowMs: number): number {
+  if (!state || state.uid !== uid || nowMs - state.savedAt > PENDING_TTL_MS) return 0;
+  return state.edits.filter((e) => e.monthId === monthId && (times[e.day] ?? 0) < e.editedAt).length;
+}
+
 /**
  * 서버에서 읽은 달(days) 위에 아직 올라가지 않은 편집을 얹은 것을 돌려준다. days는 바꾸지 않는다.
  * times는 서버가 가진 날짜별 고친 시각이다. 서버의 것이 같거나 더 새로우면(올라갔거나 다른 기기가 그 뒤에 고쳤다) 서버의 것을 둔다.

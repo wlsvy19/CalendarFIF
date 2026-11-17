@@ -1206,7 +1206,7 @@ describe('자동 업데이트를 이어 붙인 run', () => {
     const host = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }] });
     await run(host, versioned, now);
     expect(host.state.alerts[0].title).toBe('CalendarFIF 위젯 0.9.0 (2026-11-16) · 알림 0개 예약됨');
-    expect(host.state.alerts[0].message.split('\n\n')).toEqual(['앞으로 7일 안에 울릴 알림이 없습니다.', expect.stringContaining('새 버전이 나오면 스스로 받습니다.')]);
+    expect(host.state.alerts[0].message.split('\n\n').slice(0, 2)).toEqual(['앞으로 7일 안에 울릴 알림이 없습니다.', expect.stringContaining('새 버전이 나오면 스스로 받습니다.')]);
   });
 });
 
@@ -1439,6 +1439,7 @@ describe('위젯에서 연 달력이 아직 올리지 못한 편집', () => {
     expect(cacheOf(host)).toEqual({
       monthId: '2026-11', days: { '13': { text: '리뷰', color: '' } }, savedAt: 1, activeAt: NOW,
       pending: { uid: 'owner-test-uid', savedAt: NOW, edits: [edit('16', 'AI 생산성')] },
+      bridge: expect.objectContaining({ at: NOW, fail: 0, lastOkAt: NOW, lastError: '' }),
     });
   });
 
@@ -1660,14 +1661,15 @@ describe('위젯에서 연 달력의 주소와 상태', () => {
     }
   });
 
-  it('Scriptable의 메뉴에 그 상태를 한 줄로 적는다. 열어 본 적이 없으면 적지 않는다', async () => {
+  it('Scriptable의 메뉴에 그 상태를 적는다. 적어 둔 것이 없으면 적지 않는다', async () => {
     const at = new Date(2026, 10, 17, 9, 41).getTime();
     const seen = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }], files: { [CACHE]: JSON.stringify({ web: { at, app: '0.9.9', sw: false, bridge: true } }) } });
     await run(seen, cfg, now);
-    expect(seen.state.alerts[0].message).toContain('위젯에서 연 달력(11월 17일 09:41 확인): 웹앱 0.9.9, 서비스 워커 없음, 위젯에 넘기기 켜짐');
+    expect(seen.state.alerts[0].message).toContain('— 상태 —\n위젯 그림: 기록 없음');
+    expect(seen.state.alerts[0].message).toContain('달력 화면(11/17 09:41:00): 웹앱 0.9.9, 서비스 워커 없음, 넘기기 켜짐');
     const never = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }] });
     await run(never, cfg, now);
-    expect(never.state.alerts[0].message).not.toContain('위젯에서 연 달력');
+    expect(never.state.alerts[0].message).not.toContain('— 상태 —');
   });
 });
 
@@ -1738,5 +1740,80 @@ describe('위젯에서 연 달력을 쓴 직후에는 곧 다시 그려 달라�
     const host = make({ files: { [CACHE]: JSON.stringify({ activeAt: NOW - 1000 }) } });
     await run(host, cfg, now);
     expect(((lastWidget(host).props.refreshAfterDate as Date).getTime() - NOW) / 1000).toBe(15);
+  });
+});
+
+describe('메뉴의 상태에 적을 기록', () => {
+  const NOW = now().getTime();
+  const cacheOf = (h: FakeHost): Record<string, unknown> => JSON.parse(h.state.files.get(CACHE) ?? '{}');
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).WebView;
+  });
+
+  it('위젯을 그릴 때마다 그린 때, 버전, 달을 읽은 곳, 얹은 편집 수, 다음에 청한 때를 적는다(마지막 여덟 번)', async () => {
+    const pending = { uid: 'owner-test-uid', savedAt: NOW - 1000, edits: [{ monthId: '2026-11', day: '20', text: '새 메모', color: '', editedAt: NOW - 500 }] };
+    const old = Array.from({ length: 8 }, (_, i) => ({ at: NOW - 10_000 + i, v: '0.9.11', src: 'server', over: 0, next: NOW }));
+    const host = make({ keychain: loggedIn, files: { [CACHE]: JSON.stringify({ pending, draws: old }) } });
+    await run(host, { ...cfg, version: '0.9.11 (2026-11-17)' }, now);
+    const draws = cacheOf(host).draws as { at: number }[];
+    expect(draws).toHaveLength(8);
+    expect(draws[0].at).toBe(NOW - 10_000 + 1);
+    expect(draws[7]).toEqual({ at: NOW, v: '0.9.11 (2026-11-17)', src: 'server', over: 1, next: NOW + 120_000 });
+  });
+
+  it('네트워크가 안 되면 보관해 둔 것으로, 로그인이 없으면 로그인 안내로 적는다', async () => {
+    const offline = make({ keychain: loggedIn, files: { [CACHE]: JSON.stringify({ monthId: '2026-11', days: {}, savedAt: 1 }) } }, { read: () => { throw new Error('offline'); } });
+    await run(offline, cfg, now);
+    expect((cacheOf(offline).draws as { src: string }[]).at(-1)!.src).toBe('cache');
+    const loggedOut = make({});
+    await run(loggedOut, cfg, now);
+    expect((cacheOf(loggedOut).draws as { src: string }[]).at(-1)!.src).toBe('login');
+  });
+
+  it('웹 화면에서 식을 돌린 성공과 실패를 세고 마지막 실패의 까닭을 적는다', async () => {
+    let n = 0;
+    (globalThis as Record<string, unknown>).WebView = class {
+      async loadURL(): Promise<void> {}
+      async present(): Promise<void> {}
+      evaluateJavaScript(js: string): Promise<unknown> {
+        if (js.includes('__calfifApp')) return Promise.resolve('');
+        n += 1;
+        return n === 2 ? Promise.reject(new Error('웹 화면이 답하지 못했다')) : Promise.resolve('');
+      }
+    };
+    const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
+    await run(host, cfg, now);
+    expect(cacheOf(host).bridge).toEqual({ at: NOW, ok: 2, fail: 1, lastOkAt: NOW, lastError: '웹 화면이 답하지 못했다' });
+  });
+
+  it('불러오기가 끝났다는 답이 없어도 4초 뒤에는 읽기 시작한다', async () => {
+    vi.useFakeTimers();
+    try {
+      let close!: () => void;
+      const asked: string[] = [];
+      (globalThis as Record<string, unknown>).WebView = class {
+        loadURL(): Promise<void> {
+          return new Promise(() => {});
+        }
+        present(): Promise<void> {
+          return new Promise<void>((resolve) => { close = resolve; });
+        }
+        async evaluateJavaScript(js: string): Promise<string> {
+          asked.push(js);
+          return '';
+        }
+      };
+      const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
+      const done = run(host, cfg, now);
+      await vi.advanceTimersByTimeAsync(3999);
+      expect(asked).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(asked.length).toBeGreaterThan(0);
+      close();
+      await vi.advanceTimersByTimeAsync(400);
+      await done;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
