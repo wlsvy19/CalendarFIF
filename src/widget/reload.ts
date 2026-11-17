@@ -21,10 +21,10 @@ export const REPEATABLE: readonly ReloadHow[] = ['setWidget', 'ping', 'complete'
 export type ReloadWhy = 'probe' | 'save' | 'leave';
 /**
  * 한 번 해 본 기록. at: 한 때. got: 그 뒤에 시작한 위젯 그림의 시각(없으면 0. 위젯이 그리면서 적는다).
- * alive: 하고 나서도 스크립트가 돌고 있었다.
+ * alive: 하고 나서도 스크립트가 돌고 있었다(메뉴에서 시험한 것에만 적는다).
  * void: 지켜보는 중에 메뉴나 달력을 닫았다. 닫으면 스크립트가 끝나고 그것이 위젯을 그리게 하므로, 그 뒤의 그림은 이 시도의 것으로 치지 않는다.
  * away: 지켜보는 중에 화면이 가려졌거나(홈 화면으로 나갔다) 앱이 멈춰 있었다. 그 뒤에 그려지면 이 시도의 것이지만(나가기 전, 화면 앞에 있을 때 한 것이다),
- *   그려지지 않았다고 안 되는 것으로 치지는 않는다.
+ *   그려지지 않았다고 바로 안 되는 것으로 치지는 않는다.
  * shut: 하자마자 메뉴가 닫혔다(그 방법이 띄운 것을 닫는 것일 수 있다). err: 하지 못한 까닭.
  */
 export type ReloadTry = { how: ReloadHow; why: ReloadWhy; at: number; got: number; alive: boolean; void: boolean; away: boolean; shut: boolean; err: string };
@@ -33,7 +33,9 @@ export type Verdict = 'works' | 'fails' | 'bad' | 'unknown';
 
 /** 판정을 처음부터 다시 하게 하려면 올린다(보관 파일의 기록을 버린다). */
 export const RELOAD_EPOCH = 1;
-export const MAX_TRIES = 12;
+export const MAX_TRIES = 28;
+/** 방법마다 판정에 들어가는 기록을 이만큼은 남긴다(다른 기록에 밀려 나가지 않게). */
+export const KEEP_PER_HOW = 6;
 /** 한 뒤 이 안에 시작한 위젯 그림을 그 시도의 것으로 본다(ping은 새 실행이 새 버전을 확인하고 끝난 뒤에야 그려진다). */
 export const CREDIT_MS = 5000;
 /** 이만큼 지나도 그림이 없으면 그려지지 않은 것으로 본다(위젯은 다 그린 뒤에 적으므로 CREDIT_MS보다 길다). */
@@ -42,10 +44,34 @@ export const SETTLE_MS = 10_000;
 export const ALIVE_MS = 1200;
 /** 하고 나서 이 안에 메뉴가 닫히면 그 방법이 닫은 것일 수 있다. */
 export const SHUT_MS = 1500;
+/** 나가서 지켜보지 못했고 그림도 없는 일이 이만큼 잇달으면, 되던 방법도 모르는 것으로 돌린다(다시 시험한다). */
+export const AWAY_LIMIT = 3;
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const HOWS: readonly string[] = ['setWidget', 'ping', 'complete', 'finish'];
 const WHYS: readonly string[] = ['probe', 'save', 'leave'];
+
+/** 판정에 끝내 들어가지 않을 기록인가(닫아서 무효가 됐다, 나간 뒤에 했다). 하자마자 메뉴가 닫힌 것은 판정에 들어간다. */
+const spent = (t: ReloadTry): boolean => (t.void && !t.shut) || t.why === 'leave';
+
+/**
+ * 스물여덟 개까지만 남긴다. 방법마다 판정에 들어가는 마지막 기록 여섯 개는 꼭 남기고, 남는 자리는 가장 나중의 것들로 채운다.
+ * 옛 것부터만 버리면 판정의 근거(메뉴에서 시험한 기록)가 저장할 때마다 쌓이는 기록에 밀려 나가, 같은 시험을 되풀이하게 된다.
+ */
+function trim(tries: ReloadTry[]): ReloadTry[] {
+  if (tries.length <= MAX_TRIES) return tries;
+  const keep = new Set<number>();
+  const perHow = new Map<ReloadHow, number>();
+  for (let i = tries.length - 1; i >= 0; i -= 1) {
+    const t = tries[i];
+    const count = perHow.get(t.how) ?? 0;
+    if (spent(t) || count >= KEEP_PER_HOW) continue;
+    keep.add(i);
+    perHow.set(t.how, count + 1);
+  }
+  for (let i = tries.length - 1; i >= 0 && keep.size < MAX_TRIES; i -= 1) keep.add(i);
+  return tries.filter((_, i) => keep.has(i));
+}
 
 /** 보관 파일의 reload 칸({ epoch, tries })을 읽는다(옛 것이 앞). 판 번호가 다르거나 모양이 다른 것은 버린다. */
 export function triesOf(v: unknown): ReloadTry[] {
@@ -60,24 +86,11 @@ export function triesOf(v: unknown): ReloadTry[] {
       alive: t.alive === true, void: t.void === true, away: t.away === true, shut: t.shut === true, err: typeof t.err === 'string' ? t.err : '',
     });
   }
-  return out.slice(-MAX_TRIES);
+  return trim(out);
 }
 
-/** 판정에 끝내 들어가지 않을 기록인가(닫아서 무효가 됐다, 나간 뒤에 했다, 나가서 지켜보지 못했고 그림도 없다). */
-const spent = (t: ReloadTry): boolean => t.void || t.why === 'leave' || (t.away && t.got === 0);
-
-/**
- * 보관 파일에 적을 모양. 열두 개를 넘으면 판정에 들어가지 않을 것부터 버리고(마지막 둘은 방금 한 것이라 둔다), 그래도 넘으면 옛 것부터 버린다.
- * 저장하자마자 홈 화면으로 나가는 일이 흔해서, 옛 것부터만 버리면 판정의 근거(메뉴에서 시험해 그려진 기록)가 그런 기록에 밀려 나간다.
- */
-export function reloadCell(tries: ReloadTry[]): { epoch: number; tries: ReloadTry[] } {
-  const kept = [...tries];
-  for (let i = 0; kept.length > MAX_TRIES && i < kept.length - 2; ) {
-    if (spent(kept[i])) kept.splice(i, 1);
-    else i += 1;
-  }
-  return { epoch: RELOAD_EPOCH, tries: kept.slice(-MAX_TRIES) };
-}
+/** 보관 파일에 적을 모양. */
+export const reloadCell = (tries: ReloadTry[]): { epoch: number; tries: ReloadTry[] } => ({ epoch: RELOAD_EPOCH, tries: trim(tries) });
 
 /**
  * drawAt에 시작한 위젯 그림을 그것을 부른 시도에 적는다: 그 앞 CREDIT_MS 안에 한 것 가운데 가장 나중의 것.
@@ -94,8 +107,11 @@ export function creditDraw(tries: ReloadTry[], drawAt: number): ReloadTry[] | nu
   return null;
 }
 
-type Outcome = 'hit' | 'miss' | 'hurt' | 'open';
-/** 한 번의 결과. open: 아직 모른다(지켜보는 중이거나 끝까지 지켜보지 못했다). hurt: 스크립트가 멈췄거나 메뉴가 닫혔다. */
+/**
+ * 한 번의 결과. hit: 그려졌다. miss: 화면 앞에서 다 지켜보고도 그려지지 않았다. hurt: 스크립트가 멈췄거나 하자마자 메뉴가 닫혔다.
+ * away: 나가서 지켜보지 못했고 그림도 없다. open: 판정에 넣지 않는다(지켜보는 중이다, 닫아서 무효다, 나간 뒤에 한 것이다).
+ */
+export type Outcome = 'hit' | 'miss' | 'hurt' | 'away' | 'open';
 export function outcomeOf(t: ReloadTry, now: number): Outcome {
   if (t.why === 'leave') return 'open';
   if (t.shut) return 'hurt';
@@ -105,40 +121,56 @@ export function outcomeOf(t: ReloadTry, now: number): Outcome {
   // 스크립트가 멈췄는지는 메뉴에서 시험한 것으로만 가린다(달력에서는 저장하자마자 홈 화면으로 나가는 일이 흔하다).
   if (t.why === 'probe' && t.how !== 'finish' && !t.alive) return settled ? 'hurt' : 'open';
   if (t.got > 0) return 'hit';
-  if (t.away) return 'open';
-  return settled ? 'miss' : 'open';
+  if (!settled) return 'open';
+  return t.away ? 'away' : 'miss';
 }
 
 /**
  * 그 방법이 되는지. 나중의 기록부터 본다.
- * 그려졌으면 된다(그 뒤에 한 번 안 그려진 것은 넘어간다). 두 번 잇달아 안 그려졌으면 안 된다. 그려진 적 없이 한 번 안 그려졌으면
- * 여러 번 쓰는 방법은 안 되는 것으로, 스크립트 끝내기는 모르는 것으로 둔다(마지막 수단이라 한 번 더 해 본다).
- * 두 번 잇달아 스크립트가 멈추거나 메뉴가 닫혔으면 쓰지 않는다(한 번은 우연일 수 있어 다시 시험한다).
+ * - 여러 번 쓰는 방법은 두 번 그려져야 되는 것으로 본다(한 번은 다른 까닭으로 그려진 것일 수 있다. 한 번뿐이면 모르는 것으로 두어 다시 시험한다).
+ *   스크립트 끝내기는 한 번 그려지면 된다. 그려진 것 앞에(나중에) 한 번 안 그려진 것은 넘어간다.
+ * - 두 번 잇달아 안 그려졌으면 안 된다. 그려진 적 없이 한 번 안 그려졌으면 여러 번 쓰는 방법은 안 되는 것으로,
+ *   스크립트 끝내기는 모르는 것으로 둔다(마지막 수단이라 한 번 더 해 본다).
+ * - 두 번 잇달아 스크립트가 멈추거나 메뉴가 닫혔으면 쓰지 않는다(한 번은 우연일 수 있어 다시 시험한다).
+ * - 나가서 지켜보지 못했고 그림도 없는 일이 세 번 잇달았으면 모르는 것으로 돌린다(되던 것이 안 되게 됐을 수 있다).
  */
 export function verdictOf(how: ReloadHow, tries: ReloadTry[], now: number): Verdict {
+  let aways = 0;
   let misses = 0;
   let hurts = 0;
-  let first = true;
+  let hits = 0;
+  let decided = false;
   for (let i = tries.length - 1; i >= 0; i -= 1) {
     const t = tries[i];
     if (t.how !== how) continue;
     const outcome = outcomeOf(t, now);
     if (outcome === 'open') continue;
+    if (outcome === 'away') {
+      if (!decided) {
+        aways += 1;
+        if (aways >= AWAY_LIMIT) return 'unknown';
+      }
+      continue;
+    }
     if (outcome === 'hurt') {
-      if (!first && hurts === 0) break; // 앞의 판정 뒤에 나온 옛 기록이다
+      if (decided && hurts === 0) break; // 앞의 판정 뒤에 나온 옛 기록이다
       hurts += 1;
-      first = false;
+      decided = true;
       if (hurts >= 2) return 'bad';
       continue;
     }
     if (hurts > 0) return 'unknown'; // 한 번 멈췄다: 다시 시험한다
-    first = false;
-    if (outcome === 'hit') return misses <= 1 ? 'works' : 'fails';
+    decided = true;
+    if (outcome === 'hit') {
+      hits += 1;
+      if (how === 'finish' || hits >= 2) return 'works';
+      continue;
+    }
+    if (hits > 0) break; // 그려진 것보다 옛 기록이다
     misses += 1;
     if (misses >= 2) return 'fails';
   }
-  if (hurts > 0) return 'unknown';
-  if (misses === 0) return 'unknown';
+  if (hurts > 0 || hits > 0 || misses === 0) return 'unknown';
   return how === 'finish' ? 'unknown' : 'fails';
 }
 

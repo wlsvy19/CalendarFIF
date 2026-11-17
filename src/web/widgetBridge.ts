@@ -33,17 +33,19 @@ export function pendingForWidget(uid: string, pending: PendingEdit[], valueOf: (
 }
 
 /**
- * 적을 글을 만드는 함수를 준다. 편집 목록이 앞의 것과 달라질 때마다 n이 하나씩 는다.
+ * 적을 글을 만드는 함수를 준다. 올리지 못한 편집의 목록(날짜와 고친 시각)이 앞의 것과 달라질 때마다 n이 하나씩 는다: 저장하면 +1, 서버에 올라가면 +1.
  * 스크립트는 0.3초마다 읽는데, 저장하고 서버에 올라가기까지가 그보다 짧으면 목록이 "없음 → 하나 → 없음"으로 바뀐 것을 보지 못한다.
- * n이 있으면 그 사이에 저장이 있었음을 안다(스크립트는 그때 위젯을 새로 그리게 한다. src/widget/reload.ts).
+ * n이 있으면 그 사이에 저장이 있었음을 안다(스크립트는 그때 위젯을 새로 그리게 한다. src/widget/pending.ts의 savedBetween).
+ * 보여 주는 값만 달라진 것(다른 기기가 고친 것과 합쳐졌다)은 세지 않는다: 저장이 아니다.
  */
 export function pendingTeller(uid: string): (pending: PendingEdit[], valueOf: (monthId: string, day: string) => DayValue | null) => string {
   let n = 0;
-  let last = '';
+  let last: string | null = null;
   return (pending, valueOf) => {
-    const plain = pendingForWidget(uid, pending, valueOf);
-    if (plain !== last) {
-      last = plain;
+    const text = pendingForWidget(uid, pending, valueOf);
+    const keys = (JSON.parse(text) as { edits: { monthId: string; day: string; editedAt: number }[] }).edits.map((e) => `${e.monthId}-${e.day}@${e.editedAt}`).join(',');
+    if (keys !== last) {
+      last = keys;
       n += 1;
     }
     return pendingForWidget(uid, pending, valueOf, n);

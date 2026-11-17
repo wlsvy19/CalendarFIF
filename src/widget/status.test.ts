@@ -66,8 +66,9 @@ describe('statusText', () => {
     expect(reloadLines([], NOW)).toEqual([]);
     expect(statusText({ ...nothing, reload: [] })).toBe('');
     const tries = [
-      t('finish', 'save', at(9, 0, 0)), // 여섯 번째 앞의 것은 시도 줄에 나오지 않는다
+      t('finish', 'save', at(9, 0, 0)), // 마지막 다섯 개보다 앞의 것은 시도 줄에 나오지 않는다
       t('setWidget', 'probe', at(10, 0, 0)),
+      t('ping', 'probe', at(9, 30, 0), { got: at(9, 30, 0) + 700 }),
       t('ping', 'probe', at(10, 0, 4), { got: at(10, 0, 4) + 900 }),
       t('complete', 'probe', at(10, 0, 8), { void: true, shut: true }),
       t('ping', 'save', at(10, 2, 0), { away: true }),

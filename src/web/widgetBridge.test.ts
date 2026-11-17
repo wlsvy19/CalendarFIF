@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import type { DayValue, PendingEdit } from '../core/types';
-import { PENDING_GLOBAL as WIDGET_GLOBAL, parsePendingMessage } from '../widget/pending';
+import { PENDING_GLOBAL as WIDGET_GLOBAL, parsePendingMessage, pendingCount, savedBetween } from '../widget/pending';
 import { PENDING_GLOBAL, pendingForWidget, pendingTeller } from './widgetBridge';
 
 const day = (text: string, color = ''): DayValue => ({ text, color });
@@ -37,7 +37,7 @@ it('올릴 것이 없으면 빈 목록이고, 같은 것은 늘 같은 글이다
   expect(pendingForWidget('u', a, () => day('x'))).toBe(pendingForWidget('u', [...a].reverse(), () => day('x')));
 });
 
-it('편집 목록이 달라질 때마다 n이 는다: 스크립트가 읽는 사이에 저장하고 올라가도 저장이 있었음을 안다', () => {
+it('올리지 못한 편집의 목록이 달라질 때마다 n이 는다(저장 +1, 올라감 +1): 스크립트가 읽는 사이에 저장하고 올라가도 저장이 있었음을 안다', () => {
   const tell = pendingTeller('owner-test-uid');
   const shown = () => day('회의');
   const one = [edit('2026-11', '16', day('회의'), 100)];
@@ -55,6 +55,12 @@ it('편집 목록이 달라질 때마다 n이 는다: 스크립트가 읽는 사
   const again = tell([edit('2026-11', '16', day('회의'), 200)], shown);
   expect(JSON.parse(again).n).toBe(4);
   expect(parsePendingMessage(again)).toEqual({ uid: 'owner-test-uid', edits: [{ monthId: '2026-11', day: '16', text: '회의', color: '', editedAt: 200 }] });
+  // 보여 주는 값만 달라진 것(다른 기기의 것과 합쳐졌다)은 세지 않는다. 글에는 새 값이 들어간다.
+  const merged = tell([edit('2026-11', '16', day('회의'), 200)], () => day('회의\n다른 기기의 줄'));
+  expect([JSON.parse(merged).n, JSON.parse(merged).edits[0].text]).toEqual([4, '회의\n다른 기기의 줄']);
+  // 위젯 쪽의 판정과 맞물린다: 저장은 저장으로, 올라간 것과 값만 달라진 것은 저장이 아닌 것으로 본다.
+  const seen = (text: string) => ({ n: pendingCount(text), edits: parsePendingMessage(text)!.edits });
+  expect([savedBetween(seen(empty), seen(saved)), savedBetween(seen(saved), seen(sent)), savedBetween(seen(empty), seen(sent)), savedBetween(seen(again), seen(merged))]).toEqual([true, false, true, false]);
   // 화면마다 따로 센다.
   expect(JSON.parse(pendingTeller('u')([], shown)).n).toBe(1);
 });

@@ -75,6 +75,30 @@ export function parsePendingMessage(text: string): { uid: string; edits: Pending
   return edits ? { uid: parsed.uid, edits } : null;
 }
 
+/** 웹 화면이 적어 둔 글의 n(편집 목록이 달라질 때마다 는다. src/web/widgetBridge.ts의 pendingTeller). 없으면 0(0.9.12까지의 웹앱). */
+export function pendingCount(text: string): number {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return isObject(parsed) && typeof parsed.n === 'number' && Number.isFinite(parsed.n) && parsed.n > 0 ? parsed.n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * 앞에 읽은 것(before)과 지금 읽은 것(after) 사이에 저장이 있었는가.
+ * 목록에 새 편집(날짜와 고친 시각)이 생겼으면 저장이다. 편집이 서버에 올라가 목록에서 빠지기만 한 것은 저장이 아니다
+ * (앞서 올리지 못해 남아 있던 편집이 달력을 열자마자 올라가는 일이 있다).
+ * 읽는 사이에 저장하고 올라가 버리면 새 편집이 보이지 않는다. 그때는 n으로 안다: n은 목록이 달라질 때마다 하나씩 늘므로
+ * (저장 +1, 올라감 +1), 는 만큼에서 줄어든 편집의 수를 빼고도 남으면 그 사이에 저장이 있었다.
+ */
+export function savedBetween(before: { edits: PendingDay[]; n: number }, after: { edits: PendingDay[]; n: number }): boolean {
+  const key = (e: PendingDay): string => `${e.monthId}-${e.day}@${e.editedAt}`;
+  const had = new Set(before.edits.map(key));
+  if (after.edits.some((e) => !had.has(key(e)))) return true;
+  return after.n - before.n + (after.edits.length - before.edits.length) > 0;
+}
+
 /** 보관 파일의 pending 칸을 읽는다. 없거나 모양이 다르면 null. */
 export function pendingStateOf(v: unknown): PendingState | null {
   if (!isObject(v) || typeof v.uid !== 'string' || v.uid === '') return null;

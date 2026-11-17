@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LOG_GLOBAL, PENDING_TTL_MS, PROBE_JS, applyPending, countPending, parsePendingMessage, parsePoll, parseProbe, pendingStateOf, probeLine, settlePending, webLogOf, webProbeOf, type PendingState } from './pending';
+import { LOG_GLOBAL, PENDING_TTL_MS, PROBE_JS, applyPending, countPending, parsePendingMessage, parsePoll, parseProbe, pendingCount, pendingStateOf, probeLine, savedBetween, settlePending, webLogOf, webProbeOf, type PendingState } from './pending';
 import { LOG_GLOBAL as WEB_LOG_GLOBAL } from '../web/widgetLog';
 
 const edit = (day: string, text: string, color = '', editedAt = 2000, monthId = '2026-11') => ({ monthId, day, text, color, editedAt });
@@ -82,6 +82,50 @@ describe('settlePending', () => {
     const s = state([edit('15', '내가 새롭다', '', 2000)]);
     expect(settlePending('2026-11', { '15': 1999 }, s)).toBe(s);
     expect(settlePending('2026-11', {}, state([]))).toEqual(state([]));
+  });
+});
+
+describe('저장이 있었는지', () => {
+  const a = edit('16', '회의', '', 100);
+  const b = edit('17', '약속', '', 200);
+  const seen = (n: number, edits: ReturnType<typeof edit>[]) => ({ n, edits });
+
+  it('웹 화면이 적어 둔 글의 n을 읽는다. 없거나 모양이 다르면 0', () => {
+    expect(pendingCount(message([], { n: 7 }))).toBe(7);
+    for (const text of [message([]), message([], { n: '7' }), message([], { n: -1 }), message([], { n: null }), 'not json', '[]', '']) expect(pendingCount(text)).toBe(0);
+  });
+
+  it('목록에 새 편집(날짜나 고친 시각이 다른 것)이 생겼으면 저장이다', () => {
+    expect(savedBetween(seen(1, []), seen(2, [a]))).toBe(true);
+    expect(savedBetween(seen(2, [a]), seen(3, [a, b]))).toBe(true);
+    // 같은 날을 다시 고쳤다(시각이 다르다).
+    expect(savedBetween(seen(2, [a]), seen(3, [edit('16', '회의 2', '', 150)]))).toBe(true);
+    // 하나가 올라가는 사이에 다른 날을 고쳤다.
+    expect(savedBetween(seen(2, [a]), seen(4, [b]))).toBe(true);
+    // n을 적지 않는 옛 웹앱(0.9.12까지)도 새 편집으로 안다.
+    expect(savedBetween(seen(0, []), seen(0, [a]))).toBe(true);
+  });
+
+  it('편집이 서버에 올라가 목록에서 빠지기만 한 것, 보여 주는 값만 달라진 것은 저장이 아니다', () => {
+    expect(savedBetween(seen(1, [a]), seen(2, []))).toBe(false);
+    expect(savedBetween(seen(1, [a, b]), seen(2, [b]))).toBe(false);
+    // 둘이 따로 올라갔다(+2), 둘이 한꺼번에 올라갔다(+1).
+    expect(savedBetween(seen(1, [a, b]), seen(3, []))).toBe(false);
+    expect(savedBetween(seen(1, [a, b]), seen(2, []))).toBe(false);
+    expect(savedBetween(seen(2, [a]), seen(2, [{ ...a, text: '다른 기기의 것과 합쳐진 값' }]))).toBe(false);
+    expect(savedBetween(seen(0, [a]), seen(0, []))).toBe(false);
+    expect(savedBetween(seen(3, []), seen(3, []))).toBe(false);
+  });
+
+  it('읽는 사이에 저장하고 올라가 버려 새 편집이 보이지 않아도 n으로 안다', () => {
+    // 저장(+1)하고 올라갔다(+1): 목록은 그대로 비어 있다.
+    expect(savedBetween(seen(1, []), seen(3, []))).toBe(true);
+    // 남아 있던 것이 올라가고(+1), 다른 것을 저장해(+1) 그것도 올라갔다(+1).
+    expect(savedBetween(seen(1, [a]), seen(4, []))).toBe(true);
+    // 같은 날을 다시 고쳐(+1) 올라갔다(+1).
+    expect(savedBetween(seen(2, [a]), seen(4, []))).toBe(true);
+    // 웹 화면이 다시 떠서 n이 처음부터다: 저장으로 보지 않는다.
+    expect(savedBetween(seen(9, []), seen(1, []))).toBe(false);
   });
 });
 

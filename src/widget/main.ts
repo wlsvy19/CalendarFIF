@@ -6,7 +6,7 @@ import { clearAlarms, pendingStatus, scheduleAlarms, scheduleTest, type AlarmSta
 import { isApiError, readEvents, readMonthDoc, readPushDoc, refreshSession, signIn, type Config, type Session } from './api';
 import { pushCoversUntil } from '../push/doc';
 import type { Host, ListWidgetLike } from './host';
-import { POLL_JS, PROBE_JS, applyPending, countPending, parsePendingMessage, parsePoll, parseProbe, pendingStateOf, settlePending, webProbeOf, type PendingState, type WebProbe } from './pending';
+import { POLL_JS, PROBE_JS, applyPending, countPending, parsePendingMessage, parsePoll, parseProbe, pendingCount, pendingStateOf, savedBetween, settlePending, webProbeOf, type PendingDay, type PendingState, type WebProbe } from './pending';
 import { MAX_DRAWS, bridgeOf, drawsOf, leaveOf, statusText, type BridgeNote, type DrawNote, type LeaveNote } from './status';
 import { ALIVE_MS, CREDIT_MS, SETTLE_MS, SHUT_MS, creditDraw, pickReload, reloadCell, toProbe, triesOf, type ReloadHow, type ReloadTry, type ReloadWhy } from './reload';
 import { makeWidget } from './render';
@@ -173,9 +173,9 @@ type ReloadLog = {
   tries(): ReloadTry[];
   /** how를 하고 적는다. 방금 한 것을 아직 지켜보는 중이면(finish가 아닐 때) 하기만 하고 따로 적지 않는다. */
   fire(how: ReloadHow, why: ReloadWhy): void;
-  /** 주기적으로 부른다. visible: 띄운 것이 화면에 보이는가. 스크립트가 살아 있음을 적고, 가려졌거나 멈췄다 깨어났으면 지켜보던 것에 그렇다고 적는다(away). */
+  /** 주기적으로 부른다. visible: 띄운 것이 화면에 보이는가. 가려졌거나 멈췄다 깨어났으면 지켜보던 것에 그렇다고 적고(away), 메뉴에서 시험한 것에는 살아 있음을 적는다. */
   tick(visible: boolean): void;
-  /** 실행이 끝난다. 지켜보던 것을 무효로 한다. menu: 메뉴가 닫혀서 끝난다(방금 한 ping, complete가 닫은 것일 수 있다고 적는다). */
+  /** 실행이 끝난다(또는 달력이 닫혔다). 아직 그림이 적힐 수 있는 것을 무효로 한다: 끝나는 것이 위젯을 그리게 한다. menu: 메뉴가 닫혀서 끝난다(방금 한 ping, complete가 닫은 것일 수 있다고 적는다). */
   end(menu: boolean): void;
   /** at에 한 시도에 그림이 적혔는가. */
   credited(at: number): boolean;
@@ -212,7 +212,8 @@ function reloadLog(host: Host, now: () => Date): ReloadLog {
       // 적지 못하면 그 시도는 판정에 들어가지 않거나 한 번 더 해 보게 된다.
     }
   };
-  const watching = (t: ReloadTry, at: number): boolean => t.got === 0 && !t.void && !t.away && t.err === '' && at - t.at < SETTLE_MS;
+  /** 아직 그림이 적힐 수 있는 시도인가. */
+  const fresh = (t: ReloadTry, at: number): boolean => t.how !== 'finish' && t.got === 0 && !t.void && t.err === '' && at - t.at < CREDIT_MS;
   return {
     tries: read,
     fire(how, why) {
@@ -240,18 +241,20 @@ function reloadLog(host: Host, now: () => Date): ReloadLog {
       const before = lastTick;
       lastTick = at;
       amend((t) => {
-        const alive = t.alive || at - t.at >= ALIVE_MS;
-        // 멈춰 있었거나 가려졌다: 그려지지 않았더라도 안 되는 것으로 칠 수 없다(그려지면 위젯이 적는다).
-        const lost = (gap ? t.got === 0 && !t.void && !t.away && t.err === '' && before - t.at < SETTLE_MS : !visible && watching(t, at)) && t.how !== 'finish';
+        // 살아 있음은 메뉴에서 시험한 것에만 적는다. 그림이 적힐 때를 지나서 적는다: 위젯도 같은 파일을 통째로 고쳐 쓰므로 겹치면 한쪽이 지워진다.
+        const alive = t.alive || (t.why === 'probe' && at - t.at >= CREDIT_MS);
+        // 멈춰 있었거나 가려졌다: 그려지지 않았더라도 바로 안 되는 것으로 칠 수 없다(그려지면 위젯이 적는다).
+        const lost = !t.away && (gap ? fresh(t, before) : !visible && fresh(t, at));
         return alive !== t.alive || lost ? { ...t, alive, away: t.away || lost } : null;
       });
     },
     end(menu) {
       const at = now().getTime();
       amend((t) => {
-        if (t.how === 'finish' || !watching(t, at)) return null;
-        const shut = menu && (t.how === 'ping' || t.how === 'complete') && at - t.at < SHUT_MS;
-        return { ...t, void: true, shut };
+        const alive = t.alive || (t.why === 'probe' && at - t.at >= ALIVE_MS);
+        const cut = fresh(t, at);
+        const shut = cut && menu && (t.how === 'ping' || t.how === 'complete') && at - t.at < SHUT_MS;
+        return alive !== t.alive || cut ? { ...t, alive, void: t.void || cut, shut: t.shut || shut } : null;
       });
     },
     credited(at) {
@@ -268,29 +271,46 @@ const PROBE_WAIT_MS = CREDIT_MS;
 const PROBE_TICK_MS = 300;
 
 /**
- * 메뉴를 띄워 둔 동안, 위젯을 바로 새로 그리게 하는 방법들을 차례로 해 본다(reload.ts). 되는 것이 나오면 멈춘다.
+ * 메뉴를 띄워 둔 동안, 위젯을 바로 새로 그리게 하는 방법들을 차례로 해 본다(reload.ts). 그려진 방법은 한 번 더 해 보고, 두 번 다 그려지면 멈춘다.
  * 결과는 위젯이 그리면서 보관 파일에 적고, 다음에 메뉴를 열면 상태에 보인다. 돌려주는 함수는 시험을 멈춘다(메뉴가 닫힐 때 부른다).
  */
 function probeReload(host: Host, now: () => Date, plan: ReloadHow[]): () => void {
   if (plan.length === 0) return () => {};
   const log = reloadLog(host, now);
+  const queue = [...plan];
   let stopped = false;
   let timer: { invalidate(): void } | undefined;
-  let next = 0;
+  let current: ReloadHow | null = null;
+  let fires = 0; // 지금 방법을 몇 번 했나
   let firedAt = 0;
+  let found = false; // 두 번 다 그려진 방법이 있다
+  const fire = (how: ReloadHow): void => {
+    log.fire(how, 'probe');
+    firedAt = log.lastAt();
+  };
   const step = (): void => {
     if (stopped) return;
     try {
       log.tick(true);
       const at = now().getTime();
-      if (firedAt > 0 && log.credited(firedAt)) next = plan.length; // 되는 방법을 찾았다: 더 해 보지 않는다
-      else if (next < plan.length && (firedAt === 0 || at - firedAt >= PROBE_WAIT_MS)) {
-        log.fire(plan[next], 'probe');
-        firedAt = log.lastAt();
-        next += 1;
+      if (current && !found) {
+        if (log.credited(firedAt)) {
+          // 그려졌다. 다른 까닭으로 그려진 것일 수 있어 한 번 더 해 본다. 두 번 다 그려지면 더 시험하지 않는다.
+          if (fires < 2) {
+            fires += 1;
+            fire(current);
+          } else found = true;
+        } else if (at - firedAt >= PROBE_WAIT_MS) current = null; // 안 그려졌다: 다음 것
       }
-      // 다 해 본 뒤에도 마지막 것을 지켜보는 동안은 돈다(살아 있음을 적는다).
-      if (next >= plan.length && firedAt > 0 && at - firedAt >= SETTLE_MS) return;
+      if (!current && !found && queue.length > 0) {
+        current = queue.shift() ?? null;
+        if (current) {
+          fires = 1;
+          fire(current);
+        }
+      }
+      // 더 할 것이 없어도 마지막 것을 지켜보는 동안은 돈다(살아 있음을 적는다).
+      if ((found || (!current && queue.length === 0)) && at - firedAt >= SETTLE_MS) return;
       timer = host.Timer.schedule(PROBE_TICK_MS, false, step);
     } catch {
       // 타이머가 없으면 시험하지 않는다.
@@ -400,17 +420,19 @@ function keepActive(host: Host, now: () => Date): (quiet?: boolean) => void {
 
 /**
  * 달력을 지켜보는 쪽이 알려 주는 것들.
- * changed: 웹 화면이 적어 둔 것이 바뀌었다(저장했거나 서버에 올라갔다. 처음 읽은 것은 알리지 않는다). visible: 그때 화면이 보이는가.
- * left: 보이던 화면이 가려졌다(앱이 뒤로 갔다). 다시 보였다가 가려지면 또 부른다. tick: 읽을 때마다. check: 3초쯤마다.
+ * changed: 웹 화면에서 저장이 있었다(pending.ts의 savedBetween. 처음 읽은 것과 서버에 올라가기만 한 것은 알리지 않는다). visible: 그때 화면이 보이는가.
+ * left: 보이던 화면이 가려졌다(앱이 뒤로 갔다). 다시 보였다가 가려지면 또 부른다. tick: 읽을 때마다.
+ * check: 3초쯤마다 묻는다. true를 주면 더 지켜보지 않는다(위젯을 다시 눌러 새 달력이 떴다).
  */
-type WatchHooks = { changed(visible: boolean): void; left(): void; tick(visible: boolean): void; check(): void };
+type WatchHooks = { changed(visible: boolean): void; left(): void; tick(visible: boolean): void; check(): boolean };
 
-/** 돌려주는 함수의 fast: 마지막 읽기를 건너뛰고 바로 멈춘다. */
-function watchPending(host: Host, view: WebViewLike, now: () => Date, hooks: WatchHooks): (fast?: boolean) => Promise<void> {
+/** 돌려주는 함수의 fast: 마지막 읽기를 건너뛰고 바로 멈춘다. quiet: 멈추면서 보관 파일에 적지 않는다(새 달력이 적는 칸을 덮어쓰지 않게). */
+function watchPending(host: Host, view: WebViewLike, now: () => Date, hooks: WatchHooks): (fast?: boolean, quiet?: boolean) => Promise<void> {
   if (typeof view.evaluateJavaScript !== 'function') return async () => {};
   let seenVisible = false;
   let leftTold = false;
   let last = '';
+  let lastSeen: { edits: PendingDay[]; n: number } | null = null;
   let lastProbe = '';
   let reads = 0;
   let stopped = false;
@@ -443,9 +465,10 @@ function watchPending(host: Host, view: WebViewLike, now: () => Date, hooks: Wat
     const turn = reads;
     reads += 1;
     if (turn % PROBE_EVERY === 0) {
+      // 새 달력이 떴으면 여기서 그만둔다: 이 달력의 상태를 더 적지 않는다(새 달력이 적는 칸이다).
+      if (hooks.check()) return;
       await probe();
       noteBridge();
-      hooks.check();
     }
     try {
       // 화면이 아직 없거나 닫힌 뒤에는 답이 오지 않을 수 있어 기다리는 시간을 둔다.
@@ -462,7 +485,10 @@ function watchPending(host: Host, view: WebViewLike, now: () => Date, hooks: Wat
       if (got !== '' && got !== last) {
         const message = parsePendingMessage(got);
         if (message) {
-          changed = last !== ''; // 처음 읽은 것은 저장이 아니다
+          const seen = { edits: message.edits, n: pendingCount(got) };
+          // 처음 읽은 것은 저장이 아니다. 편집이 서버에 올라가 목록에서 빠지기만 한 것도 저장이 아니다.
+          changed = lastSeen !== null && savedBetween(lastSeen, seen);
+          lastSeen = seen;
           last = got;
           const pending: PendingState = { uid: message.uid, savedAt: now().getTime(), edits: message.edits };
           updateCache(host, { pending });
@@ -496,7 +522,7 @@ function watchPending(host: Host, view: WebViewLike, now: () => Date, hooks: Wat
     });
   };
   loop();
-  return async (fast = false) => {
+  return async (fast = false, quiet = false) => {
     stopped = true;
     try {
       timer?.invalidate();
@@ -509,7 +535,7 @@ function watchPending(host: Host, view: WebViewLike, now: () => Date, hooks: Wat
       await read();
       await probe();
     }
-    noteBridge();
+    if (!quiet) noteBridge();
   };
 }
 
@@ -544,7 +570,7 @@ function skipLateUpdateCheck(host: Host): void {
  * 달력에서 저장하면 그 순간 위젯을 새로 그리게 한다(reload.ts): Scriptable이 화면 앞에 있을 때 한 것만 iOS가 듣는다
  * (2026-11-17 사용자의 아이폰: 달력을 닫은 그 초에는 위젯이 그려졌고, 홈 화면으로 나간 뒤에 스크립트를 끝낸 0.9.12에서는 그려지지 않았다).
  * 되는 것으로 가려진 방법이 있으면 그것을 하고 달력을 계속 지켜본다. 없으면 달력을 띄운 채 스크립트를 끝낸다(그 달력은 그대로 남는다).
- * 닫지 않고 홈 화면으로 나가도 스크립트는 끝내지 않는다(앱 전환으로 돌아와 고쳐도 지켜보게). 위젯을 다시 눌러 새 달력이 뜨면 앞의 것은 끝낸다.
+ * 닫지 않고 홈 화면으로 나가도 스크립트는 끝내지 않는다(앱 전환으로 돌아와 고쳐도 지켜보게). 위젯을 다시 눌러 새 달력이 뜨면 앞의 것은 더 지켜보지 않는다.
  * 불러오기가 끝나기를 기다리지 않고 바로 띄운다: 기다리는 동안 Scriptable의 화면이 보이지 않게, 그리고 느린 연결에서 멈춰 있지 않게.
  */
 async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Promise<string> {
@@ -556,14 +582,14 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
     // 올리지 못한 편집은 불러오기가 끝난 뒤부터 읽는다(불러오는 중에 웹 화면에서 식을 돌리지 않는다). 끝나기 전에 닫히면 읽지 않는다.
     // 불러오기가 끝났다는 답이 오지 않는 때를 위해 4초 뒤에는 읽기 시작한다.
     let closed = false;
-    let stopWatching: (fast?: boolean) => Promise<void> = async () => {};
+    let stopWatching: (fast?: boolean, quiet?: boolean) => Promise<void> = async () => {};
     let watching = false;
-    // saved: 저장한 것을 위젯에 보이려고 스크립트를 끝낸다. over: 위젯을 다시 눌러 새 달력이 떴다.
+    // saved: 저장한 것을 위젯에 보이려고 스크립트를 끝낸다. over: 위젯을 다시 눌러 새 달력이 떴다(더 지켜보지 않는다).
     let quit: (how: 'saved' | 'over') => void = () => {};
     const early = new Promise<'saved' | 'over'>((resolve) => {
       quit = resolve;
     });
-    // 이 달력의 번호. 위젯을 다시 누르면 새 실행이 자기 번호를 적는다. 그러면 이 실행은 가려진 달력을 더 지켜보지 않고 끝낸다.
+    // 이 달력의 번호(연 시각). 위젯을 다시 누르면 새 실행이 더 큰 번호를 적는다. 그러면 이 실행은 가려진 달력을 더 지켜보지 않는다.
     const session = now().getTime();
     updateCache(host, { session });
     const log = reloadLog(host, now);
@@ -575,21 +601,30 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
       log.fire(how, why);
       if (how === 'finish') quit('saved');
     };
+    // 닫힌 뒤의 마지막 읽기에서는 아무것도 하지 않는다: 닫히면 스크립트가 끝나고 그것이 위젯을 그리게 한다.
+    // (닫힌 웹 화면은 가려졌다고 답할 수 있다. 그것을 홈 화면으로 나간 것으로 적으면 끝나면서 그려진 것이 방금 한 시도의 것으로 적힌다.)
     const hooks: WatchHooks = {
       changed: (visible) => {
+        if (closed) return;
         if (visible) request('save');
         else unsent = true;
       },
       left: () => {
+        if (closed) return;
         const note: LeaveNote = { at: now().getTime(), how: 'left' };
         updateCache(host, { leave: note });
         // 편집 화면을 연 채 나가면 웹앱이 그때 저장한다. 뒤로 물러난 뒤라 듣지 않을 수 있지만 청해 둔다.
         if (unsent) request('leave');
       },
-      tick: (visible) => log.tick(visible),
+      tick: (visible) => {
+        if (!closed) log.tick(visible);
+      },
       check: () => {
+        if (closed) return false;
         const other = cacheObject(host)?.session;
-        if (typeof other === 'number' && other !== session) quit('over');
+        if (typeof other !== 'number' || other <= session) return false;
+        quit('over');
+        return true;
       },
     };
     const startWatching = (): void => {
@@ -610,8 +645,9 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
       });
     const stopActive = keepActive(host, now);
     let how: 'closed' | 'saved' | 'over' = 'closed';
+    let shown: Promise<'closed'> = Promise.resolve('closed');
     try {
-      const shown = Promise.resolve(view.present(true)).then(() => 'closed' as const);
+      shown = Promise.resolve(view.present(true)).then(() => 'closed' as const);
       shown.catch(() => {}); // 먼저 끝낸 뒤에 거절돼도 잡지 않은 오류가 되지 않게
       // 달력을 띄워 둔 동안 새 위젯 코드가 있는지 확인해 받아 둔다(던지지 않는다). 달력을 닫지 않고 홈 화면으로 나가는 일이 흔해서,
       // 닫힌 뒤의 확인(update.ts의 runWithUpdate)에만 맡기면 새 코드는 위젯이 세 시간에 한 번 확인할 때에야 온다.
@@ -625,8 +661,14 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
         // 그대로 둔다.
       }
       stopActive(how === 'over'); // 새 달력이 떴으면 그쪽이 적는 것을 덮어쓰지 않는다
-      await stopWatching(how !== 'closed');
+      await stopWatching(how !== 'closed', how === 'over');
       log.end(false);
+    }
+    if (how === 'over') {
+      // 새 달력이 떠 있는 동안에는 이 스크립트를 끝내지 않는다(끝나는 것이 새 달력을 건드리는지 모른다).
+      // 가려진 이 달력이 닫힐 때 끝난다. 닫히지 않으면 0.9.11까지처럼 끝나지 않은 채 남는다.
+      await shown.catch(() => 'closed' as const);
+      return '';
     }
     if (how === 'closed') {
       const note: LeaveNote = { at: now().getTime(), how };
