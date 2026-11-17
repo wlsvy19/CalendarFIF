@@ -507,6 +507,13 @@ describe('화면이 가려질 때 저장해 두기(onKeep)', () => {
     expect(onKeep.mock.calls[1]).toEqual([{ text: '회의', color: 'F12424' }]);
   });
 
+  it('고친 것이 없으면, 저장된 글이 다듬어지지 않은 것이어도 넘기지 않는다', () => {
+    const onKeep = vi.fn();
+    mount({ text: '끝에 빈칸  ', color: '' }, { onKeep });
+    setVisibility('hidden');
+    expect(onKeep).not.toHaveBeenCalled();
+  });
+
   it('다시 보일 때는 넘기지 않는다', () => {
     const onKeep = vi.fn();
     const { area } = mount({ text: '', color: '' }, { onKeep });

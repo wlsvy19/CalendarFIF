@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseEventsDocument, parseMonthDocument, readEvents, readMonth, refreshSession, signIn, type ApiError, type Config } from './api';
+import { parseEventsDocument, parseMonthDocument, parseMonthTimes, readEvents, readMonth, readMonthDoc, refreshSession, signIn, type ApiError, type Config } from './api';
 import { makeFakeHost, type FakeAnswer, type FakeRequest } from './fakeHost';
 
 const cfg: Config = { projectId: 'demo-calfif', apiKey: 'demo-key', appUrl: 'https://example.test/' };
@@ -64,6 +64,19 @@ describe('요청의 모양', () => {
     const host = hostWith(() => ({ body: { idToken: 'I', refreshToken: 'R', localId: 'u' } }));
     await signIn(host, { ...cfg, authBase: 'http://x.test/a' }, 'e', 'p');
     expect(host.state.requests[0].url).toBe('http://x.test/a/v1/accounts:signInWithPassword?key=demo-key');
+  });
+
+  it('날짜별 고친 시각도 읽는다: 정수(글)와 소수(숫자), 읽지 못한 날은 넣지 않는다', async () => {
+    const day = (editedAt: unknown) => ({ mapValue: { fields: { text: { stringValue: 'A' }, color: { stringValue: '' }, ...(editedAt === undefined ? {} : { editedAt }) } } });
+    const body = { fields: { days: { mapValue: { fields: {
+      '13': day({ integerValue: '1763370000000' }), '14': day({ doubleValue: 1763370000001.5 }), '15': day(undefined), '16': day({ stringValue: 'x' }), '17': day({ integerValue: 'abc' }), '18': day({ integerValue: '0' }), x: day({ integerValue: '5' }),
+    } } } } };
+    expect(parseMonthTimes(body)).toEqual({ '13': 1763370000000, '14': 1763370000001.5 });
+    expect(parseMonthTimes({})).toEqual({});
+    expect(parseMonthTimes(null)).toEqual({});
+    const read = await readMonthDoc(hostWith(() => ({ body })), cfg, session, '2026-11');
+    expect([Object.keys(read.days).sort(), read.times]).toEqual([['13', '14', '15', '16', '17', '18'], { '13': 1763370000000, '14': 1763370000001.5 }]);
+    expect(await readMonthDoc(hostWith(() => ({ status: 404, body: {} })), cfg, session, '2026-12')).toEqual({ days: {}, times: {} });
   });
 
   it('404는 빈 달', async () => {

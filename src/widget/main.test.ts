@@ -1363,3 +1363,192 @@ describe('위젯을 눌렀을 때 여는 곳(매개변수 inapp)', () => {
     expect([log.loaded, host.state.alerts.length]).toEqual([[], 1]);
   });
 });
+
+describe('위젯에서 연 달력이 아직 올리지 못한 편집', () => {
+  const NOW = now().getTime();
+  const pendingText = (edits: unknown[], uid = 'owner-test-uid'): string => JSON.stringify({ v: 1, uid, edits });
+  const edit = (day: string, text: string, color = '', editedAt = NOW - 500) => ({ monthId: '2026-11', day, text, color, editedAt });
+  const cacheOf = (h: FakeHost): Record<string, unknown> => JSON.parse(h.state.files.get(CACHE) ?? '{}');
+  /** 웹 화면이 window.__calfifPending에 적어 둔 것을 돌려주는 가짜 WebView. answers는 읽을 때마다 차례로 준다(마지막 것은 되풀이한다). */
+  const withPendingView = (answers: unknown[], present: () => Promise<void> = async () => {}) => {
+    const asked: [string, unknown][] = [];
+    let i = 0;
+    (globalThis as Record<string, unknown>).WebView = class {
+      async loadURL(): Promise<void> {}
+      present(): Promise<void> {
+        return present();
+      }
+      evaluateJavaScript(js: string, useCallback?: boolean): Promise<unknown> {
+        asked.push([js, useCallback]);
+        const answer = answers[Math.min(i, answers.length - 1)];
+        i += 1;
+        return typeof answer === 'function' ? (answer as () => Promise<unknown>)() : Promise.resolve(answer);
+      }
+    };
+    return asked;
+  };
+  const openHost = (files: Record<string, string> = {}) => make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' }, files });
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).WebView;
+  });
+
+  it('달력을 띄운 동안 웹 화면이 적어 둔 것을 읽어 보관 파일의 pending 칸에 적는다. 다른 칸은 그대로 둔다', async () => {
+    const asked = withPendingView([pendingText([edit('16', 'AI 생산성')])]);
+    const host = openHost({ [CACHE]: JSON.stringify({ monthId: '2026-11', days: { '13': { text: '리뷰', color: '' } }, savedAt: 1 }) });
+    await run(host, cfg, now);
+    expect(asked[0]).toEqual(['String(window.__calfifPending || "")', false]);
+    expect(cacheOf(host)).toEqual({
+      monthId: '2026-11', days: { '13': { text: '리뷰', color: '' } }, savedAt: 1,
+      pending: { uid: 'owner-test-uid', savedAt: NOW, edits: [edit('16', 'AI 생산성')] },
+    });
+  });
+
+  it('올릴 것이 없다는 빈 목록도 적는다(앞의 것을 지운다). 적어 둔 것이 없거나 모양이 다르면 건드리지 않는다', async () => {
+    const before = JSON.stringify({ pending: { uid: 'owner-test-uid', savedAt: 5, edits: [edit('16', '앞의 것')] } });
+    withPendingView([pendingText([])]);
+    const cleared = openHost({ [CACHE]: before });
+    await run(cleared, cfg, now);
+    expect(cacheOf(cleared).pending).toEqual({ uid: 'owner-test-uid', savedAt: NOW, edits: [] });
+
+    for (const answer of ['', 'not json', undefined, 7, JSON.stringify({ v: 2, uid: 'u', edits: [] })]) {
+      withPendingView([answer]);
+      const kept = openHost({ [CACHE]: before });
+      await run(kept, cfg, now);
+      expect(kept.state.files.get(CACHE)).toBe(before);
+    }
+  });
+
+  it('띄워 둔 동안 0.3초마다 다시 읽고, 닫히면 바로 한 번, 0.3초 뒤에 한 번 더 읽고 멈춘다', async () => {
+    vi.useFakeTimers();
+    try {
+      let close!: () => void;
+      const asked = withPendingView(
+        [pendingText([]), pendingText([]), pendingText([edit('16', '방금 고친 것')]), pendingText([edit('16', '닫기 직전에 고친 것')]), pendingText([edit('16', '닫히면서 저장해 둔 것')])],
+        () => new Promise<void>((resolve) => { close = resolve; }),
+      );
+      const host = openHost();
+      const done = run(host, cfg, now);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(asked).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(asked).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(300);
+      expect((cacheOf(host).pending as { edits: unknown[] }).edits).toEqual([edit('16', '방금 고친 것')]);
+      close();
+      await vi.advanceTimersByTimeAsync(0);
+      expect((cacheOf(host).pending as { edits: unknown[] }).edits).toEqual([edit('16', '닫기 직전에 고친 것')]);
+      await vi.advanceTimersByTimeAsync(300);
+      await done;
+      expect((cacheOf(host).pending as { edits: unknown[] }).edits).toEqual([edit('16', '닫히면서 저장해 둔 것')]);
+      const count = asked.length;
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(asked).toHaveLength(count);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('웹 화면이 답하지 않거나 읽다가 오류가 나도 달력은 뜨고, 닫히면 끝난다', async () => {
+    vi.useFakeTimers();
+    try {
+      withPendingView([() => new Promise(() => {})]);
+      const stuck = openHost();
+      const done = run(stuck, cfg, now);
+      await vi.advanceTimersByTimeAsync(3400); // 닫힌 뒤의 읽기 두 번을 1.5초씩만 기다리고, 그 사이에 0.3초를 쉰다
+      await expect(done).resolves.toBeUndefined();
+      expect(stuck.state.alerts).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+    // 읽기가 거절되거나, 부르자마자 오류가 나도 같다.
+    for (const answer of [() => Promise.reject(new Error('읽을 수 없다')), () => { throw new Error('부를 수 없다'); }]) {
+      withPendingView([answer]);
+      const failing = openHost();
+      await expect(run(failing, cfg, now)).resolves.toBeUndefined();
+      expect([failing.state.alerts.length, failing.state.files.has(CACHE)]).toEqual([0, false]);
+    }
+  });
+
+  it('타이머를 걸지 못하고 웹 화면도 답하지 않아도, 닫히면 끝난다', async () => {
+    withPendingView([() => new Promise(() => {})]);
+    const host = openHost();
+    (host as { Timer: unknown }).Timer = { schedule: () => { throw new Error('타이머 없음'); } };
+    await expect(run(host, cfg, now)).resolves.toBeUndefined();
+    expect([host.state.alerts.length, host.state.files.has(CACHE)]).toEqual([0, false]);
+  });
+
+  it('불러오기가 끝난 뒤부터 읽는다. 끝나기 전에 닫히면 읽지 않는다', async () => {
+    const asked: string[] = [];
+    (globalThis as Record<string, unknown>).WebView = class {
+      loadURL(): Promise<void> {
+        return new Promise(() => {});
+      }
+      async present(): Promise<void> {}
+      async evaluateJavaScript(js: string): Promise<string> {
+        asked.push(js);
+        return pendingText([edit('16', '읽히지 않는다')]);
+      }
+    };
+    const host = openHost();
+    await run(host, cfg, now);
+    expect([asked, host.state.files.has(CACHE)]).toEqual([[], false]);
+  });
+
+  const timedDoc = (text: string, color: string, editedAt: number) => ({
+    fields: { days: { mapValue: { fields: { '13': { mapValue: { fields: { text: { stringValue: text }, color: { stringValue: color }, editedAt: { integerValue: String(editedAt) } } } } } } } },
+  });
+  const pendingFile = (edits: unknown[], extra: Record<string, unknown> = {}): Record<string, string> =>
+    ({ [CACHE]: JSON.stringify({ pending: { uid: 'owner-test-uid', savedAt: NOW - 1000, edits, ...extra } }) });
+
+  it('위젯은 서버에서 읽은 달 위에 그것을 얹어 그린다. 보관 파일의 달은 서버의 것 그대로다', async () => {
+    const host = make({ keychain: loggedIn, files: pendingFile([edit('13', '고친 것'), edit('20', '새 메모')]) }, { read: () => ({ body: timedDoc('리뷰', 'F9BC0B', NOW - 60_000) }) });
+    await run(host, cfg, now);
+    const texts = drawnTexts(host);
+    expect([texts.includes('고친 것'), texts.includes('새 메모'), texts.includes('리뷰')]).toEqual([true, true, false]);
+    expect(cacheOf(host)).toMatchObject({ days: { '13': { text: '리뷰', color: 'F9BC0B' } }, times: { '13': NOW - 60_000 } });
+    expect((cacheOf(host).days as Record<string, unknown>)['20']).toBeUndefined();
+  });
+
+  it('서버의 것이 같거나 더 새로우면 서버의 것을 그린다. 다른 계정의 것과 한 시간이 지난 것도 얹지 않는다', async () => {
+    const draw = async (files: Record<string, string>, serverAt: number): Promise<string[]> => {
+      const host = make({ keychain: loggedIn, files }, { read: () => ({ body: timedDoc('서버', '', serverAt) }) });
+      await run(host, cfg, now);
+      return drawnTexts(host);
+    };
+    const mine = [edit('13', '못 올림', '', NOW - 500)];
+    expect(await draw(pendingFile(mine), NOW - 500)).toContain('서버');
+    expect(await draw(pendingFile(mine), NOW - 100)).toContain('서버');
+    expect(await draw(pendingFile(mine), NOW - 501)).toContain('못 올림');
+    expect(await draw(pendingFile(mine, { uid: 'someone-else' }), NOW - 60_000)).toContain('서버');
+    expect(await draw(pendingFile(mine, { savedAt: NOW - 3_600_000 - 1 }), NOW - 60_000)).toContain('서버');
+    expect(await draw(pendingFile(mine, { savedAt: NOW - 3_600_000 }), NOW - 60_000)).toContain('못 올림');
+  });
+
+  it('서버가 따라잡은 편집은 보관 파일에서 지운다. 그 뒤 다른 기기가 그날을 지워도 다시 얹지 않는다', async () => {
+    const files = pendingFile([edit('13', '올린 것', '', NOW - 500), edit('20', '남는 것', '', NOW - 400)]);
+    const host = make({ keychain: loggedIn, files }, { read: () => ({ body: timedDoc('올린 것', '', NOW - 500) }) });
+    await run(host, cfg, now);
+    expect((cacheOf(host).pending as { savedAt: number; edits: unknown[] })).toEqual({ uid: 'owner-test-uid', savedAt: NOW - 1000, edits: [edit('20', '남는 것', '', NOW - 400)] });
+    // 다른 기기가 13일을 지웠다(서버의 달 문서에 흔적이 없다).
+    const later = make({ keychain: loggedIn, files: { [CACHE]: host.state.files.get(CACHE)! } }, { read: () => ({ body: { fields: { days: { mapValue: { fields: {} } } } } }) });
+    await run(later, cfg, now);
+    const texts = drawnTexts(later);
+    expect([texts.includes('올린 것'), texts.includes('남는 것')]).toEqual([false, true]);
+  });
+
+  it('네트워크가 안 될 때는 보관 파일의 편집을 지우지 않는다(보관해 둔 시각은 서버의 지금 것이 아니다)', async () => {
+    const before = JSON.stringify({ monthId: '2026-11', days: { '13': { text: '보관', color: '' } }, times: { '13': NOW - 500 }, savedAt: 1, pending: { uid: 'owner-test-uid', savedAt: NOW - 1000, edits: [edit('13', '올린 것', '', NOW - 500)] } });
+    const host = make({ keychain: loggedIn, files: { [CACHE]: before } }, { read: () => { throw new Error('offline'); } });
+    await run(host, cfg, now);
+    expect(cacheOf(host).pending).toEqual(JSON.parse(before).pending);
+    expect(drawnTexts(host)).toContain('보관');
+  });
+
+  it('네트워크가 안 될 때 보관해 둔 달 위에도 얹는다', async () => {
+    const files = { [CACHE]: JSON.stringify({ monthId: '2026-11', days: { '13': { text: '보관', color: '' } }, times: { '13': NOW - 60_000 }, savedAt: 1, pending: { uid: 'owner-test-uid', savedAt: NOW - 1000, edits: [edit('13', '못 올림')] } }) };
+    const host = make({ keychain: loggedIn, files }, { read: () => { throw new Error('offline'); } });
+    await run(host, cfg, now);
+    const texts = drawnTexts(host);
+    expect([texts.includes('못 올림'), texts.includes('보관'), texts.includes('오프라인')]).toEqual([true, false, true]);
+  });
+});

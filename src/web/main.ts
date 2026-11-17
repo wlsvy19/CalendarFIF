@@ -45,9 +45,12 @@ import { holidayLabel } from '../core/holidays';
 import { lunarLong } from '../core/lunar';
 import { seasonNames } from '../core/solarTerms';
 import { splitDateKey, todayKey } from '../core/dates';
+import { normalizeColor } from '../core/color';
+import { normalizeText } from '../core/text';
 import { EMPTY_DAY } from '../core/types';
 import { FirestoreMonthStore } from '../sync/firestoreStore';
 import { Outbox } from '../sync/outbox';
+import { PENDING_GLOBAL, pendingForWidget } from './widgetBridge';
 import { SyncEngine } from '../sync/engine';
 
 const { app, auth, db } = initFirebase(import.meta.env);
@@ -170,6 +173,16 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   const offStatus = engine.subscribe(() => store.refresh());
   // 트랜잭션은 SDK의 로컬 캐시를 거치지 않으므로, 올린 값을 다음 스냅숏이 올 때까지 화면에 남긴다.
   const offCommit = engine.onCommit((monthId, changes) => store.noteCommitted(monthId, changes));
+  // 위젯에서 연 화면: 아직 올리지 못한 편집을 위젯 스크립트가 읽어 가게 적어 둔다(widgetBridge.ts). 올리고 나면 빈 목록이 된다.
+  const tellWidget = (): void => {
+    try {
+      (window as unknown as Record<string, unknown>)[PENDING_GLOBAL] = pendingForWidget(session.uid, outbox.list(), (m, d) => (store.isLoaded(m) ? store.days(m)[d] ?? EMPTY_DAY : null));
+    } catch {
+      // 적지 못하면 위젯은 서버의 것을 그린다.
+    }
+  };
+  const offWidget = viaWidget() ? store.onChange(tellWidget) : () => {};
+  if (viaWidget()) tellWidget();
   const onStorage = (event: StorageEvent) => {
     if (event.key === null || event.key.startsWith('calfif.outbox.')) store.refresh();
   };
@@ -338,11 +351,14 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
         closeEditor();
         afterEditor();
       },
-      onKeep: (next) => {
-        engine.saveEdit(monthId, day, base, next);
-        base = next;
-        store.refresh();
-      },
+      // 웹앱만: 화면이 가려질 때(앱을 나갈 때) 고친 것을 저장해 둔다. PC 앱은 다른 창에 가려지는 일이 잦아 적던 글이 저장되지 않게 그대로 둔다.
+      onKeep: DESKTOP
+        ? undefined
+        : (next) => {
+          engine.saveEdit(monthId, day, base, next);
+          base = { text: normalizeText(next.text), color: normalizeColor(next.color) }; // 대기열에 들어간 값 그대로
+          store.refresh();
+        },
     }, DESKTOP ? { focusText: true, attachDrag: (sheet, handle) => makeDraggable(sheet, handle, editorMemory) } : undefined);
     editor = { dateKey, handle };
     interactivity.begin('editor');
@@ -542,6 +558,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       window.removeEventListener('storage', onStorage);
       offStatus();
       offCommit();
+      offWidget();
       stopAutoFlush();
       store.destroy();
     },

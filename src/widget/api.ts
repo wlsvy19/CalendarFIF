@@ -94,16 +94,44 @@ export async function refreshSession(host: Host, cfg: Config, refreshToken: stri
   throw { kind: isClientError(a.status) ? 'failed' : 'network', code } satisfies ApiError;
 }
 
+/** 서버에서 읽은 달: 날짜별 값과 날짜별 고친 시각(ms, 읽지 못한 날은 없다). */
+export type MonthRead = { days: Record<string, DayValue>; times: Record<string, number> };
+
 /** 그 달 문서의 날짜들. 문서가 없으면 빈 객체. */
 export async function readMonth(host: Host, cfg: Config, session: Session, monthId: string): Promise<Record<string, DayValue>> {
+  return (await readMonthDoc(host, cfg, session, monthId)).days;
+}
+
+/** 그 달 문서의 날짜들과 날짜별 고친 시각. 문서가 없으면 둘 다 빈 객체. */
+export async function readMonthDoc(host: Host, cfg: Config, session: Session, monthId: string): Promise<MonthRead> {
   const base = cfg.firestoreBase ?? 'https://firestore.googleapis.com';
   const url = `${base}/v1/projects/${cfg.projectId}/databases/(default)/documents/users/${encodeURIComponent(session.uid)}/months/${monthId}`;
   const a = await send(host, url, 'GET', { Authorization: `Bearer ${session.idToken}` });
-  if (a.status === 200) return parseMonthDocument(a.json);
-  if (a.status === 404) return {};
+  if (a.status === 200) return { days: parseMonthDocument(a.json), times: parseMonthTimes(a.json) };
+  if (a.status === 404) return { days: {}, times: {} };
   const code = errorCode(a);
   if (a.status === 403) throw { kind: 'denied', code } satisfies ApiError;
   throw { kind: isClientError(a.status) ? 'failed' : 'network', code } satisfies ApiError;
+}
+
+/** Firestore REST 문서(JSON)에서 날짜별 고친 시각(editedAt, ms)을 꺼낸다. 읽지 못한 날은 넣지 않는다. */
+export function parseMonthTimes(json: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  const fieldsOf = (v: unknown): Record<string, unknown> | null => {
+    if (!isObject(v) || !isObject(v.mapValue) || !isObject(v.mapValue.fields)) return null;
+    return v.mapValue.fields;
+  };
+  const days = isObject(json) && isObject(json.fields) ? fieldsOf(json.fields.days) : null;
+  if (!days) return out;
+  for (const [key, value] of Object.entries(days)) {
+    if (!/^(0[1-9]|[12][0-9]|3[01])$/.test(key)) continue;
+    const at = fieldsOf(value)?.editedAt;
+    if (!isObject(at)) continue;
+    // Firestore는 정수를 글로, 소수를 숫자로 준다.
+    const n = typeof at.integerValue === 'string' || typeof at.integerValue === 'number' ? Number(at.integerValue) : typeof at.doubleValue === 'number' ? at.doubleValue : NaN;
+    if (Number.isFinite(n) && n > 0) out[key] = n;
+  }
+  return out;
 }
 
 /** Firestore REST 문서(JSON)에서 날짜별 값을 꺼낸다. 모양이 다르면 그 날짜를 건너뛴다. */

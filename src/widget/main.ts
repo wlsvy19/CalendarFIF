@@ -3,9 +3,10 @@ import { parseOfficialHolidays, setOfficialHolidays, type OfficialYear } from '.
 import type { DayValue } from '../core/types';
 import { parseEventMap, type EventMap } from '../core/events';
 import { clearAlarms, pendingStatus, scheduleAlarms, scheduleTest, type AlarmStatus, type TestResult } from './alarms';
-import { isApiError, readEvents, readMonth, readPushDoc, refreshSession, signIn, type Config, type Session } from './api';
+import { isApiError, readEvents, readMonthDoc, readPushDoc, refreshSession, signIn, type Config, type Session } from './api';
 import { pushCoversUntil } from '../push/doc';
 import type { Host, ListWidgetLike } from './host';
+import { PENDING_JS, applyPending, parsePendingMessage, pendingStateOf, settlePending, type PendingState } from './pending';
 import { makeWidget } from './render';
 import { renderTree } from './renderTree';
 import { buildScene, messageScene, type MonthData, type Scene } from './scene';
@@ -81,7 +82,12 @@ function tapUrl(host: Host, env: Env, cfg: Config): string {
   return cfg.appUrl;
 }
 
-type WebViewLike = { loadURL(url: string): Promise<unknown>; present(fullscreen?: boolean): Promise<unknown> };
+type WebViewLike = {
+  loadURL(url: string): Promise<unknown>;
+  present(fullscreen?: boolean): Promise<unknown>;
+  /** 웹 화면에서 식을 돌려 그 값을 받는다. */
+  evaluateJavaScript?(javaScript: string, useCallback?: boolean): Promise<unknown>;
+};
 // Scriptable의 전역 WebView. 붙여 넣은 스크립트가 넘기는 이름에 없어서(0.9.0에서 굳었다) 전역에서 직접 가져온다. Scriptable 밖에는 없다.
 declare const WebView: unknown;
 
@@ -103,10 +109,6 @@ function findWebView(): (new () => WebViewLike) | null {
   }
 }
 
-/**
- * Scriptable 안의 웹 화면(WebView)에 달력을 띄운다. 닫을 때까지 기다린다. 띄웠으면 빈 글, 띄우지 못하면 그 까닭을 준다.
- * 불러오기가 끝나기를 기다리지 않고 바로 띄운다: 기다리는 동안 Scriptable의 화면이 보이지 않게, 그리고 느린 연결에서 멈춰 있지 않게.
- */
 /** 웹앱 주소에 via=widget을 붙인다. 주소를 읽지 못하면 그대로 둔다. */
 function withVia(appUrl: string): string {
   try {
@@ -118,16 +120,110 @@ function withVia(appUrl: string): string {
   }
 }
 
-async function openCalendarInApp(cfg: Config): Promise<string> {
+/** 띄운 웹 화면에서 아직 올리지 못한 편집을 읽는 간격과, 한 번 읽는 데 기다리는 시간. */
+const PENDING_POLL_MS = 300;
+const PENDING_READ_WAIT_MS = 1500;
+
+/**
+ * 띄운 웹 화면이 적어 두는 "아직 서버에 올리지 못한 편집"을 닫힐 때까지 되풀이해 읽어 보관 파일에 적는다(pending.ts).
+ * 위젯은 그것을 서버에서 읽은 달 위에 얹으므로, 고치고 바로 홈 화면으로 나와도 위젯이 새로 그려질 때 고친 것이 보인다.
+ * 돌려주는 함수는 읽기를 멈추고 마지막으로 두 번 더 읽는다(바로, 그리고 0.3초 뒤: 화면이 닫히면서 저장해 둔 것까지 받는다).
+ * 읽지 못해도 던지지 않는다.
+ */
+/**
+ * work를 ms까지만 기다린다. 타이머를 걸지 못하면 기다리지 않는다: 달력을 닫은 뒤 스크립트가 끝나지 않는 것보다
+ * 올리지 못한 편집을 읽지 못하는 것이 낫다(waitAtMost는 타이머가 없으면 끝까지 기다린다).
+ */
+async function boundedWait<T>(host: Host, work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: { invalidate(): void } | undefined;
+  const late = new Promise<T>((resolve) => {
+    try {
+      timer = host.Timer.schedule(ms, false, () => resolve(fallback));
+    } catch {
+      resolve(fallback);
+    }
+  });
+  try {
+    return await Promise.race([work, late]);
+  } finally {
+    try {
+      timer?.invalidate();
+    } catch {
+      // 그대로 둔다.
+    }
+  }
+}
+
+function watchPending(host: Host, view: WebViewLike, now: () => Date): () => Promise<void> {
+  if (typeof view.evaluateJavaScript !== 'function') return async () => {};
+  let last = '';
+  let stopped = false;
+  let timer: { invalidate(): void } | undefined;
+  const read = async (): Promise<void> => {
+    try {
+      // 화면이 아직 없거나 닫힌 뒤에는 답이 오지 않을 수 있어 기다리는 시간을 둔다.
+      const got = await boundedWait<unknown>(host, Promise.resolve(view.evaluateJavaScript!(PENDING_JS, false)), PENDING_READ_WAIT_MS, null);
+      if (typeof got !== 'string' || got === '' || got === last) return;
+      const message = parsePendingMessage(got);
+      if (!message) return;
+      last = got;
+      const pending: PendingState = { uid: message.uid, savedAt: now().getTime(), edits: message.edits };
+      updateCache(host, { pending });
+    } catch {
+      // 다음에 다시 읽는다.
+    }
+  };
+  const loop = (): void => {
+    if (stopped) return; // 멈춘 뒤에 울린 타이머
+    void read().then(() => {
+      if (stopped) return;
+      try {
+        timer = host.Timer.schedule(PENDING_POLL_MS, false, loop);
+      } catch {
+        // 타이머가 없으면 닫힐 때 한 번만 더 읽는다.
+      }
+    });
+  };
+  loop();
+  return async () => {
+    stopped = true;
+    try {
+      timer?.invalidate();
+    } catch {
+      // 그대로 둔다.
+    }
+    await read();
+    await boundedWait<null>(host, new Promise<null>(() => {}), PENDING_POLL_MS, null);
+    await read();
+  };
+}
+
+/**
+ * Scriptable 안의 웹 화면(WebView)에 달력을 띄운다. 닫을 때까지 기다린다. 띄웠으면 빈 글, 띄우지 못하면 그 까닭을 준다.
+ * 불러오기가 끝나기를 기다리지 않고 바로 띄운다: 기다리는 동안 Scriptable의 화면이 보이지 않게, 그리고 느린 연결에서 멈춰 있지 않게.
+ */
+async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Promise<string> {
   try {
     const Ctor = findWebView();
     if (!Ctor) return 'Scriptable의 WebView를 찾지 못했다';
     const view = new Ctor();
     // ?via=widget: 웹앱이 위젯에서 연 화면인 것을 안다(알림 받기를 여기서 켤 수 없는 까닭을 달리 적는다).
-    void Promise.resolve(view.loadURL(withVia(cfg.appUrl))).catch(() => {
-      // 불러오지 못하면 빈 화면이 남는다. 닫으면 끝난다.
-    });
-    await view.present(true);
+    // 올리지 못한 편집은 불러오기가 끝난 뒤부터 읽는다(불러오는 중에 웹 화면에서 식을 돌리지 않는다). 끝나기 전에 닫히면 읽지 않는다.
+    let closed = false;
+    let stopWatching: () => Promise<void> = async () => {};
+    void Promise.resolve(view.loadURL(withVia(cfg.appUrl)))
+      .then(() => {
+        if (!closed) stopWatching = watchPending(host, view, now);
+      })
+      .catch(() => {
+        // 불러오지 못하면 빈 화면이 남는다. 닫으면 끝난다.
+      });
+    try {
+      await view.present(true);
+    } finally {
+      closed = true;
+      await stopWatching();
+    }
     return '';
   } catch (e) {
     return e instanceof Error && e.message !== '' ? e.message : '알 수 없는 오류';
@@ -161,8 +257,52 @@ function updateCache(host: Host, patch: Record<string, unknown>): void {
   }
 }
 
-function writeCache(host: Host, data: MonthData, now: Date): void {
-  updateCache(host, { monthId: data.monthId, days: data.days, savedAt: now.getTime() });
+/** times: 서버가 가진 날짜별 고친 시각. 보관해 둔 달 위에 올리지 못한 편집을 얹을 때 쓴다. */
+function writeCache(host: Host, data: MonthData, times: Record<string, number>, now: Date): void {
+  updateCache(host, { monthId: data.monthId, days: data.days, times, savedAt: now.getTime() });
+}
+
+/** 보관 파일을 통째로 읽는다. 없거나 깨졌으면 null. */
+function cacheObject(host: Host): Record<string, unknown> | null {
+  try {
+    const fm = host.FileManager.local();
+    const path = cachePath(host);
+    if (!fm.fileExists(path)) return null;
+    const parsed: unknown = JSON.parse(fm.readString(path));
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 보관해 둔 달의 날짜별 고친 시각. 그 달의 것이 없으면 빈 것. */
+function readCachedTimes(host: Host, monthId: string): Record<string, number> {
+  const cache = cacheObject(host);
+  const out: Record<string, number> = {};
+  if (!cache || cache.monthId !== monthId || typeof cache.times !== 'object' || cache.times === null) return out;
+  for (const [key, v] of Object.entries(cache.times)) if (typeof v === 'number' && Number.isFinite(v)) out[key] = v;
+  return out;
+}
+
+/**
+ * 서버에서 읽은(또는 보관해 둔) 달 위에, 위젯에서 연 달력이 아직 올리지 못한 편집을 얹는다(pending.ts).
+ * 보관 파일의 달은 서버의 것 그대로 둔다. 얹지 못하면 받은 달을 그대로 준다.
+ * fromServer: times가 방금 서버에서 읽은 것이다. 그때는 서버가 따라잡은 편집을 보관 파일에서 지운다(settlePending).
+ */
+function withPending(host: Host, month: MonthData, times: Record<string, number>, now: Date, fromServer: boolean): MonthData {
+  try {
+    let state = pendingStateOf(cacheObject(host)?.pending);
+    if (!state) return month;
+    if (fromServer) {
+      const settled = settlePending(month.monthId, times, state);
+      if (settled !== state) updateCache(host, { pending: settled });
+      state = settled;
+    }
+    const uid = host.Keychain.contains(UID_KEY) ? host.Keychain.get(UID_KEY) : '';
+    return { monthId: month.monthId, days: applyPending(month.monthId, month.days, times, state, uid, now.getTime()) };
+  } catch {
+    return month;
+  }
 }
 
 /** 마지막으로 읽은 "푸시가 아이폰 알림을 언제까지 맡는가"(밀리초). 읽은 적이 없으면 0. */
@@ -410,7 +550,7 @@ async function load(host: Host, cfg: Config, env: Env, now: Date, alarmsDone = f
   };
   const fromCache = async (code: string | null): Promise<View> => {
     const cached = readCache(host, monthId);
-    if (cached) return drawMonth(cached, true);
+    if (cached) return drawMonth(withPending(host, cached, readCachedTimes(host, monthId), now, false), true);
     return code === null
       ? message(env, '불러오지 못했습니다', ['네트워크를 확인하세요.'])
       : message(env, '불러오지 못했습니다', ['잠시 뒤 다시 시도합니다.', `(${Array.from(code).slice(0, 40).join('')})`]);
@@ -418,12 +558,12 @@ async function load(host: Host, cfg: Config, env: Env, now: Date, alarmsDone = f
   try {
     const session = await refreshSession(host, cfg, token);
     if (session.refreshToken !== token) storeLogin(host, session.refreshToken, session.uid);
-    const days = await readMonth(host, cfg, session, monthId);
-    const month: MonthData = { monthId, days };
-    writeCache(host, month, now);
+    const doc = await readMonthDoc(host, cfg, session, monthId);
+    const month: MonthData = { monthId, days: doc.days };
+    writeCache(host, month, doc.times, now);
     // 던지지 않는다. 알림 기능이 멈춰 끝나지 않아도 5초 뒤에는 그린다(예약은 다음 실행에 다시 한다).
     if (!alarmsDone) await waitAtMost(host, syncAlarms(host, cfg, session, now), ALARM_SYNC_WAIT_MS, SYNC_UNKNOWN);
-    return await drawMonth(month, false);
+    return await drawMonth(withPending(host, month, doc.times, now, true), false);
   } catch (e) {
     if (!isApiError(e)) throw e;
     if (e.kind === 'network') return fromCache(null);
@@ -555,7 +695,7 @@ async function runInApp(host: Host, cfg: Config, now: () => Date): Promise<void>
   const words = paramWords(host);
   let calendarProblem = '';
   if (host.args.queryParameters?.open === 'calendar' || words.includes('inapp') || words.includes('앱안')) {
-    calendarProblem = await openCalendarInApp(cfg);
+    calendarProblem = await openCalendarInApp(host, cfg, now);
     if (calendarProblem === '') return;
   }
   const show = async (): Promise<void> => {

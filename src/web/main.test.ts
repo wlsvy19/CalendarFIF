@@ -245,35 +245,6 @@ it('편집 화면이 열린 동안 중지되면 편집 화면을 두고, 저장�
   expect(lastInteractive()).toEqual(['setInteractive', false]);
 });
 
-it('편집 화면을 연 채 화면이 가려지면 고친 메모를 대기열에 넣고 편집 화면은 그대로 둔다. 그 뒤 취소하면 되돌린다', async () => {
-  const hide = (state: 'hidden' | 'visible'): void => {
-    Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
-    document.dispatchEvent(new Event('visibilitychange'));
-  };
-  const pending = (): { day: string; base: { text: string }; next: { text: string } }[] => JSON.parse(localStorage.getItem('calfif.outbox.keep-hidden') ?? '[]');
-  try {
-    const { editor, openEditor } = await start('keep-hidden');
-    access.emit!(server(accessDoc()));
-    await openEditor('2026-11-03', '나가기 전에 적은 메모');
-    hide('hidden');
-    expect(pending().map((e) => [e.day, e.base.text, e.next.text])).toEqual([['03', '', '나가기 전에 적은 메모']]);
-    expect(editor()!.querySelector('textarea')!.value).toBe('나가기 전에 적은 메모');
-
-    // 돌아와 더 적고 다시 나가면 앞의 것에 이어 붙는다(base가 앞에서 저장해 둔 값이다).
-    hide('visible');
-    editor()!.querySelector('textarea')!.value = '나가기 전에 적은 메모\n한 줄 더';
-    hide('hidden');
-    expect(pending().map((e) => [e.day, e.base.text, e.next.text])).toEqual([['03', '', '나가기 전에 적은 메모\n한 줄 더']]);
-
-    hide('visible');
-    editor()!.querySelector<HTMLElement>('.textbtn.start')!.click(); // 취소
-    await vi.waitFor(() => expect(editor()).toBeNull());
-    expect(pending()).toEqual([]);
-  } finally {
-    hide('visible');
-  }
-});
-
 it('편집 화면이 열린 동안 허가가 없어지면 취소한 뒤에 안내로 바꾼다', async () => {
   const { root, editor, notice, openEditor } = await start('hold-cancel');
   access.emit!(server(accessDoc()));
@@ -683,5 +654,89 @@ it('웹앱은 화면을 내리면 울린 알림 상자도 함께 지워진다', 
     app.destroy();
   } finally {
     eventsFeed.items = {};
+  }
+});
+
+it('웹앱: 위젯에서 연 화면은 아직 올리지 못한 편집을 window.__calfifPending에 적어 둔다. 보통 화면은 적지 않는다', async () => {
+  const pendingText = (): unknown => (window as unknown as Record<string, unknown>).__calfifPending;
+  const saveMemo = async (uid: string, text: string): Promise<void> => {
+    const { day, title } = await startWeb(uid);
+    access.emit!(server(accessDoc()));
+    location.hash = '2000-01-03';
+    await vi.waitFor(() => expect(day()?.querySelector('h3')?.textContent).toBe(title('2000-01-03')));
+    day()!.querySelector('textarea')!.value = text;
+    day()!.querySelector<HTMLElement>('.textbtn.end')!.click();
+    await vi.waitFor(() => expect(day()).toBeNull());
+  };
+  try {
+    await saveMemo('bridge-plain', '보통 화면의 메모');
+    expect(pendingText()).toBeUndefined();
+
+    sessionStorage.setItem('calfif.via', 'widget');
+    await saveMemo('bridge-widget', '위젯에서 고친 메모');
+    const message = JSON.parse(pendingText() as string) as { v: number; uid: string; edits: { monthId: string; day: string; text: string; color: string; editedAt: number }[] };
+    expect([message.v, message.uid, message.edits.map((e) => [e.monthId, e.day, e.text, e.color])]).toEqual([1, 'bridge-widget', [['2000-01', '03', '위젯에서 고친 메모', '']]]);
+    expect(message.edits[0].editedAt).toBeGreaterThan(0);
+  } finally {
+    sessionStorage.removeItem('calfif.via');
+    delete (window as unknown as Record<string, unknown>).__calfifPending;
+  }
+});
+
+it('웹앱: 위젯에서 연 화면은 올릴 것이 없으면 빈 목록을 적어 둔다(위젯이 앞에 받아 둔 것을 지운다)', async () => {
+  sessionStorage.setItem('calfif.via', 'widget');
+  try {
+    await startWeb('bridge-empty');
+    access.emit!(server(accessDoc()));
+    await vi.waitFor(() => expect((window as unknown as Record<string, unknown>).__calfifPending).toBe('{"v":1,"uid":"bridge-empty","edits":[]}'));
+  } finally {
+    sessionStorage.removeItem('calfif.via');
+    delete (window as unknown as Record<string, unknown>).__calfifPending;
+  }
+});
+
+const setHidden = (state: 'hidden' | 'visible'): void => {
+  Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+  document.dispatchEvent(new Event('visibilitychange'));
+};
+const outboxOf = (uid: string): { day: string; base: { text: string }; next: { text: string } }[] => JSON.parse(localStorage.getItem(`calfif.outbox.${uid}`) ?? '[]');
+
+it('웹앱: 편집 화면을 연 채 화면이 가려지면 고친 메모를 대기열에 넣고 편집 화면은 그대로 둔다. 그 뒤 취소하면 되돌린다', async () => {
+  try {
+    const { day, title } = await startWeb('keep-hidden');
+    access.emit!(server(accessDoc()));
+    location.hash = '2000-01-03';
+    await vi.waitFor(() => expect(day()?.querySelector('h3')?.textContent).toBe(title('2000-01-03')));
+    day()!.querySelector('textarea')!.value = '나가기 전에 적은 메모';
+    setHidden('hidden');
+    expect(outboxOf('keep-hidden').map((e) => [e.day, e.base.text, e.next.text])).toEqual([['03', '', '나가기 전에 적은 메모']]);
+    expect(day()!.querySelector('textarea')!.value).toBe('나가기 전에 적은 메모');
+
+    // 돌아와 더 적고 다시 나가면 앞의 것에 이어 붙는다(base가 앞에서 저장해 둔 값이다).
+    setHidden('visible');
+    day()!.querySelector('textarea')!.value = '나가기 전에 적은 메모\n한 줄 더';
+    setHidden('hidden');
+    expect(outboxOf('keep-hidden').map((e) => [e.day, e.base.text, e.next.text])).toEqual([['03', '', '나가기 전에 적은 메모\n한 줄 더']]);
+
+    setHidden('visible');
+    day()!.querySelector<HTMLElement>('.textbtn.start')!.click(); // 취소
+    await vi.waitFor(() => expect(day()).toBeNull());
+    expect(outboxOf('keep-hidden')).toEqual([]);
+  } finally {
+    setHidden('visible');
+  }
+});
+
+it('PC 앱: 창이 가려져도 적던 메모를 저장하지 않는다', async () => {
+  vi.resetModules();
+  try {
+    const { editor, openEditor } = await start('keep-desktop');
+    access.emit!(server(accessDoc()));
+    await openEditor('2026-11-03', '적는 중');
+    setHidden('hidden');
+    expect(localStorage.getItem('calfif.outbox.keep-desktop')).toBeNull();
+    expect(editor()!.querySelector('textarea')!.value).toBe('적는 중');
+  } finally {
+    setHidden('visible');
   }
 });

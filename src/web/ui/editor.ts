@@ -256,6 +256,7 @@ export function mountEditor(
   let kept: DayValue | null = null;
   const keepIfHidden = (): void => {
     if (finished || !props.onKeep || document.visibilityState !== 'hidden') return;
+    if (!kept && !changed()) return; // 고친 것이 없다
     const now: DayValue = { text: normalizeText(area.value), color };
     const last = kept ?? props.value;
     if (now.text === last.text && now.color === last.color) return;
