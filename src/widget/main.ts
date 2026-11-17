@@ -9,7 +9,7 @@ import type { Host, ListWidgetLike } from './host';
 import { POLL_JS, PROBE_JS, applyPending, countPending, parsePendingMessage, parsePoll, parseProbe, pendingCount, pendingStateOf, savedBetween, settlePending, webProbeOf, type PendingDay, type PendingState, type WebProbe } from './pending';
 import { MAX_DRAWS, bridgeOf, drawsOf, leaveOf, statusText, type BridgeNote, type DrawNote, type LeaveNote } from './status';
 import { withEventLines } from './eventLines';
-import { ALIVE_MS, CREDIT_MS, SETTLE_MS, SHUT_MS, creditDraw, endsRun, pickReload, reloadCell, toProbe, triesOf, waitsForLeave, type ReloadHow, type ReloadTry, type ReloadWhy } from './reload';
+import { ALIVE_MS, CREDIT_MS, NUDGE_NO_DRAW, NUDGE_WAIT_MS, SETTLE_MS, SHUT_MS, creditDraw, endsRun, nudges, pickReload, reloadCell, toProbe, triesOf, waitsForLeave, type ReloadHow, type ReloadTry, type ReloadWhy } from './reload';
 import { makeWidget } from './render';
 import { renderTree } from './renderTree';
 import { buildScene, messageScene, type MonthData, type Scene } from './scene';
@@ -155,7 +155,7 @@ function doReload(host: Host, how: ReloadHow): string {
   try {
     if (how === 'setWidget') host.Script.setWidget(new host.ListWidget());
     else if (how === 'complete') host.Script.complete();
-    else if (how === 'ping') {
+    else if (how === 'ping' || how === 'nudge') {
       const open = findOpenUrl();
       if (!open) return 'Safari.open이 없다';
       const url = pingUrl(host);
@@ -182,6 +182,8 @@ type ReloadLog = {
   credited(at: number): boolean;
   /** 마지막으로 적은 시도의 시각(없으면 0). */
   lastAt(): number;
+  /** at에 한 시도에 하지 못한 까닭을 적는다(안 그려진 것으로 판정에 들어가고, 그 뒤의 그림이 그 시도에 적히지 않는다). */
+  fail(at: number, why: string): void;
 };
 
 const TICK_GAP_MS = 2500; // 이보다 오래 불리지 않았으면 앱이 멈춰 있었다
@@ -264,6 +266,9 @@ function reloadLog(host: Host, now: () => Date): ReloadLog {
     },
     lastAt() {
       return mine.length === 0 ? 0 : mine[mine.length - 1];
+    },
+    fail(at, why) {
+      amend((t) => (t.at === at && t.err === '' && t.got === 0 ? { ...t, err: why } : null));
     },
   };
 }
@@ -616,22 +621,48 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
     // 저장한 것이 있고, 달력에서 나가는 순간에 스크립트를 끝내려고 기다리는 중이다(reload.ts의 leave).
     // 저장하자마자 끝내면 그 뒤에 이어서 고친 것을 보지 못한다(넣었다가 다시 지운 배경이 위젯에 남았다).
     let waiting = false;
+    // nudge를 하고 위젯이 그려지기를 기다리는 중이다(0이면 아니다): 그 시도의 시각과, 그려지지 않으면 스크립트를 끝낼 때.
+    let nudgedAt = 0;
+    let nudgeUntil = 0;
+    const finishNow = (why: 'save' | 'leave'): void => {
+      nudgedAt = 0;
+      log.fire('finish', why);
+      quit('saved');
+    };
     const request = (why: 'save' | 'leave'): void => {
       unsent = false;
       const tries = log.tries();
       const at = now().getTime();
       const how = pickReload(tries, at);
-      if (!how) return;
-      if (how !== 'finish') {
+      if (how && how !== 'finish') {
         log.fire(how, why);
         return;
       }
+      // 저장할 때마다 반영하는 길(reload.ts의 nudge). 화면 앞에서 저장했을 때만 한다.
+      const nudge = nudges(tries, at);
+      if (why === 'save' && nudge.use) {
+        const before = log.lastAt();
+        log.fire('nudge', 'save');
+        const fired = log.lastAt();
+        // 방금 한 것을 아직 지켜보는 중이면 따로 적히지 않는다(하기는 했다): 앞의 기다림을 그대로 둔다.
+        if (fired === before) return;
+        if (log.tries().some((t) => t.at === fired && t.err !== '')) {
+          if (how) finishNow(why); // 하지 못했다(Safari.open이 없다 등): 전처럼 끝낸다
+          return;
+        }
+        // 그려진 것으로 가려지기 전에는, 그려지지 않으면 전처럼 스크립트를 끝내는 뒷받침을 둔다. 끝내는 것까지 안 되면 두지 않는다.
+        if (!nudge.safe && how) {
+          nudgedAt = fired;
+          nudgeUntil = at + NUDGE_WAIT_MS;
+        }
+        return;
+      }
+      if (!how) return;
       if (why === 'save' && waitsForLeave(tries, at)) {
         waiting = true;
         return;
       }
-      log.fire('finish', why);
-      quit('saved');
+      finishNow(why);
     };
     // 닫힌 뒤의 마지막 읽기에서는 아무것도 하지 않는다: 닫히면 스크립트가 끝나고 그것이 위젯을 그리게 한다.
     // (닫힌 웹 화면은 가려졌다고 답할 수 있다. 그것을 홈 화면으로 나간 것으로 적으면 끝나면서 그려진 것이 방금 한 시도의 것으로 적힌다.)
@@ -651,6 +682,16 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
       tick: (visible, away) => {
         if (closed) return;
         log.tick(visible);
+        if (nudgedAt > 0) {
+          if (log.credited(nudgedAt)) nudgedAt = 0; // 그려졌다: 달력을 계속 지켜본다
+          else if (away || !visible) finishNow('save'); // 그려지기 전에 나간다: 지금이라도 끝낸다(그 시도는 판정에 넣지 않는다)
+          else if (now().getTime() >= nudgeUntil) {
+            // 화면 앞에서 다 기다렸는데 그려지지 않았다: 안 되는 것으로 적고 전처럼 끝낸다.
+            log.fail(nudgedAt, NUDGE_NO_DRAW);
+            finishNow('save');
+          }
+          if (closed || nudgedAt === 0) return;
+        }
         // 저장한 것이 있는데 달력에서 나가려 한다(초점을 잃었다. 그것을 알아채지 못했으면 가려졌을 때): 지금 끝낸다.
         if (waiting && (away || !visible)) {
           waiting = false;
@@ -658,7 +699,7 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
           quit('saved');
         }
       },
-      pace: () => (waiting ? LEAVING_POLL_MS : PENDING_POLL_MS),
+      pace: () => (waiting || nudgedAt > 0 ? LEAVING_POLL_MS : PENDING_POLL_MS),
       check: () => {
         if (closed) return false;
         const other = cacheObject(host)?.session;

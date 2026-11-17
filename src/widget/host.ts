@@ -22,9 +22,14 @@ export type DrawContextLike = {
 /** Scriptable의 WidgetText 중 위젯이 쓰는 부분. */
 export type WidgetTextLike = { font: unknown; textColor: unknown; textOpacity: number; lineLimit: number; minimumScaleFactor: number };
 
+/** Scriptable의 WidgetImage 중 위젯이 쓰는 부분. tintColor를 주면 그림의 선이 그 색이 된다. */
+export type WidgetImageLike = { imageSize: unknown; tintColor: unknown; imageOpacity: number };
+
 /** 위젯과 상자가 같이 가진, 안에 넣는 방법. addSpacer에 null을 주면 남는 곳을 채운다. */
 export type WidgetContainerLike = {
   addText(text: string): WidgetTextLike;
+  /** 그림을 넣는다. 오래된 Scriptable에는 없을 수 있다. */
+  addImage?(image: unknown): WidgetImageLike;
   addStack(): WidgetStackLike;
   addSpacer(length: number | null): unknown;
 };

@@ -1,5 +1,5 @@
 // 시험용 가짜 Scriptable. 묶음(번들)에는 들어가지 않는다.
-import type { DrawContextLike, Host, NotificationLike, ListWidgetLike, TextFieldLike, WidgetStackLike, WidgetTextLike } from './host';
+import type { DrawContextLike, Host, NotificationLike, ListWidgetLike, TextFieldLike, WidgetImageLike, WidgetStackLike, WidgetTextLike } from './host';
 
 /** 묶음 파일에 이 파일의 코드가 섞여 들어가지 않았는지 찾아볼 표지. */
 export const FAKE_HOST_MARKER = 'calfif-fake-host-marker';
@@ -12,6 +12,7 @@ export type FakeContextRecord = { size: unknown; opaque: boolean; respectScreenS
 export type FakeNode =
   | { kind: 'text'; text: string; font?: unknown; textColor?: unknown; textOpacity?: number; lineLimit?: number; minimumScaleFactor?: number }
   | { kind: 'spacer'; length: number | null }
+  | { kind: 'image'; image: unknown; imageSize?: unknown; tintColor?: unknown; imageOpacity?: number }
   | { kind: 'stack'; layout: 'h' | 'v' | null; spacing?: number; padding?: number[]; backgroundColor?: unknown; cornerRadius?: number; size?: unknown; align?: 'top' | 'center' | 'bottom'; children: FakeNode[] };
 export type FakeWidgetRecord = { props: Record<string, unknown>; padding: number[] | null; presented: 'small' | 'medium' | 'large' | null; children: FakeNode[] };
 
@@ -232,6 +233,11 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
       children.push(node);
       return node;
     },
+    addImage(image: unknown): WidgetImageLike {
+      const node: Extract<FakeNode, { kind: 'image' }> = { kind: 'image', image };
+      children.push(node);
+      return node as unknown as WidgetImageLike;
+    },
   });
 
   class FakeStack implements WidgetStackLike {
@@ -241,6 +247,7 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
     declare addText: WidgetStackLike['addText'];
     declare addStack: WidgetStackLike['addStack'];
     declare addSpacer: WidgetStackLike['addSpacer'];
+    declare addImage: NonNullable<WidgetStackLike['addImage']>;
     get spacing(): number { return this.rec.spacing ?? 0; }
     set spacing(v: number) { this.rec.spacing = v; }
     get backgroundColor(): unknown { return this.rec.backgroundColor; }
@@ -275,6 +282,7 @@ export function makeFakeHost(opts: FakeOptions = {}): FakeHost {
     declare addText: ListWidgetLike['addText'];
     declare addStack: ListWidgetLike['addStack'];
     declare addSpacer: ListWidgetLike['addSpacer'];
+    declare addImage: NonNullable<ListWidgetLike['addImage']>;
     get record(): FakeWidgetRecord {
       this.rec.props = { backgroundColor: this.backgroundColor, spacing: this.spacing, backgroundImage: this.backgroundImage, url: this.url, refreshAfterDate: this.refreshAfterDate };
       return this.rec;

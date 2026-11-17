@@ -102,7 +102,7 @@ type Axis = 'x' | 'y';
 const mainAxis = (dir: 'h' | 'v'): Axis => (dir === 'h' ? 'x' : 'y');
 function flexes(node: Node, axis: Axis, parentDir: 'h' | 'v'): boolean {
   if (node.kind === 'spacer') return node.length === null && mainAxis(parentDir) === axis;
-  if (node.kind === 'text') return false;
+  if (node.kind === 'text' || node.kind === 'icon') return false;
   return node.children.some((c) => flexes(c, axis, node.dir));
 }
 const WEIGHTS = { regular: 400, medium: 500, semibold: 600, bold: 700 };
@@ -111,6 +111,12 @@ function nodeHtml(node: Node, parentDir: 'h' | 'v', theme: Theme): string {
   if (node.kind === 'spacer') {
     if (node.length === null) return '<div style="flex:1 1 0;min-width:0;min-height:0"></div>';
     return `<div style="flex:none;${parentDir === 'h' ? 'width' : 'height'}:${node.length}px"></div>`;
+  }
+  if (node.kind === 'icon') {
+    // 웹앱의 칸이 쓰는 것과 같은 선 그림(종, 모래시계). 아이폰에서는 SF Symbols의 그림이 놓인다.
+    const d = node.symbol === 'bell' ? 'M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4' : 'M6 3h12M6 21h12M7 3c0 6 5 6 5 9s-5 3-5 9M17 3c0 6-5 6-5 9s5 3 5 9';
+    const opacity = node.opacity !== undefined ? `opacity:${node.opacity};` : '';
+    return `<svg style="flex:none;${opacity}" width="${node.size}" height="${node.size}" viewBox="0 0 24 24" fill="none" stroke="${node.color[theme]}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
   }
   const main = mainAxis(parentDir);
   const cross: Axis = main === 'x' ? 'y' : 'x';

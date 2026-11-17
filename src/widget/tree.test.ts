@@ -334,6 +334,7 @@ describe('모든 나무', () => {
   const ALLOWED: Record<Node['kind'], string[]> = {
     text: ['kind', 'text', 'size', 'weight', 'color', 'opacity', 'lines', 'minScale'],
     spacer: ['kind', 'length'],
+    icon: ['kind', 'symbol', 'size', 'color', 'opacity', 'fallback'],
     stack: ['kind', 'dir', 'children', 'spacing', 'padding', 'background', 'radius', 'align', 'size'],
   };
 

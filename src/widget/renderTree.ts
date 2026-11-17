@@ -7,11 +7,57 @@ import type { Dyn, Node, Tree } from './tree';
 const colorOf = (host: Host, d: Dyn, force: Theme | undefined): unknown =>
   force ? new host.Color(d[force]) : host.Color.dynamic(new host.Color(d.light), new host.Color(d.dark));
 
+// Scriptable의 전역 SFSymbol. 붙여 넣은 스크립트가 넘기는 이름에 없어서(0.9.0에서 굳었다) 전역에서 직접 가져온다. Scriptable 밖에는 없다.
+declare const SFSymbol: unknown;
+type SymbolLike = { image: unknown; applyFont?(font: unknown): void };
+
+/** SF Symbols의 그림을 찾는다. 없으면(오래된 Scriptable, 모르는 이름) null. 던지지 않는다. */
+function symbolImage(host: Host, name: string, size: number): unknown {
+  const named = (found: unknown): SymbolLike | null => {
+    const api = found as { named?: (n: string) => SymbolLike | null } | null | undefined;
+    return api && typeof api.named === 'function' ? api.named(name) : null;
+  };
+  try {
+    let symbol: SymbolLike | null = null;
+    try {
+      if (typeof SFSymbol !== 'undefined') symbol = named(SFSymbol);
+    } catch {
+      symbol = null;
+    }
+    if (!symbol) symbol = named((globalThis as { SFSymbol?: unknown }).SFSymbol);
+    if (!symbol) return null;
+    // 놓는 크기보다 크게 그려 두어야 또렷하다(줄여서 놓는다).
+    try {
+      symbol.applyFont?.(host.Font.mediumSystemFont(size * 3));
+    } catch {
+      // 크기를 정하지 못해도 그림은 쓴다.
+    }
+    return symbol.image ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function addNodes(host: Host, parent: WidgetContainerLike, nodes: Node[], force: Theme | undefined): void {
   const dyn = (d: Dyn): unknown => colorOf(host, d, force);
   for (const node of nodes) {
     if (node.kind === 'spacer') {
       parent.addSpacer(node.length);
+    } else if (node.kind === 'icon') {
+      // 그림을 놓는다. 그림을 쓸 수 없으면 그림 글자를 글자로 놓는다(줄은 그대로 보인다).
+      const image = typeof parent.addImage === 'function' ? symbolImage(host, node.symbol, node.size) : null;
+      if (image) {
+        const placed = parent.addImage!(image);
+        placed.imageSize = new host.Size(node.size, node.size);
+        placed.tintColor = dyn(node.color);
+        if (node.opacity !== undefined) placed.imageOpacity = node.opacity;
+      } else {
+        const t = parent.addText(node.fallback);
+        t.font = host.Font.systemFont(node.size);
+        t.textColor = dyn(node.color);
+        if (node.opacity !== undefined) t.textOpacity = node.opacity;
+        t.lineLimit = 1;
+      }
     } else if (node.kind === 'text') {
       const t = parent.addText(node.text);
       t.font = node.weight === 'bold' ? host.Font.boldSystemFont(node.size)

@@ -7,6 +7,7 @@ import type { GridCell } from '../core/dates';
 import type { DayValue } from '../core/types';
 import type { MonthData } from './scene';
 import type { Family, Size } from './sizes';
+import { ALARM_MARK, COUNTDOWN_MARK } from './eventLines';
 import { capLines, fitText, memoLines } from './text';
 import { PALETTES, dayBackground, type Palette } from './theme';
 
@@ -15,7 +16,12 @@ export type Pad = [top: number, leading: number, bottom: number, trailing: numbe
 export type TextNode = { kind: 'text'; text: string; size: number; weight: 'regular' | 'medium' | 'semibold' | 'bold'; color: Dyn; opacity?: number; lines: number; minScale?: number }; // lines: 줄 수 제한(0은 제한 없음)
 export type SpacerNode = { kind: 'spacer'; length: number | null }; // null은 남는 곳을 채운다
 export type StackNode = { kind: 'stack'; dir: 'h' | 'v'; children: Node[]; spacing?: number; padding?: Pad; background?: Dyn; radius?: number; align?: 'top' | 'center' | 'bottom'; size?: [width: number, height: number] }; // size: 고정 크기
-export type Node = TextNode | SpacerNode | StackNode;
+/**
+ * 작은 그림(알림의 종, 카운트다운의 모래시계). 웹앱의 칸이 줄 앞에 붙이는 것과 같은 모양이다: 선으로 그린 종, 글자와 같은 색.
+ * Scriptable에서는 SF Symbols의 그림을 쓴다(symbol). 그림을 쓸 수 없으면 fallback(그림 글자)을 글자로 놓는다.
+ */
+export type IconNode = { kind: 'icon'; symbol: 'bell' | 'hourglass'; size: number; color: Dyn; opacity?: number; fallback: string };
+export type Node = TextNode | SpacerNode | StackNode | IconNode;
 /** 위젯 하나. ListWidget 자신이 세로로 쌓는 상자다. */
 export type Tree = { background: Dyn; padding: Pad; spacing: number; children: Node[] };
 
@@ -55,6 +61,25 @@ const text = (t: string, size: number, weight: TextNode['weight'], color: Dyn, l
   ({ kind: 'text', text: t, size, weight, color, lines, ...extra });
 /** 글자를 앞쪽 가장자리로 미는 가로 상자. */
 const leading = (node: Node): StackNode => ({ kind: 'stack', dir: 'h', children: [node, flex()] });
+
+/** 그림과 글 사이의 틈(pt). */
+const ICON_GAP = 2;
+/**
+ * 메모 한 줄. 알림과 카운트다운의 줄(eventLines.ts가 그림 글자를 앞에 붙여 둔다)은 그 그림 글자 대신 웹앱과 같은 그림을 앞에 놓는다
+ * (2026-11-18 사용자: 위젯의 종이 달력의 종과 달랐다. "캘린더에서 보이는거와 위젯에서 보이는거가 같아야").
+ * width: 줄이 쓸 수 있는 폭(없으면 자르지 않는다).
+ */
+function memoLine(line: { text: string; done: boolean }, size: number, width: number | null, extra: Partial<TextNode> = {}): StackNode {
+  const symbol: IconNode['symbol'] | null = line.text.startsWith(`${ALARM_MARK} `) ? 'bell' : line.text.startsWith(`${COUNTDOWN_MARK} `) ? 'hourglass' : null;
+  const mark = symbol === 'bell' ? ALARM_MARK : COUNTDOWN_MARK;
+  const body = (line.done ? DONE_MARK : '') + (symbol ? line.text.slice(mark.length + 1) : line.text);
+  const dim = line.done ? { opacity: 0.55 } : {};
+  const room = width === null ? null : symbol ? width - size - ICON_GAP : width;
+  const words = text(room === null ? body : fitText(body, size, room), size, 'regular', C.ink, 1, { ...extra, ...dim });
+  if (!symbol) return leading(words);
+  const icon: IconNode = { kind: 'icon', symbol, size, color: C.ink, ...dim, fallback: mark };
+  return { kind: 'stack', dir: 'h', align: 'center', children: [icon, fixed(ICON_GAP), words, flex()] };
+}
 
 const monthTitle = (monthId: string): string => `${monthId.slice(0, 4)}년 ${Number(monthId.slice(5, 7))}월`;
 const weekdayOfKey = (key: string): number => new Date(Date.UTC(+key.slice(0, 4), +key.slice(5, 7) - 1, +key.slice(8, 10))).getUTCDay();
@@ -117,9 +142,7 @@ function dayCell(cell: GridCell, day: DayValue | undefined, today: string, lay: 
     // 줄마다 한 줄짜리 글이다. 실제 폭이 어림보다 좁으면 iOS가 조금 줄이고, 그래도 넘치면 "…"로 자른다(다음 줄로 접지 않는다).
     const memo = (t: string, extra: Partial<TextNode> = {}): Node => leading(text(t, 9, 'regular', C.ink, 1, { minScale: 0.9, ...extra }));
     const { shown, more } = capLines(memoLines(day.text), capacity);
-    for (const l of shown) {
-      children.push(l.done ? memo(fitText(DONE_MARK + l.text, 9, lay.innerWidth), { opacity: 0.55 }) : memo(fitText(l.text, 9, lay.innerWidth)));
-    }
+    for (const l of shown) children.push(memoLine(l, 9, lay.innerWidth, { minScale: 0.9 }));
     if (more > 0) children.push(memo(`+${more}`));
   }
   children.push(flex());
@@ -175,7 +198,7 @@ function smallTree(input: TreeInput): Tree {
   } else {
     // 날짜 아래 줄이 있으면 메모 한 줄을 덜 넣는다(작은 위젯의 높이를 넘지 않게).
     const { shown, more } = capLines(lines, under === '' ? 6 : 5);
-    for (const l of shown) memo.push(leading(l.done ? text(DONE_MARK + l.text, 11, 'regular', C.ink, 1, { opacity: 0.55 }) : text(l.text, 11, 'regular', C.ink, 1)));
+    for (const l of shown) memo.push(memoLine(l, 11, null));
     if (more > 0) memo.push(leading(text(`+${more}`, 11, 'regular', C.muted, 1)));
   }
   const children: Node[] = [
