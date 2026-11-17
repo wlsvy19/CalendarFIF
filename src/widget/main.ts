@@ -348,6 +348,19 @@ function withVia(appUrl: string, at: Date): string {
   return `${head}${head.includes('?') ? '&' : '?'}via=widget&t=${at.getTime()}${hash}`;
 }
 
+/**
+ * 가려진 달력이 바뀌어 갈 안내 쪽의 주소(웹앱의 closed.html. src/web/widgetPages.ts의 CLOSED_PAGE와 같아야 한다). 주소가 https가 아니면 빈 글.
+ * 글로 만든다(Scriptable에는 브라우저의 URL이 없다).
+ */
+function closedPageUrl(appUrl: string): string {
+  if (!/^https:\/\//i.test(appUrl ?? '')) return '';
+  const cut = appUrl.search(/[?#]/);
+  const head = cut < 0 ? appUrl : appUrl.slice(0, cut);
+  // 주소에 경로가 없으면(https://이름) 뒤에 /를 붙이고, 있으면 마지막 / 까지를 쓴다.
+  const dir = head.indexOf('/', 'https://'.length) < 0 ? `${head}/` : head.slice(0, head.lastIndexOf('/') + 1);
+  return `${dir}closed.html`;
+}
+
 /** 띄운 웹 화면에서 아직 올리지 못한 편집을 읽는 간격과, 한 번 읽는 데 기다리는 시간. */
 const PENDING_POLL_MS = 300;
 const PENDING_READ_WAIT_MS = 1500;
@@ -666,6 +679,13 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
       log.end(false);
     }
     if (how === 'over') {
+      // 가려진 이 달력을 스크립트가 없는 안내 쪽으로 바꾼다: 남은 웹앱이 서버에 붙어 있거나 오류를 적지 않게(웹앱도 스스로 그렇게 한다: src/web/widgetPages.ts).
+      try {
+        const page = closedPageUrl(cfg.appUrl);
+        if (page !== '') void Promise.resolve(view.loadURL(page)).catch(() => {});
+      } catch {
+        // 바꾸지 못하면 그대로 남는다.
+      }
       // 새 달력이 떠 있는 동안에는 이 스크립트를 끝내지 않는다(끝나는 것이 새 달력을 건드리는지 모른다).
       // 가려진 이 달력이 닫힐 때 끝난다. 닫히지 않으면 0.9.11까지처럼 끝나지 않은 채 남는다.
       await shown.catch(() => 'closed' as const);

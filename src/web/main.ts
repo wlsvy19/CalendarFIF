@@ -52,6 +52,7 @@ import { FirestoreMonthStore } from '../sync/firestoreStore';
 import { Outbox } from '../sync/outbox';
 import { PENDING_GLOBAL, pendingTeller } from './widgetBridge';
 import { keepSdkLogs } from './widgetLog';
+import { announceWidgetPage } from './widgetPages';
 import { SyncEngine } from '../sync/engine';
 
 const { app, auth, db } = initFirebase(import.meta.env);
@@ -99,6 +100,12 @@ if (viaWidget()) {
     keepSdkLogs(window as unknown as Record<string, unknown>);
   } catch {
     // 못 하면 SDK가 전처럼 콘솔에 적는다.
+  }
+  // 위젯을 다시 눌러 새 화면이 뜨면, 가려진 채 남은 앞의 화면은 스크립트가 없는 안내 쪽으로 바뀐다(widgetPages.ts).
+  try {
+    announceWidgetPage();
+  } catch {
+    // 못 하면 앞의 화면이 그대로 남는다.
   }
 }
 // 옮긴 자리는 상자마다 따로, 앱이 켜져 있는 동안만 기억한다.

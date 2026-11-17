@@ -65,16 +65,41 @@ export function keepSdkLogs(target: Record<string, unknown>, now: () => number =
     { level: 'warn' },
   );
   for (const name of ['warn', 'error'] as const) {
-    const original = con[name].bind(con);
-    con[name] = (...args: unknown[]): void => {
+    const base = con[name].bind(con);
+    // 이 뒤에 누가 콘솔의 이 자리를 바꿔 넣으면(Scriptable이 웹 화면의 콘솔을 가로채는 때를 모른다) 그것을 아래에 두고, 거르는 것은 그대로 맨 앞에 둔다.
+    let under: (...args: unknown[]) => void = base;
+    let inside = false;
+    const filter = (...args: unknown[]): void => {
       const sdk = typeof args[0] === 'string' ? SDK_NAME.exec(args[0]) : null;
-      if (!sdk) {
+      if (sdk) {
+        if (!taken) keep(name, sdk[0], textOf(args.slice(1)));
         taken = false;
-        original(...args);
         return;
       }
-      if (!taken) keep(name, sdk[0], textOf(args.slice(1)));
       taken = false;
+      // 바꿔 넣은 것이 "원래 것"으로 이 거르는 것을 다시 부르면(가로채는 쪽이 흔히 그렇게 한다) 맨 처음의 콘솔로 보낸다: 끝없이 돌지 않게.
+      if (inside) {
+        base(...args);
+        return;
+      }
+      inside = true;
+      try {
+        under(...args);
+      } finally {
+        inside = false;
+      }
     };
+    try {
+      Object.defineProperty(con, name, {
+        configurable: true,
+        enumerable: true,
+        get: () => filter,
+        set: (next: unknown) => {
+          if (typeof next === 'function' && next !== filter) under = next as (...args: unknown[]) => void;
+        },
+      });
+    } catch {
+      con[name] = filter; // 자리를 지키지 못하면 바꿔 넣기만 한다
+    }
   }
 }

@@ -31,9 +31,11 @@ const proven = (how: ReloadTry['how']): Record<string, unknown> => ({
 
 /** 닫기 전에는 닫히지 않는 가짜 WebView. state: 지금 웹 화면이 답하는 [적어 둔 글, 보이는지]. */
 function withView() {
-  const view = { state: [message(1), 'visible'] as [string, string], reads: 0, presented: 0, close: (): void => {} };
+  const view = { state: [message(1), 'visible'] as [string, string], reads: 0, presented: 0, loaded: [] as string[], close: (): void => {} };
   (globalThis as Record<string, unknown>).WebView = class {
-    async loadURL(): Promise<void> {}
+    async loadURL(url: string): Promise<void> {
+      view.loaded.push(url);
+    }
     present(): Promise<void> {
       view.presented += 1;
       return new Promise((resolve) => {
@@ -367,12 +369,26 @@ describe('위젯을 다시 눌러 새 달력이 떴을 때', () => {
     // 더 읽지 않고 더 적지 않는다. 새 달력이 떠 있는 동안에는 끝내지 않는다(끝나는 것이 새 달력을 건드리는지 모른다).
     expect([state.finished, view.reads, host.state.files.get(CACHE)]).toEqual([false, reads, before]);
     expect(cacheOf(host)).toMatchObject({ session: T0 + 1000, activeAt: 7 });
+    // 가려진 달력은 스크립트가 없는 안내 쪽으로 바꾼다(남은 웹앱이 서버에 붙어 있거나 오류를 적지 않게).
+    expect(view.loaded).toEqual([`https://example.test/?via=widget&t=${T0}`, 'https://example.test/closed.html']);
     // 가려져 있던 그 달력을 닫으면 끝난다. 닫았다고 적지 않고(새 달력의 기록이다) 요청도 그대로 된다.
     view.close();
     await vi.advanceTimersByTimeAsync(0);
     await done;
     expect([state.finished, cacheOf(host).leave]).toEqual([true, undefined]);
     await expect(new host.Request('https://example.test/x').loadString()).resolves.toBeDefined();
+  });
+
+  it('안내 쪽의 주소는 웹앱 주소의 폴더에 붙인다. 물음표와 # 뒤는 뗀다', async () => {
+    for (const [appUrl, page] of [['https://example.test', 'https://example.test/closed.html'], ['https://example.test/app/index.html?x=1#top', 'https://example.test/app/closed.html'], ['https://example.test/app/', 'https://example.test/app/closed.html']]) {
+      const view = withView();
+      const host = openHost();
+      void run(host, { ...cfg, appUrl }, now);
+      await vi.advanceTimersByTimeAsync(600);
+      host.state.files.set(CACHE, JSON.stringify({ ...cacheOf(host), session: Date.now() + 1000 }));
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(view.loaded.at(-1)).toBe(page);
+    }
   });
 
   it('보관 파일의 번호가 더 작으면(다른 쪽이 옛 것을 다시 적었다) 그대로 지켜본다', async () => {

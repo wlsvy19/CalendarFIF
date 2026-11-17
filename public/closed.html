@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>CalendarFIF</title>
+<style>
+  :root { color-scheme: light dark; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: grid; place-items: center; padding: 24px; box-sizing: border-box;
+    background: #FFFFFF; color: #151B26;
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    text-align: center; word-break: keep-all;
+  }
+  p { margin: 0 0 8px; }
+  .sub { color: #5A6575; font-size: 14px; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #161B22; color: #ECEFF4; }
+    .sub { color: #9BA6B5; }
+  }
+</style>
+</head>
+<body>
+<!-- 위젯을 다시 눌러 새 달력이 뜨면, 앞서 열어 둔 달력 화면이 이 쪽으로 바뀐다(src/web/widgetPages.ts, src/widget/main.ts).
+     스크립트가 없는 쪽이다: 가려진 채 남은 화면이 서버에 붙어 있거나 오류를 적지 않게 한다. -->
+<main>
+  <p>이 달력은 새로 연 달력으로 바뀌었습니다.</p>
+  <p class="sub">왼쪽 위의 Close를 눌러 닫아 주세요.</p>
+</main>
+</body>
+</html>
