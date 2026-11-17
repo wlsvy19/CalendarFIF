@@ -740,3 +740,27 @@ it('PC 앱: 창이 가려져도 적던 메모를 저장하지 않는다', async 
     setHidden('visible');
   }
 });
+
+it('웹앱: 위젯이 붙인 via와 t를 주소에서 지우고 위젯에서 연 화면인 것을 기억한다. 다른 것은 그대로 둔다', async () => {
+  const before = location.pathname + location.search + location.hash;
+  history.replaceState(null, '', '/?via=widget&t=1763368000000&x=1#2026-11-03');
+  try {
+    await startWeb('via-strip');
+    expect([location.search, location.hash, sessionStorage.getItem('calfif.via')]).toEqual(['?x=1', '#2026-11-03', 'widget']);
+  } finally {
+    sessionStorage.removeItem('calfif.via');
+    delete (window as unknown as Record<string, unknown>).__calfifPending;
+    history.replaceState(null, '', before);
+  }
+});
+
+it('웹앱: via가 없으면 주소를 건드리지 않는다(t만 있는 주소도)', async () => {
+  const before = location.pathname + location.search + location.hash;
+  history.replaceState(null, '', '/?t=5');
+  try {
+    await startWeb('via-none');
+    expect([location.search, sessionStorage.getItem('calfif.via')]).toEqual(['?t=5', null]);
+  } finally {
+    history.replaceState(null, '', before);
+  }
+});

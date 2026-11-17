@@ -72,6 +72,7 @@ const VIA_KEY = 'calfif.via';
     if (url.searchParams.get('via') !== 'widget') return;
     sessionStorage.setItem(VIA_KEY, 'widget');
     url.searchParams.delete('via');
+    url.searchParams.delete('t'); // 위젯이 받아 둔 옛 화면을 쓰지 않게 붙인 것(src/widget/main.ts의 withVia)
     history.replaceState(history.state, '', url.pathname + url.search + url.hash);
   } catch {
     // 기억하지 못하면 보통 화면처럼 적는다.

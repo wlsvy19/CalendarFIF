@@ -1275,7 +1275,7 @@ describe('위젯을 눌렀을 때 여는 곳(매개변수 inapp)', () => {
       const log = withWebView();
       const host = make({ runsInApp: true, keychain, queryParameters: { open: 'calendar' } });
       await run(host, cfg, now);
-      expect([log.loaded, log.presented, host.state.alerts.length, host.state.requests.length]).toEqual([['https://example.test/?via=widget'], [true], 0, 0]);
+      expect([log.loaded, log.presented, host.state.alerts.length, host.state.requests.length]).toEqual([[`https://example.test/?via=widget&t=${now().getTime()}`], [true], 0, 0]);
     }
   });
 
@@ -1311,7 +1311,7 @@ describe('위젯을 눌렀을 때 여는 곳(매개변수 inapp)', () => {
     expect('WebView' in host).toBe(false);
     await run(host, { ...cfg, version: '0.9.1 (2026-11-16)', handedOver: true, baseVersion: '0.9.0 (2026-11-16)' }, now);
     // 넘겨받은 실행은 달력을 띄워 둔 동안 새 위젯 코드가 있는지 한 번 묻는다(아래의 시험). 달이나 알림은 읽지 않는다.
-    expect([log.loaded, log.presented, host.state.requests.map((r) => r.url.replace(/\?.*$/, ''))]).toEqual([['https://example.test/?via=widget'], [true], ['https://example.test/widget/version.json']]);
+    expect([log.loaded, log.presented, host.state.requests.map((r) => r.url.replace(/\?.*$/, ''))]).toEqual([[`https://example.test/?via=widget&t=${now().getTime()}`], [true], ['https://example.test/widget/version.json']]);
   });
 
   it('달력을 띄워 둔 동안(닫기 전에) 새 위젯 코드가 있는지 확인해 받아 둔다. 버전을 모르거나 주소가 https가 아니면 묻지 않는다', async () => {
@@ -1384,7 +1384,7 @@ describe('위젯을 눌렀을 때 여는 곳(매개변수 inapp)', () => {
       const log = withWebView();
       const host = make({ runsInApp: true, keychain: loggedIn, widgetParameter });
       await run(host, cfg, now);
-      expect([log.loaded, log.presented, host.state.alerts.length]).toEqual([['https://example.test/?via=widget'], [true], 0]);
+      expect([log.loaded, log.presented, host.state.alerts.length]).toEqual([[`https://example.test/?via=widget&t=${now().getTime()}`], [true], 0]);
     }
     // 매개변수에 inapp이 없으면 전처럼 메뉴다.
     const log = withWebView();

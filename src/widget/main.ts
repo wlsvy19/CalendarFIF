@@ -109,11 +109,16 @@ function findWebView(): (new () => WebViewLike) | null {
   }
 }
 
-/** 웹앱 주소에 via=widget을 붙인다. 주소를 읽지 못하면 그대로 둔다. */
-function withVia(appUrl: string): string {
+/**
+ * 웹앱 주소에 via=widget과 t=(지금 시각)를 붙인다. 주소를 읽지 못하면 그대로 둔다.
+ * t: 열 때마다 주소가 달라져, Scriptable의 웹 화면이 받아 둔 옛 첫 화면을 쓰지 않고 서버에서 새로 받는다
+ * (2026-11-17: 배포한 뒤에도 위젯에서 연 달력만 옛 버전이었다. 그 화면에는 새 버전을 스스로 받는 서비스 워커가 없다).
+ */
+function withVia(appUrl: string, at: Date): string {
   try {
     const url = new URL(appUrl);
     url.searchParams.set('via', 'widget');
+    url.searchParams.set('t', String(at.getTime()));
     return url.toString();
   } catch {
     return appUrl;
@@ -211,7 +216,7 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
     // 올리지 못한 편집은 불러오기가 끝난 뒤부터 읽는다(불러오는 중에 웹 화면에서 식을 돌리지 않는다). 끝나기 전에 닫히면 읽지 않는다.
     let closed = false;
     let stopWatching: () => Promise<void> = async () => {};
-    void Promise.resolve(view.loadURL(withVia(cfg.appUrl)))
+    void Promise.resolve(view.loadURL(withVia(cfg.appUrl, now())))
       .then(() => {
         if (!closed) stopWatching = watchPending(host, view, now);
       })
