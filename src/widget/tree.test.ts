@@ -3,7 +3,7 @@ import type { MonthData } from './scene';
 import { widgetSize, type Family } from './sizes';
 import { estimateWidth } from './text';
 import { PALETTES, dayBackground } from './theme';
-import { buildTree, messageTree, type Dyn, type Node, type StackNode, type TextNode, type Tree } from './tree';
+import { buildTree, digitsWidth, messageTree, type Dyn, type Node, type StackNode, type TextNode, type Tree } from './tree';
 
 const SCREEN = { width: 390, height: 844 };
 const TODAY = '2026-11-13';
@@ -118,15 +118,37 @@ describe('buildTree large', () => {
     expect(pills).toHaveLength(1);
     // 크기를 정한 상자다(정하지 않으면 iOS가 머리 줄의 폭을 나눌 때 날짜가 "…"로 잘린다). 두 자리 날은 19×15, 한 자리 날은 15×15 동그라미.
     expect(pills[0]).toMatchObject({ radius: 7.5, size: [19, 15], dir: 'h', align: 'center' });
-    expect(pills[0].padding).toBeUndefined();
     const pillOf = (tree: Tree): StackNode => stacks(tree).find((s) => s.background && s.background.light === PALETTES.light.accent)!;
     expect(pillOf(build('large', month({}), '2026-11-05')).size).toEqual([15, 15]);
     expect(pillOf(buildTree({ family: 'large', size: widgetSize(SCREEN, 'large'), today: TODAY, month: month({}), offline: false, lunar: false })).size).toEqual([19, 15]);
-    // 숫자는 가운데에 놓이고, 그래도 모자라면 "…" 대신 글자를 줄인다.
-    expect(pills[0].children).toHaveLength(3);
-    expect(pills[0].children[1]).toMatchObject({ kind: 'text', text: '13', color: pair('onAccent'), lines: 1, minScale: 0.6 });
-    expect([pills[0].children[0], pills[0].children[2]]).toEqual([{ kind: 'spacer', length: null }, { kind: 'spacer', length: null }]);
+    // 상자 안에는 숫자뿐이다. 양옆의 안쪽 여백으로 가운데에 놓고, 그래도 모자라면 "…" 대신 글자를 줄인다.
+    // 늘어나는 빈칸을 양옆에 두면 iOS가 상자의 폭을 셋으로 나눠 "17"이 "1"로 잘린다(2026-11-17 아이폰).
+    expect(pills[0].children).toEqual([expect.objectContaining({ kind: 'text', text: '13', color: pair('onAccent'), lines: 1, minScale: 0.6 })]);
+    expect(pills[0].padding).toEqual([0, 3.4, 0, 3.4]);
     expect(cellOf(t, 13).children[0]).toMatchObject({ children: [pills[0], { kind: 'spacer', length: null }, { kind: 'text', text: '10.5' }] });
+  });
+
+  it('오늘 표시 안에는 어느 날이든 숫자가 들어갈 폭이 남는다: 양옆 여백을 뺀 폭이 숫자의 어림 폭과 같다', () => {
+    const pillOf = (tree: Tree): StackNode => stacks(tree).find((s) => s.background && s.background.light === PALETTES.light.accent)!;
+    for (let day = 1; day <= 30; day += 1) {
+      const key = `2026-11-${String(day).padStart(2, '0')}`;
+      const pill = pillOf(build('large', month({}), key));
+      // 상자 안에 늘어나는 것이 없다: 숫자 하나뿐이다.
+      expect(pill.children).toHaveLength(1);
+      const number = pill.children[0];
+      if (number.kind !== 'text' || !pill.padding || !pill.size) throw new Error('오늘 표시의 모양이 다르다');
+      expect(number.text).toBe(String(day));
+      const [top, left, bottom, right] = pill.padding;
+      // 위아래 여백은 없고 양옆이 같다(가운데).
+      expect([top, bottom, left]).toEqual([0, 0, right]);
+      const room = pill.size[0] - left - right;
+      const need = digitsWidth(number.text, number.size);
+      expect(Math.abs(room - need)).toBeLessThanOrEqual(0.11);
+      // 숫자 두 개가 다 들어간다(가장 넓은 두 자리도 14pt 안쪽이다). 한 글자 폭(7pt쯤)만 남는 일이 없다.
+      expect(room).toBeGreaterThanOrEqual(day >= 10 ? 10 : 5);
+      expect(left).toBeGreaterThanOrEqual(2);
+    }
+    expect([digitsWidth('17', 11), digitsWidth('20', 11), digitsWidth('1', 11)].map((w) => Math.round(w * 100) / 100)).toEqual([11.66, 13.86, 5.28]);
   });
 
   it('날짜 색이 있으면 칸 바탕이 그 색이고 숫자는 ink, 잘못된 색은 surface', () => {

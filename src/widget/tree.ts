@@ -39,6 +39,15 @@ const DONE_MARK = '\u2713 ';
 /** 오늘 표시의 높이와 두 자리 날의 폭(pt). 11pt 굵은 숫자 두 개가 14pt쯤이다. */
 const TODAY_MARK_H = 15;
 const TODAY_MARK_W2 = 19;
+/** 날짜 숫자의 글자 크기(pt). */
+const DAY_NUMBER_SIZE = 11;
+/**
+ * 기본 글꼴 숫자의 폭 어림(글자 크기에 대한 비율). 숫자마다 폭이 다르다(1이 좁다). 오늘 표시 안에서 숫자를 가운데에 놓을 때 쓴다.
+ * 정확하지 않아도 된다: 조금 모자라면 iOS가 글자를 그만큼 줄이고(minScale), 남으면 그만큼 한쪽으로 치우칠 뿐이다.
+ */
+const DIGIT_EM: Record<string, number> = { '1': 0.48, '7': 0.58 };
+const DIGIT_EM_OTHER = 0.63;
+export const digitsWidth = (digits: string, size: number): number => [...digits].reduce((w, d) => w + (DIGIT_EM[d] ?? DIGIT_EM_OTHER) * size, 0);
 
 const flex = (): SpacerNode => ({ kind: 'spacer', length: null });
 const fixed = (length: number): SpacerNode => ({ kind: 'spacer', length });
@@ -74,19 +83,24 @@ function dayCell(cell: GridCell, day: DayValue | undefined, today: string, lay: 
   // 공휴일과 대체공휴일은 요일과 상관없이 빨간 날이다.
   const holiday = holidayLabel(cell.dateKey);
   const numberColor = cell.dateKey === today ? C.onAccent : hasColor ? C.ink : holiday !== '' ? C.sun : dowColor(cell.dow);
-  const numberText = text(String(cell.dayOfMonth), 11, 'semibold', numberColor, 1, cell.inMonth ? {} : { opacity: 0.4 });
+  const numberText = text(String(cell.dayOfMonth), DAY_NUMBER_SIZE, 'semibold', numberColor, 1, cell.inMonth ? {} : { opacity: 0.4 });
   // 머리 줄: 숫자는 앞쪽, 음력은 뒤쪽 가장자리. 이번 달의 칸에만 음력과 공휴일 이름을 적는다.
   // 절기나 복날이면 음력 대신 그 이름을 초록으로 적는다(둘이 겹치면 절기).
   const season = lay.lunar && cell.inMonth ? seasonNames(cell.dateKey)[0] ?? '' : '';
   const lunar = season !== '' ? season : lay.lunar && cell.inMonth ? lunarShort(cell.dateKey) : '';
   // 오늘 표시: 크기를 정한 동그라미(두 자리 날은 조금 넓은 알약). 크기를 정하지 않으면 iOS가 머리 줄의 폭을
   // 숫자, 빈칸, 음력에 나눠 줄 때 숫자 상자가 모자라 날짜가 "…"로 잘린다(2026-11-17 아이폰에서 17일이 그랬다).
-  // 그래도 폭이 모자라면 날짜를 줄여서라도 보인다.
+  // 그 안에서 숫자는 양옆의 안쪽 여백으로 가운데에 놓는다. 늘어나는 빈칸(flex)을 양옆에 두면 iOS가 상자의 폭을
+  // 빈칸, 숫자, 빈칸에 셋으로 나눠 숫자에 6pt쯤만 주어서 "17"이 "1"로 잘린다(같은 날 0.9.5~0.9.13에서 그랬다).
+  // 안쪽 여백은 제 몫만 가져가고 나머지가 모두 숫자에 간다(상자 안에는 숫자뿐이라 나눌 것이 없다).
+  // 여백은 숫자의 어림 폭으로 정한다. 어림보다 숫자가 넓으면 iOS가 그만큼 줄여서 보인다.
+  const markWidth = cell.dayOfMonth >= 10 ? TODAY_MARK_W2 : TODAY_MARK_H;
+  const markSide = Math.max(0.5, Math.round(((markWidth - digitsWidth(String(cell.dayOfMonth), DAY_NUMBER_SIZE)) / 2) * 10) / 10);
   const number: Node = cell.dateKey === today
     ? {
       kind: 'stack', dir: 'h', align: 'center', background: C.accent, radius: TODAY_MARK_H / 2,
-      size: [cell.dayOfMonth >= 10 ? TODAY_MARK_W2 : TODAY_MARK_H, TODAY_MARK_H],
-      children: [flex(), { ...numberText, minScale: 0.6 }, flex()],
+      size: [markWidth, TODAY_MARK_H], padding: [0, markSide, 0, markSide],
+      children: [{ ...numberText, minScale: 0.6 }],
     }
     : numberText;
   const head: Node[] = [number, flex()];
