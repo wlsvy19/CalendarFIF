@@ -1437,7 +1437,7 @@ describe('위젯에서 연 달력이 아직 올리지 못한 편집', () => {
     await run(host, cfg, now);
     expect(asked[0]).toEqual(['String(window.__calfifPending || "")', false]);
     expect(cacheOf(host)).toEqual({
-      monthId: '2026-11', days: { '13': { text: '리뷰', color: '' } }, savedAt: 1,
+      monthId: '2026-11', days: { '13': { text: '리뷰', color: '' } }, savedAt: 1, activeAt: NOW,
       pending: { uid: 'owner-test-uid', savedAt: NOW, edits: [edit('16', 'AI 생산성')] },
     });
   });
@@ -1453,7 +1453,7 @@ describe('위젯에서 연 달력이 아직 올리지 못한 편집', () => {
       withPendingView([answer]);
       const kept = openHost({ [CACHE]: before });
       await run(kept, cfg, now);
-      expect(kept.state.files.get(CACHE)).toBe(before);
+      expect(cacheOf(kept).pending).toEqual(JSON.parse(before).pending);
     }
   });
 
@@ -1504,7 +1504,7 @@ describe('위젯에서 연 달력이 아직 올리지 못한 편집', () => {
       withPendingView([answer]);
       const failing = openHost();
       await expect(run(failing, cfg, now)).resolves.toBeUndefined();
-      expect([failing.state.alerts.length, failing.state.files.has(CACHE)]).toEqual([0, false]);
+      expect([failing.state.alerts.length, cacheOf(failing).pending]).toEqual([0, undefined]);
     }
   });
 
@@ -1513,7 +1513,7 @@ describe('위젯에서 연 달력이 아직 올리지 못한 편집', () => {
     const host = openHost();
     (host as { Timer: unknown }).Timer = { schedule: () => { throw new Error('타이머 없음'); } };
     await expect(run(host, cfg, now)).resolves.toBeUndefined();
-    expect([host.state.alerts.length, host.state.files.has(CACHE)]).toEqual([0, false]);
+    expect([host.state.alerts.length, cacheOf(host).pending]).toEqual([0, undefined]);
   });
 
   it('불러오기가 끝난 뒤부터 읽는다. 끝나기 전에 닫히면 읽지 않는다', async () => {
@@ -1530,7 +1530,7 @@ describe('위젯에서 연 달력이 아직 올리지 못한 편집', () => {
     };
     const host = openHost();
     await run(host, cfg, now);
-    expect([asked, host.state.files.has(CACHE)]).toEqual([[], false]);
+    expect([asked, cacheOf(host).pending]).toEqual([[], undefined]);
   });
 
   const timedDoc = (text: string, color: string, editedAt: number) => ({
@@ -1656,7 +1656,7 @@ describe('위젯에서 연 달력의 주소와 상태', () => {
       withProbe(answer);
       const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
       await expect(run(host, cfg, now)).resolves.toBeUndefined();
-      expect([host.state.files.has(CACHE), host.state.alerts.length]).toEqual([false, 0]);
+      expect([cacheOf(host).web, host.state.alerts.length]).toEqual([undefined, 0]);
     }
   });
 
@@ -1668,5 +1668,75 @@ describe('위젯에서 연 달력의 주소와 상태', () => {
     const never = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }] });
     await run(never, cfg, now);
     expect(never.state.alerts[0].message).not.toContain('위젯에서 연 달력');
+  });
+});
+
+describe('위젯에서 연 달력을 쓴 직후에는 곧 다시 그려 달라고 청한다', () => {
+  const NOW = now().getTime();
+  const cacheOf = (h: FakeHost): Record<string, unknown> => JSON.parse(h.state.files.get(CACHE) ?? '{}');
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).WebView;
+  });
+
+  it('달력을 띄우면 바로 그 시각을 보관 파일의 activeAt에 적고, 떠 있는 동안 5초마다, 닫힐 때 한 번 더 적는다', async () => {
+    vi.useFakeTimers();
+    try {
+      let t = NOW;
+      let close!: () => void;
+      (globalThis as Record<string, unknown>).WebView = class {
+        async loadURL(): Promise<void> {}
+        present(): Promise<void> {
+          return new Promise<void>((resolve) => { close = resolve; });
+        }
+      };
+      const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
+      const done = run(host, cfg, () => new Date(t));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(cacheOf(host).activeAt).toBe(NOW);
+      t = NOW + 5000;
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(cacheOf(host).activeAt).toBe(NOW);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(cacheOf(host).activeAt).toBe(NOW + 5000);
+      t = NOW + 7000;
+      close();
+      await vi.advanceTimersByTimeAsync(0);
+      await done;
+      expect(cacheOf(host).activeAt).toBe(NOW + 7000);
+      t = NOW + 60_000;
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(cacheOf(host).activeAt).toBe(NOW + 7000); // 닫힌 뒤에는 적지 않는다
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('타이머를 걸지 못해도 열 때와 닫을 때는 적는다', async () => {
+    (globalThis as Record<string, unknown>).WebView = class { async loadURL(): Promise<void> {} async present(): Promise<void> {} };
+    const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
+    (host as { Timer: unknown }).Timer = { schedule: () => { throw new Error('타이머 없음'); } };
+    await expect(run(host, cfg, now)).resolves.toBeUndefined();
+    expect(cacheOf(host).activeAt).toBe(NOW);
+  });
+
+  it('위젯은 그 시각에서 3분 안이면 15초 뒤를, 아니면 2분 뒤를 청한다. 기본 부품 위젯도 같다', async () => {
+    const refreshOf = async (activeAt: number | undefined, native = false): Promise<number> => {
+      const files: Record<string, string> = activeAt === undefined ? {} : { [CACHE]: JSON.stringify({ activeAt }) };
+      const host = (native ? makeNative : make)({ keychain: loggedIn, files });
+      await run(host, cfg, now);
+      return ((lastWidget(host).props.refreshAfterDate as Date).getTime() - NOW) / 1000;
+    };
+    expect(await refreshOf(NOW - 20_000)).toBe(15);
+    expect(await refreshOf(NOW - 20_000, true)).toBe(15);
+    expect(await refreshOf(NOW - 179_000)).toBe(15);
+    expect(await refreshOf(NOW - 181_000)).toBe(120);
+    expect(await refreshOf(undefined)).toBe(120);
+    expect(await refreshOf(undefined, true)).toBe(120);
+  });
+
+  it('로그인 안내나 오류 위젯도 같은 간격을 따른다', async () => {
+    const host = make({ files: { [CACHE]: JSON.stringify({ activeAt: NOW - 1000 }) } });
+    await run(host, cfg, now);
+    expect(((lastWidget(host).props.refreshAfterDate as Date).getTime() - NOW) / 1000).toBe(15);
   });
 });

@@ -7,6 +7,7 @@ import { isApiError, readEvents, readMonthDoc, readPushDoc, refreshSession, sign
 import { pushCoversUntil } from '../push/doc';
 import type { Host, ListWidgetLike } from './host';
 import { PENDING_JS, PROBE_JS, applyPending, parsePendingMessage, parseProbe, pendingStateOf, probeLine, settlePending, webProbeOf, type PendingState, type WebProbe } from './pending';
+import { refreshAt } from './refresh';
 import { makeWidget } from './render';
 import { renderTree } from './renderTree';
 import { buildScene, messageScene, type MonthData, type Scene } from './scene';
@@ -159,6 +160,39 @@ async function boundedWait<T>(host: Host, work: Promise<T>, ms: number, fallback
   }
 }
 
+/** 달력이 떠 있는 동안 그 시각을 보관 파일의 activeAt에 적는 간격. */
+const ACTIVE_BEAT_MS = 5000;
+
+/**
+ * 위젯에서 연 달력이 화면에 떠 있는 동안 그 시각을 보관 파일의 activeAt에 적어 둔다(바로 한 번, 그 뒤 5초마다).
+ * 앱이 뒤로 가면 타이머가 멈추므로 마지막으로 적힌 시각이 달력에서 나간 때쯤이다. 위젯은 그때에서 3분 안이면 곧 다시 그려 달라고 청한다.
+ * 돌려주는 함수는 한 번 더 적고 멈춘다. 던지지 않는다.
+ */
+function keepActive(host: Host, now: () => Date): () => void {
+  let stopped = false;
+  let timer: { invalidate(): void } | undefined;
+  const beat = (): void => updateCache(host, { activeAt: now().getTime() });
+  const loop = (): void => {
+    if (stopped) return;
+    beat();
+    try {
+      timer = host.Timer.schedule(ACTIVE_BEAT_MS, false, loop);
+    } catch {
+      // 타이머가 없으면 열 때와 닫을 때만 적는다.
+    }
+  };
+  loop();
+  return () => {
+    stopped = true;
+    try {
+      timer?.invalidate();
+    } catch {
+      // 그대로 둔다.
+    }
+    beat();
+  };
+}
+
 function watchPending(host: Host, view: WebViewLike, now: () => Date): () => Promise<void> {
   if (typeof view.evaluateJavaScript !== 'function') return async () => {};
   let last = '';
@@ -243,6 +277,7 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
       .catch(() => {
         // 불러오지 못하면 빈 화면이 남는다. 닫으면 끝난다.
       });
+    const stopActive = keepActive(host, now);
     try {
       const shown = view.present(true);
       // 달력을 띄워 둔 동안 새 위젯 코드가 있는지 확인해 받아 둔다(던지지 않는다). 달력을 닫지 않고 홈 화면으로 나가는 일이 흔해서,
@@ -251,6 +286,7 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
       await shown;
     } finally {
       closed = true;
+      stopActive();
       await stopWatching();
     }
     return '';
@@ -259,8 +295,17 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
   }
 }
 
-const toWidget = (host: Host, env: Env, view: View, appUrl: string, now: Date): ListWidgetLike =>
-  'tree' in view ? renderTree(host, view.tree, appUrl, now, env.force) : makeWidget(host, view.scene, appUrl, now);
+function toWidget(host: Host, env: Env, view: View, appUrl: string, now: Date): ListWidgetLike {
+  const widget = 'tree' in view ? renderTree(host, view.tree, appUrl, now, env.force) : makeWidget(host, view.scene, appUrl, now);
+  // 방금까지 위젯에서 연 달력을 쓰고 있었으면 곧 다시 그려 달라고 청한다(refresh.ts). 그때를 모르면 보통 간격이다.
+  try {
+    const activeAt = cacheObject(host)?.activeAt;
+    if (typeof activeAt === 'number' && Number.isFinite(activeAt)) widget.refreshAfterDate = refreshAt(now, activeAt);
+  } catch {
+    // 보통 간격으로 둔다.
+  }
+  return widget;
+}
 
 // 보관해 둔 달: 네트워크가 안 될 때 마지막으로 읽은 것을 그린다.
 const cachePath = (host: Host): string => {
