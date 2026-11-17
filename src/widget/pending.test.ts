@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PENDING_TTL_MS, applyPending, parsePendingMessage, parseProbe, pendingStateOf, probeLine, settlePending, webProbeOf, type PendingState } from './pending';
+import { PENDING_TTL_MS, applyPending, countPending, parsePendingMessage, parsePoll, parseProbe, pendingStateOf, probeLine, settlePending, webProbeOf, type PendingState } from './pending';
 
 const edit = (day: string, text: string, color = '', editedAt = 2000, monthId = '2026-11') => ({ monthId, day, text, color, editedAt });
 const message = (edits: unknown[], extra: Record<string, unknown> = {}): string => JSON.stringify({ v: 1, uid: 'owner-test-uid', edits, ...extra });
@@ -105,5 +105,31 @@ describe('웹 화면의 상태', () => {
     expect(probeLine({ at, app: '0.9.9', sw: false, bridge: true })).toBe('위젯에서 연 달력(11월 17일 09:05 확인): 웹앱 0.9.9, 서비스 워커 없음, 위젯에 넘기기 켜짐');
     expect(probeLine({ at, app: '', sw: true, bridge: false })).toBe('위젯에서 연 달력(11월 17일 09:05 확인): 웹앱 버전 모름(0.9.8 이하), 서비스 워커 있음, 위젯에 넘기기 꺼짐');
     expect(probeLine(null)).toBe('');
+  });
+});
+
+describe('0.3초마다 묻는 식의 답', () => {
+  it('올리지 못한 편집의 글과 화면이 보이는지를 읽는다', () => {
+    expect(parsePoll(JSON.stringify(['{"v":1}', 'visible']))).toEqual({ pending: '{"v":1}', hidden: false, visible: true });
+    expect(parsePoll(JSON.stringify(['', 'hidden']))).toEqual({ pending: '', hidden: true, visible: false });
+    expect(parsePoll(JSON.stringify(['', 'prerender']))).toEqual({ pending: '', hidden: false, visible: false });
+    expect(parsePoll(JSON.stringify(['', '']))).toEqual({ pending: '', hidden: false, visible: false });
+  });
+
+  it('모양이 다르면 null', () => {
+    for (const text of ['', 'x', 'null', '{}', '[]', JSON.stringify(['a']), JSON.stringify([1, 'visible']), JSON.stringify(['a', true])]) expect(parsePoll(text)).toBeNull();
+  });
+});
+
+describe('countPending', () => {
+  const state: PendingState = { uid: 'u', savedAt: 9000, edits: [
+    { monthId: '2026-11', day: '13', text: 'a', color: '', editedAt: 2000 }, { monthId: '2026-11', day: '14', text: 'b', color: '', editedAt: 2000 }, { monthId: '2026-12', day: '13', text: 'c', color: '', editedAt: 2000 },
+  ] };
+  it('applyPending이 얹을 것만 센다', () => {
+    expect(countPending('2026-11', { '13': 2000 }, state, 'u', 10_000)).toBe(1);
+    expect(countPending('2026-11', {}, state, 'u', 10_000)).toBe(2);
+    expect(countPending('2026-11', {}, state, 'other', 10_000)).toBe(0);
+    expect(countPending('2026-11', {}, state, 'u', 9000 + PENDING_TTL_MS + 1)).toBe(0);
+    expect(countPending('2026-11', {}, null, 'u', 10_000)).toBe(0);
   });
 });

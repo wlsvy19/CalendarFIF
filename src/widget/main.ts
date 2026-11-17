@@ -6,9 +6,8 @@ import { clearAlarms, pendingStatus, scheduleAlarms, scheduleTest, type AlarmSta
 import { isApiError, readEvents, readMonthDoc, readPushDoc, refreshSession, signIn, type Config, type Session } from './api';
 import { pushCoversUntil } from '../push/doc';
 import type { Host, ListWidgetLike } from './host';
-import { PENDING_JS, PROBE_JS, applyPending, countPending, parsePendingMessage, parseProbe, pendingStateOf, settlePending, webProbeOf, type PendingState, type WebProbe } from './pending';
-import { MAX_DRAWS, bridgeOf, drawsOf, statusText, type BridgeNote, type DrawNote } from './status';
-import { refreshAt } from './refresh';
+import { POLL_JS, PROBE_JS, applyPending, countPending, parsePendingMessage, parsePoll, parseProbe, pendingStateOf, settlePending, webProbeOf, type PendingState, type WebProbe } from './pending';
+import { MAX_DRAWS, bridgeOf, drawsOf, leaveOf, statusText, type BridgeNote, type DrawNote, type LeaveNote } from './status';
 import { makeWidget } from './render';
 import { renderTree } from './renderTree';
 import { buildScene, messageScene, type MonthData, type Scene } from './scene';
@@ -168,7 +167,7 @@ const ACTIVE_BEAT_MS = 5000;
 
 /**
  * 위젯에서 연 달력이 화면에 떠 있는 동안 그 시각을 보관 파일의 activeAt에 적어 둔다(바로 한 번, 그 뒤 5초마다).
- * 앱이 뒤로 가면 타이머가 멈추므로 마지막으로 적힌 시각이 달력에서 나간 때쯤이다. 위젯은 그때에서 3분 안이면 곧 다시 그려 달라고 청한다.
+ * 앱이 뒤로 가면 타이머가 멈추므로 마지막으로 적힌 시각이 달력에서 나간 때쯤이다. 메뉴의 상태에 보인다.
  * 돌려주는 함수는 한 번 더 적고 멈춘다. 던지지 않는다.
  */
 function keepActive(host: Host, now: () => Date): () => void {
@@ -196,8 +195,11 @@ function keepActive(host: Host, now: () => Date): () => void {
   };
 }
 
-function watchPending(host: Host, view: WebViewLike, now: () => Date): () => Promise<void> {
+/** onLeave: 보이던 웹 화면이 가려졌을 때(앱이 뒤로 갔다) 한 번 부른다. 돌려주는 함수의 fast: 마지막 읽기를 건너뛰고 바로 멈춘다. */
+function watchPending(host: Host, view: WebViewLike, now: () => Date, onLeave: () => void): (fast?: boolean) => Promise<void> {
   if (typeof view.evaluateJavaScript !== 'function') return async () => {};
+  let seenVisible = false;
+  let leftTold = false;
   let last = '';
   let lastProbe = '';
   let reads = 0;
@@ -236,19 +238,29 @@ function watchPending(host: Host, view: WebViewLike, now: () => Date): () => Pro
     }
     try {
       // 화면이 아직 없거나 닫힌 뒤에는 답이 오지 않을 수 있어 기다리는 시간을 둔다.
-      const got = await boundedWait<unknown>(host, Promise.resolve(view.evaluateJavaScript!(PENDING_JS, false)), PENDING_READ_WAIT_MS, null);
-      if (typeof got !== 'string') {
-        failed(got === null ? '답이 없다(1.5초)' : `글이 아닌 답(${typeof got})`);
+      const answer = await boundedWait<unknown>(host, Promise.resolve(view.evaluateJavaScript!(POLL_JS, false)), PENDING_READ_WAIT_MS, null);
+      const poll = typeof answer === 'string' ? parsePoll(answer) : null;
+      if (!poll) {
+        failed(answer === null ? '답이 없다(1.5초)' : typeof answer === 'string' ? '모양이 다른 답' : `글이 아닌 답(${typeof answer})`);
         return;
       }
       tally.ok += 1;
       tally.lastOkAt = now().getTime();
-      if (got === '' || got === last) return;
-      const message = parsePendingMessage(got);
-      if (!message) return;
-      last = got;
-      const pending: PendingState = { uid: message.uid, savedAt: now().getTime(), edits: message.edits };
-      updateCache(host, { pending });
+      const got = poll.pending;
+      if (got !== '' && got !== last) {
+        const message = parsePendingMessage(got);
+        if (message) {
+          last = got;
+          const pending: PendingState = { uid: message.uid, savedAt: now().getTime(), edits: message.edits };
+          updateCache(host, { pending });
+        }
+      }
+      // 보이던 화면이 가려졌다: 사용자가 홈 화면으로 나갔다. 올리지 못한 편집은 방금 위에서 받았다.
+      if (poll.visible) seenVisible = true;
+      else if (poll.hidden && seenVisible && !leftTold) {
+        leftTold = true;
+        onLeave();
+      }
     } catch (e) {
       failed(e); // 다음에 다시 읽는다.
     }
@@ -265,23 +277,54 @@ function watchPending(host: Host, view: WebViewLike, now: () => Date): () => Pro
     });
   };
   loop();
-  return async () => {
+  return async (fast = false) => {
     stopped = true;
     try {
       timer?.invalidate();
     } catch {
       // 그대로 둔다.
     }
-    await read();
-    await boundedWait<null>(host, new Promise<null>(() => {}), PENDING_POLL_MS, null);
-    await read();
-    await probe();
+    if (!fast) {
+      await read();
+      await boundedWait<null>(host, new Promise<null>(() => {}), PENDING_POLL_MS, null);
+      await read();
+      await probe();
+    }
     noteBridge();
   };
 }
 
 /**
- * Scriptable 안의 웹 화면(WebView)에 달력을 띄운다. 닫을 때까지 기다린다. 띄웠으면 빈 글, 띄우지 못하면 그 까닭을 준다.
+ * 붙여 넣은 스크립트는 달력을 여는 실행이 끝난 뒤에 새 버전을 확인한다(update.ts의 runWithUpdate, 네트워크 요청).
+ * 홈 화면으로 나간 뒤에는 그 요청을 기다리다가 아이폰이 앱을 멈춰 스크립트가 끝나지 못할 수 있으므로, 그 요청이 바로 실패하게 해 둔다.
+ * 새 버전은 달력을 띄워 둔 동안 이미 확인했다(openCalendarInApp). 던지지 않는다.
+ */
+function skipLateUpdateCheck(host: Host): void {
+  try {
+    const refuse = (): Promise<never> => Promise.reject(new Error('홈 화면으로 나가는 중이라 확인을 건너뛰었다(달력을 띄운 동안 확인했다)'));
+    (host as { Request: unknown }).Request = class {
+      method = 'GET';
+      headers: Record<string, string> = {};
+      body = '';
+      timeoutInterval = 0;
+      response = null;
+      loadJSON(): Promise<unknown> {
+        return refuse();
+      }
+      loadString(): Promise<string> {
+        return refuse();
+      }
+    };
+  } catch {
+    // 바꾸지 못하면 그 확인이 그대로 돈다.
+  }
+}
+
+/**
+ * Scriptable 안의 웹 화면(WebView)에 달력을 띄운다. 닫거나 홈 화면으로 나갈 때까지 기다린다. 띄웠으면 빈 글, 띄우지 못하면 그 까닭을 준다.
+ * 홈 화면으로 나가면(웹 화면이 가려지면) 기다리지 않고 끝낸다: Scriptable은 앱 안에서 돌린 스크립트가 끝날 때 위젯을 새로 그리게 한다
+ * (2026-11-17 사용자의 아이폰 기록: 달력을 닫은 바로 그 초에 위젯이 그려졌고, 닫지 않고 나간 동안에는 16~22분씩 그려지지 않았다).
+ * 닫지 않고 나가는 것이 보통이라, 끝내지 않으면 고친 것이 위젯에 오래 나오지 않는다. 띄운 화면은 그대로 남는다.
  * 불러오기가 끝나기를 기다리지 않고 바로 띄운다: 기다리는 동안 Scriptable의 화면이 보이지 않게, 그리고 느린 연결에서 멈춰 있지 않게.
  */
 async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Promise<string> {
@@ -293,12 +336,16 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
     // 올리지 못한 편집은 불러오기가 끝난 뒤부터 읽는다(불러오는 중에 웹 화면에서 식을 돌리지 않는다). 끝나기 전에 닫히면 읽지 않는다.
     // 불러오기가 끝났다는 답이 오지 않는 때를 위해 4초 뒤에는 읽기 시작한다.
     let closed = false;
-    let stopWatching: () => Promise<void> = async () => {};
+    let stopWatching: (fast?: boolean) => Promise<void> = async () => {};
     let watching = false;
+    let leave: () => void = () => {};
+    const left = new Promise<'left'>((resolve) => {
+      leave = () => resolve('left');
+    });
     const startWatching = (): void => {
       if (closed || watching) return;
       watching = true;
-      stopWatching = watchPending(host, view, now);
+      stopWatching = watchPending(host, view, now, leave);
     };
     let lateStart: { invalidate(): void } | undefined;
     try {
@@ -312,12 +359,14 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
         // 불러오지 못하면 빈 화면이 남는다. 닫으면 끝난다.
       });
     const stopActive = keepActive(host, now);
+    let how: LeaveNote['how'] = 'closed';
     try {
-      const shown = view.present(true);
+      const shown = Promise.resolve(view.present(true)).then(() => 'closed' as const);
+      shown.catch(() => {}); // 홈 화면으로 나가 먼저 끝낸 뒤에 거절돼도 잡지 않은 오류가 되지 않게
       // 달력을 띄워 둔 동안 새 위젯 코드가 있는지 확인해 받아 둔다(던지지 않는다). 달력을 닫지 않고 홈 화면으로 나가는 일이 흔해서,
       // 닫힌 뒤의 확인(update.ts의 runWithUpdate)에만 맡기면 새 코드는 위젯이 세 시간에 한 번 확인할 때에야 온다.
       if (versionKey(cfg.version) && /^https:\/\//i.test(cfg.appUrl ?? '')) void checkForUpdate(host, cfg, now());
-      await shown;
+      how = await Promise.race([shown, left]);
     } finally {
       closed = true;
       try {
@@ -326,25 +375,19 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
         // 그대로 둔다.
       }
       stopActive();
-      await stopWatching();
+      await stopWatching(how === 'left');
     }
+    const note: LeaveNote = { at: now().getTime(), how };
+    updateCache(host, { leave: note });
+    if (how === 'left') skipLateUpdateCheck(host);
     return '';
   } catch (e) {
     return e instanceof Error && e.message !== '' ? e.message : '알 수 없는 오류';
   }
 }
 
-function toWidget(host: Host, env: Env, view: View, appUrl: string, now: Date): ListWidgetLike {
-  const widget = 'tree' in view ? renderTree(host, view.tree, appUrl, now, env.force) : makeWidget(host, view.scene, appUrl, now);
-  // 방금까지 위젯에서 연 달력을 쓰고 있었으면 곧 다시 그려 달라고 청한다(refresh.ts). 그때를 모르면 보통 간격이다.
-  try {
-    const activeAt = cacheObject(host)?.activeAt;
-    if (typeof activeAt === 'number' && Number.isFinite(activeAt)) widget.refreshAfterDate = refreshAt(now, activeAt);
-  } catch {
-    // 보통 간격으로 둔다.
-  }
-  return widget;
-}
+const toWidget = (host: Host, env: Env, view: View, appUrl: string, now: Date): ListWidgetLike =>
+  'tree' in view ? renderTree(host, view.tree, appUrl, now, env.force) : makeWidget(host, view.scene, appUrl, now);
 
 // 보관해 둔 달: 네트워크가 안 될 때 마지막으로 읽은 것을 그린다.
 const cachePath = (host: Host): string => {
@@ -965,7 +1008,7 @@ function statusOf(host: Host, now: Date): string {
     const activeAt = typeof cache.activeAt === 'number' && Number.isFinite(cache.activeAt) ? cache.activeAt : 0;
     const { version, unfinished, skipUntil, note, libNote } = readUpdateState(host);
     return statusText({
-      now: now.getTime(), draws: drawsOf(cache.draws), web: webProbeOf(cache.web), activeAt, pending: pendingStateOf(cache.pending), bridge: bridgeOf(cache.bridge),
+      now: now.getTime(), draws: drawsOf(cache.draws), web: webProbeOf(cache.web), activeAt, leave: leaveOf(cache.leave), pending: pendingStateOf(cache.pending), bridge: bridgeOf(cache.bridge),
       update: { version, unfinished, skipUntil, note, libNote },
     });
   } catch {

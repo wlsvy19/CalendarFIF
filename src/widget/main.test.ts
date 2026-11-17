@@ -1408,7 +1408,9 @@ describe('위젯에서 연 달력이 아직 올리지 못한 편집', () => {
   const cacheOf = (h: FakeHost): Record<string, unknown> => JSON.parse(h.state.files.get(CACHE) ?? '{}');
   /** 웹 화면이 window.__calfifPending에 적어 둔 것을 돌려주는 가짜 WebView. answers는 읽을 때마다 차례로 준다(마지막 것은 되풀이한다). */
   /** probe: 웹 화면의 상태를 묻는 식(PROBE_JS)에 줄 답. 그 물음은 asked에 넣지 않는다. */
+  /** 글로 준 답은 웹 화면이 주는 꼴([올리지 못한 편집의 글, 화면이 보이는지]의 JSON)로 싸서 준다. 화면은 늘 보인다. */
   const withPendingView = (answers: unknown[], present: () => Promise<void> = async () => {}, probe: unknown = undefined) => {
+    const wrap = (v: unknown): unknown => (typeof v === 'string' ? JSON.stringify([v, 'visible']) : v);
     const asked: [string, unknown][] = [];
     let i = 0;
     (globalThis as Record<string, unknown>).WebView = class {
@@ -1421,7 +1423,7 @@ describe('위젯에서 연 달력이 아직 올리지 못한 편집', () => {
         asked.push([js, useCallback]);
         const answer = answers[Math.min(i, answers.length - 1)];
         i += 1;
-        return typeof answer === 'function' ? (answer as () => Promise<unknown>)() : Promise.resolve(answer);
+        return typeof answer === 'function' ? (answer as () => Promise<unknown>)() : Promise.resolve(wrap(answer));
       }
     };
     return asked;
@@ -1435,11 +1437,12 @@ describe('위젯에서 연 달력이 아직 올리지 못한 편집', () => {
     const asked = withPendingView([pendingText([edit('16', 'AI 생산성')])]);
     const host = openHost({ [CACHE]: JSON.stringify({ monthId: '2026-11', days: { '13': { text: '리뷰', color: '' } }, savedAt: 1 }) });
     await run(host, cfg, now);
-    expect(asked[0]).toEqual(['String(window.__calfifPending || "")', false]);
+    expect(asked[0]).toEqual(['JSON.stringify([String(window.__calfifPending || ""), String(document.visibilityState || "")])', false]);
     expect(cacheOf(host)).toEqual({
       monthId: '2026-11', days: { '13': { text: '리뷰', color: '' } }, savedAt: 1, activeAt: NOW,
       pending: { uid: 'owner-test-uid', savedAt: NOW, edits: [edit('16', 'AI 생산성')] },
       bridge: expect.objectContaining({ at: NOW, fail: 0, lastOkAt: NOW, lastError: '' }),
+      leave: { at: NOW, how: 'closed' },
     });
   });
 
@@ -1450,7 +1453,7 @@ describe('위젯에서 연 달력이 아직 올리지 못한 편집', () => {
     await run(cleared, cfg, now);
     expect(cacheOf(cleared).pending).toEqual({ uid: 'owner-test-uid', savedAt: NOW, edits: [] });
 
-    for (const answer of ['', 'not json', undefined, 7, JSON.stringify({ v: 2, uid: 'u', edits: [] })]) {
+    for (const answer of ['', 'not json', undefined, 7, JSON.stringify({ v: 2, uid: 'u', edits: [] }), () => Promise.resolve('글이지만 배열이 아니다')]) {
       withPendingView([answer]);
       const kept = openHost({ [CACHE]: before });
       await run(kept, cfg, now);
@@ -1673,7 +1676,7 @@ describe('위젯에서 연 달력의 주소와 상태', () => {
   });
 });
 
-describe('위젯에서 연 달력을 쓴 직후에는 곧 다시 그려 달라고 청한다', () => {
+describe('위젯에서 연 달력이 떠 있던 때', () => {
   const NOW = now().getTime();
   const cacheOf = (h: FakeHost): Record<string, unknown> => JSON.parse(h.state.files.get(CACHE) ?? '{}');
   afterEach(() => {
@@ -1721,25 +1724,17 @@ describe('위젯에서 연 달력을 쓴 직후에는 곧 다시 그려 달라�
     expect(cacheOf(host).activeAt).toBe(NOW);
   });
 
-  it('위젯은 그 시각에서 3분 안이면 15초 뒤를, 아니면 2분 뒤를 청한다. 기본 부품 위젯도 같다', async () => {
+  it('위젯은 달력을 방금 썼어도 15분 뒤를 청한다(짧게 청해도 iOS는 그려 주지 않고 하루 횟수만 쓴다)', async () => {
     const refreshOf = async (activeAt: number | undefined, native = false): Promise<number> => {
       const files: Record<string, string> = activeAt === undefined ? {} : { [CACHE]: JSON.stringify({ activeAt }) };
       const host = (native ? makeNative : make)({ keychain: loggedIn, files });
       await run(host, cfg, now);
-      return ((lastWidget(host).props.refreshAfterDate as Date).getTime() - NOW) / 1000;
+      return ((lastWidget(host).props.refreshAfterDate as Date).getTime() - NOW) / 60_000;
     };
     expect(await refreshOf(NOW - 20_000)).toBe(15);
     expect(await refreshOf(NOW - 20_000, true)).toBe(15);
-    expect(await refreshOf(NOW - 179_000)).toBe(15);
-    expect(await refreshOf(NOW - 181_000)).toBe(120);
-    expect(await refreshOf(undefined)).toBe(120);
-    expect(await refreshOf(undefined, true)).toBe(120);
-  });
-
-  it('로그인 안내나 오류 위젯도 같은 간격을 따른다', async () => {
-    const host = make({ files: { [CACHE]: JSON.stringify({ activeAt: NOW - 1000 }) } });
-    await run(host, cfg, now);
-    expect(((lastWidget(host).props.refreshAfterDate as Date).getTime() - NOW) / 1000).toBe(15);
+    expect(await refreshOf(undefined)).toBe(15);
+    expect(await refreshOf(undefined, true)).toBe(15);
   });
 });
 
@@ -1758,7 +1753,7 @@ describe('메뉴의 상태에 적을 기록', () => {
     const draws = cacheOf(host).draws as { at: number }[];
     expect(draws).toHaveLength(8);
     expect(draws[0].at).toBe(NOW - 10_000 + 1);
-    expect(draws[7]).toEqual({ at: NOW, v: '0.9.11 (2026-11-17)', src: 'server', over: 1, next: NOW + 120_000 });
+    expect(draws[7]).toEqual({ at: NOW, v: '0.9.11 (2026-11-17)', src: 'server', over: 1, next: NOW + 900_000 });
   });
 
   it('네트워크가 안 되면 보관해 둔 것으로, 로그인이 없으면 로그인 안내로 적는다', async () => {
@@ -1778,7 +1773,7 @@ describe('메뉴의 상태에 적을 기록', () => {
       evaluateJavaScript(js: string): Promise<unknown> {
         if (js.includes('__calfifApp')) return Promise.resolve('');
         n += 1;
-        return n === 2 ? Promise.reject(new Error('웹 화면이 답하지 못했다')) : Promise.resolve('');
+        return n === 2 ? Promise.reject(new Error('웹 화면이 답하지 못했다')) : Promise.resolve(JSON.stringify(['', 'visible']));
       }
     };
     const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
@@ -1814,6 +1809,109 @@ describe('메뉴의 상태에 적을 기록', () => {
       await done;
     } finally {
       vi.useRealTimers();
+    }
+  });
+});
+
+describe('달력에서 나갈 때', () => {
+  const NOW = now().getTime();
+  const cacheOf = (h: FakeHost): Record<string, unknown> => JSON.parse(h.state.files.get(CACHE) ?? '{}');
+  const pendingText = (edits: unknown[]): string => JSON.stringify({ v: 1, uid: 'owner-test-uid', edits });
+  const edit = { monthId: '2026-11', day: '19', text: '', color: '', editedAt: NOW - 500 };
+  /** 닫히지 않는 가짜 WebView. states: 읽을 때마다 차례로 주는 [올리지 못한 편집의 글, 화면이 보이는지](마지막 것은 되풀이한다). */
+  const neverClosing = (states: [string, string][]) => {
+    const log = { reads: 0 };
+    (globalThis as Record<string, unknown>).WebView = class {
+      async loadURL(): Promise<void> {}
+      present(): Promise<void> {
+        return new Promise(() => {});
+      }
+      async evaluateJavaScript(js: string): Promise<string> {
+        if (js.includes('__calfifApp')) return JSON.stringify({ app: '0.9.12', sw: false, bridge: true });
+        const state = states[Math.min(log.reads, states.length - 1)];
+        log.reads += 1;
+        return JSON.stringify(state);
+      }
+    };
+    return log;
+  };
+  const openHost = () => make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).WebView;
+  });
+
+  it('닫지 않고 홈 화면으로 나가면(보이던 웹 화면이 가려지면) 기다리지 않고 끝낸다. 그때까지 받은 편집은 적혀 있다', async () => {
+    vi.useFakeTimers();
+    try {
+      const log = neverClosing([['', 'visible'], [pendingText([edit]), 'visible'], [pendingText([edit]), 'hidden']]);
+      const host = openHost();
+      let finished = false;
+      const done = run(host, cfg, now).then(() => { finished = true; });
+      await vi.advanceTimersByTimeAsync(300);
+      expect(finished).toBe(false);
+      await vi.advanceTimersByTimeAsync(300);
+      await done;
+      expect(finished).toBe(true);
+      expect(cacheOf(host)).toMatchObject({ leave: { at: NOW, how: 'left' }, pending: { uid: 'owner-test-uid', edits: [edit] } });
+      // 끝낸 뒤에는 더 읽지 않는다.
+      const reads = log.reads;
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(log.reads).toBe(reads);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('나가면서 붙여 넣은 스크립트의 마지막 새 버전 확인이 바로 실패하게 해 둔다(네트워크를 기다리다 멈추지 않게)', async () => {
+    vi.useFakeTimers();
+    try {
+      neverClosing([['', 'visible'], ['', 'hidden']]);
+      const host = openHost();
+      const done = run(host, cfg, now);
+      await vi.advanceTimersByTimeAsync(300);
+      await done;
+      const req = new host.Request('https://example.test/widget/version.json');
+      await expect(req.loadString()).rejects.toThrow('홈 화면으로 나가는 중이라 확인을 건너뛰었다');
+      await expect(req.loadJSON()).rejects.toThrow('홈 화면으로 나가는 중이라 확인을 건너뛰었다');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('한 번도 보인 적이 없는 화면이 가려져 있다고 해서 끝내지는 않는다(띄우는 중일 수 있다)', async () => {
+    vi.useFakeTimers();
+    try {
+      neverClosing([['', 'hidden'], ['', 'hidden'], ['', ''], ['', 'prerender']]);
+      const host = openHost();
+      let finished = false;
+      void run(host, cfg, now).then(() => { finished = true; });
+      await vi.advanceTimersByTimeAsync(3000);
+      expect([finished, cacheOf(host).leave]).toEqual([false, undefined]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('닫기를 눌러 닫으면 전처럼 마지막으로 더 읽고 끝내고, 닫았다고 적는다. 요청은 그대로 된다', async () => {
+    (globalThis as Record<string, unknown>).WebView = class {
+      async loadURL(): Promise<void> {}
+      async present(): Promise<void> {}
+      async evaluateJavaScript(js: string): Promise<string> {
+        return js.includes('__calfifApp') ? '' : JSON.stringify([pendingText([edit]), 'visible']);
+      }
+    };
+    const host = openHost();
+    await run(host, cfg, now);
+    expect(cacheOf(host)).toMatchObject({ leave: { at: NOW, how: 'closed' }, pending: { edits: [edit] } });
+    await expect(new host.Request('https://example.test/x').loadString()).resolves.toBeDefined();
+  });
+
+  it('메뉴의 상태에 어떻게 나갔는지 적는다', async () => {
+    const at = new Date(2026, 10, 13, 8, 59, 30).getTime();
+    for (const [how, text] of [['left', '달력에서 나감(08:59:30): 홈 화면으로 나가서 스크립트를 끝냄'], ['closed', '달력에서 나감(08:59:30): 닫기를 눌러 닫음']] as const) {
+      const host = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }], files: { [CACHE]: JSON.stringify({ leave: { at, how } }) } });
+      await run(host, cfg, now);
+      expect(host.state.alerts[0].message).toContain(text);
     }
   });
 });

@@ -9,8 +9,22 @@ import type { DayValue } from '../core/types';
 
 /** 웹 화면이 window에 적어 두는 이름. src/web/widgetBridge.ts의 PENDING_GLOBAL과 같아야 한다. */
 export const PENDING_GLOBAL = '__calfifPending';
-/** 스크립트가 웹 화면에서 돌리는 식. 적어 둔 글이 없으면 빈 글이다. */
-export const PENDING_JS = `String(window.${PENDING_GLOBAL} || "")`;
+/**
+ * 스크립트가 웹 화면에서 0.3초마다 돌리는 식. 글 두 개의 배열을 JSON으로 준다: 웹앱이 적어 둔 올리지 못한 편집(없으면 빈 글)과
+ * 화면이 보이는지(document.visibilityState: 앱이 뒤로 가면 hidden).
+ */
+export const POLL_JS = `JSON.stringify([String(window.${PENDING_GLOBAL} || ""), String(document.visibilityState || "")])`;
+
+/** POLL_JS의 답을 읽는다. 모양이 다르면 null. */
+export function parsePoll(text: string): { pending: string; hidden: boolean; visible: boolean } | null {
+  try {
+    const v: unknown = JSON.parse(text);
+    if (!Array.isArray(v) || typeof v[0] !== 'string' || typeof v[1] !== 'string') return null;
+    return { pending: v[0], hidden: v[1] === 'hidden', visible: v[1] === 'visible' };
+  } catch {
+    return null;
+  }
+}
 
 /** 하루의 값(웹 화면이 보여 주는 값)과 그것을 고친 시각. */
 export type PendingDay = { monthId: string; day: string; text: string; color: string; editedAt: number };

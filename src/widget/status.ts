@@ -8,6 +8,8 @@ import type { PendingState, WebProbe } from './pending';
 export type DrawNote = { at: number; v: string; src: string; over: number; next: number };
 /** 달력을 띄운 스크립트가 웹 화면에서 식을 돌린 결과. ok, fail: 성공과 실패의 수. lastError: 마지막 실패의 까닭. */
 export type BridgeNote = { at: number; ok: number; fail: number; lastOkAt: number; lastError: string };
+/** 위젯에서 연 달력에서 나간 때와 길. closed: 닫기를 눌렀다. left: 닫지 않고 홈 화면으로 나갔다(스크립트가 그때 끝냈다). */
+export type LeaveNote = { at: number; how: 'closed' | 'left' };
 /** update.ts의 상태 가운데 메뉴에 적을 것. */
 export type UpdateNote = { version: string; unfinished: Record<string, number>; skipUntil: Record<string, number>; note: string; libNote: string };
 
@@ -33,6 +35,12 @@ export function bridgeOf(v: unknown): BridgeNote | null {
   return { at: num(v.at), ok: num(v.ok), fail: num(v.fail), lastOkAt: num(v.lastOkAt), lastError: str(v.lastError) };
 }
 
+/** 보관 파일의 leave 칸을 읽는다. 없으면 null. */
+export function leaveOf(v: unknown): LeaveNote | null {
+  if (!isObject(v) || num(v.at) <= 0 || (v.how !== 'closed' && v.how !== 'left')) return null;
+  return { at: num(v.at), how: v.how };
+}
+
 const two = (n: number): string => String(n).padStart(2, '0');
 /** 시:분:초. 오늘이 아니면 앞에 월/일을 붙인다. */
 export function clock(at: number, now: number): string {
@@ -51,9 +59,10 @@ const span = (ms: number): string => (ms < 90_000 ? `${Math.round(ms / 1000)}초
 
 /** 메뉴에 적을 상태 글(여러 줄). 적을 것이 하나도 없으면 빈 글. */
 export function statusText(input: {
-  now: number; draws: DrawNote[]; web: WebProbe | null; activeAt: number; pending: PendingState | null; bridge: BridgeNote | null; update: UpdateNote;
+  now: number; draws: DrawNote[]; web: WebProbe | null; activeAt: number; leave?: LeaveNote | null; pending: PendingState | null; bridge: BridgeNote | null; update: UpdateNote;
 }): string {
   const { now, draws, web, activeAt, pending, bridge, update } = input;
+  const leave = input.leave ?? null;
   const lines: string[] = [];
   if (draws.length > 0) {
     lines.push(`위젯 그림: ${[...draws].reverse().map((d) => clock(d.at, now)).join(' · ')}`);
@@ -62,6 +71,7 @@ export function statusText(input: {
   }
   if (web) lines.push(`달력 화면(${clock(web.at, now)}): ${web.app === '' ? '웹앱 버전 모름' : `웹앱 ${web.app}`}, 서비스 워커 ${web.sw ? '있음' : '없음'}, 넘기기 ${web.bridge ? '켜짐' : '꺼짐'}`);
   if (activeAt > 0) lines.push(`달력이 떠 있던 마지막 때: ${clock(activeAt, now)}`);
+  if (leave) lines.push(`달력에서 나감(${clock(leave.at, now)}): ${leave.how === 'left' ? '홈 화면으로 나가서 스크립트를 끝냄' : '닫기를 눌러 닫음'}`);
   if (pending) lines.push(`넘겨받은 편집: ${pending.edits.length}건(${clock(pending.savedAt, now)})${pending.edits.length > 0 ? ` ${pending.edits.slice(0, 5).map((e) => `${e.monthId.slice(5)}-${e.day}`).join(', ')}` : ''}`);
   if (bridge) {
     const failed = bridge.fail > 0 ? `, 실패 ${bridge.fail}(마지막 실패: ${bridge.lastError === '' ? '까닭 모름' : bridge.lastError.slice(0, 120)})` : ', 실패 0';
