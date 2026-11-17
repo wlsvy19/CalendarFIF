@@ -241,8 +241,9 @@ function reloadLog(host: Host, now: () => Date): ReloadLog {
       const before = lastTick;
       lastTick = at;
       amend((t) => {
-        // 살아 있음은 메뉴에서 시험한 것에만 적는다. 그림이 적힐 때를 지나서 적는다: 위젯도 같은 파일을 통째로 고쳐 쓰므로 겹치면 한쪽이 지워진다.
-        const alive = t.alive || (t.why === 'probe' && at - t.at >= CREDIT_MS);
+        // 살아 있음은 메뉴에서 시험한 것에만 적는다(달력에서 저장할 때 한 것에는 쓰이지 않는다. 위젯도 같은 파일을 통째로 고쳐 쓰므로 적는 일을 줄인다).
+        // 늦게 적으면 안 된다: 시험하는 중에 홈 화면으로 나가 앱이 꺼지면, 살아 있었는데도 스크립트가 멈춘 것으로 남는다.
+        const alive = t.alive || (t.why === 'probe' && at - t.at >= ALIVE_MS);
         // 멈춰 있었거나 가려졌다: 그려지지 않았더라도 바로 안 되는 것으로 칠 수 없다(그려지면 위젯이 적는다).
         const lost = !t.away && (gap ? fresh(t, before) : !visible && fresh(t, at));
         return alive !== t.alive || lost ? { ...t, alive, away: t.away || lost } : null;
@@ -293,14 +294,14 @@ function probeReload(host: Host, now: () => Date, plan: ReloadHow[]): () => void
     try {
       log.tick(true);
       const at = now().getTime();
-      if (current && !found) {
-        if (log.credited(firedAt)) {
-          // 그려졌다. 다른 까닭으로 그려진 것일 수 있어 한 번 더 해 본다. 두 번 다 그려지면 더 시험하지 않는다.
-          if (fires < 2) {
-            fires += 1;
-            fire(current);
-          } else found = true;
-        } else if (at - firedAt >= PROBE_WAIT_MS) current = null; // 안 그려졌다: 다음 것
+      if (current && !found && at - firedAt >= PROBE_WAIT_MS) {
+        // 5초를 다 지켜보고 정한다. 그려졌으면 한 번 더 해 본다(다른 까닭으로 그려진 것일 수 있다). 두 번 다 그려지면 더 시험하지 않는다.
+        // 그려지자마자 다시 하지 않는 까닭: 위젯은 한 번에 두 번 잇달아(1~2초 사이) 그려지기도 해서, 그 둘째 그림이 다시 한 것의 것으로 적힌다.
+        if (!log.credited(firedAt)) current = null; // 안 그려졌다: 다음 것
+        else if (fires < 2) {
+          fires += 1;
+          fire(current);
+        } else found = true;
       }
       if (!current && !found && queue.length > 0) {
         current = queue.shift() ?? null;

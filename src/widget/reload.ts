@@ -46,6 +46,8 @@ export const ALIVE_MS = 1200;
 export const SHUT_MS = 1500;
 /** 나가서 지켜보지 못했고 그림도 없는 일이 이만큼 잇달으면, 되던 방법도 모르는 것으로 돌린다(다시 시험한다). */
 export const AWAY_LIMIT = 3;
+/** 안 되는 것으로 가려진 지 이만큼 지나면 모르는 것으로 돌려 한 번 더 해 본다. */
+export const RETRY_AFTER_MS = 3 * 24 * 3_600_000;
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const HOWS: readonly string[] = ['setWidget', 'ping', 'complete', 'finish'];
@@ -94,14 +96,16 @@ export const reloadCell = (tries: ReloadTry[]): { epoch: number; tries: ReloadTr
 
 /**
  * drawAt에 시작한 위젯 그림을 그것을 부른 시도에 적는다: 그 앞 CREDIT_MS 안에 한 것 가운데 가장 나중의 것.
- * 닫아서 무효가 된 것(void), 하지 못한 것, 이미 그림이 적힌 것에는 적지 않는다. 적었으면 새 목록, 적을 데가 없으면 null.
+ * 닫아서 무효가 된 것(void)과 하지 못한 것은 건너뛴다. 그 시도에 이미 그림이 적혀 있으면 아무 데도 적지 않는다. 적었으면 새 목록, 적을 데가 없으면 null.
  */
 export function creditDraw(tries: ReloadTry[], drawAt: number): ReloadTry[] | null {
   for (let i = tries.length - 1; i >= 0; i -= 1) {
     const t = tries[i];
     if (t.at > drawAt) continue;
     if (drawAt - t.at > CREDIT_MS) return null;
-    if (t.void || t.got > 0 || t.err !== '') continue;
+    if (t.void || t.err !== '') continue;
+    // 이미 그림이 적힌 시도 뒤에 또 그려졌다: 같은 것이 부른 그림이다(위젯은 한 번에 두 번 잇달아 그려지기도 한다). 더 앞의 시도에 적지 않는다.
+    if (t.got > 0) return null;
     return tries.map((x, j) => (j === i ? { ...x, got: drawAt } : x));
   }
   return null;
@@ -127,51 +131,59 @@ export function outcomeOf(t: ReloadTry, now: number): Outcome {
 
 /**
  * 그 방법이 되는지. 나중의 기록부터 본다.
- * - 여러 번 쓰는 방법은 두 번 그려져야 되는 것으로 본다(한 번은 다른 까닭으로 그려진 것일 수 있다. 한 번뿐이면 모르는 것으로 두어 다시 시험한다).
- *   스크립트 끝내기는 한 번 그려지면 된다. 그려진 것 앞에(나중에) 한 번 안 그려진 것은 넘어간다.
- * - 두 번 잇달아 안 그려졌으면 안 된다. 그려진 적 없이 한 번 안 그려졌으면 여러 번 쓰는 방법은 안 되는 것으로,
- *   스크립트 끝내기는 모르는 것으로 둔다(마지막 수단이라 한 번 더 해 본다).
+ * - 여러 번 쓰는 방법은 잇달아 두 번 그려져야 되는 것으로 본다(메뉴에서는 그려지면 한 번 더 해 본다). 한 번은 다른 까닭으로 그려진 것일 수 있다.
+ *   스크립트 끝내기는 한 번 그려지면 된다. 그 뒤에(나중에) 한 번 안 그려진 것은 넘어간다.
+ * - 잇달아 두 번 안 그려졌으면 안 된다. 그려졌다 안 그려졌다 하는 것(안 그려진 것이 둘인데 잇달아 두 번 그려진 적이 없다)도 안 되는 것으로 본다.
+ *   그려진 적 없이 한 번 안 그려졌으면 여러 번 쓰는 방법은 안 되는 것으로, 스크립트 끝내기는 모르는 것으로 둔다(마지막 수단이라 한 번 더 해 본다).
  * - 두 번 잇달아 스크립트가 멈추거나 메뉴가 닫혔으면 쓰지 않는다(한 번은 우연일 수 있어 다시 시험한다).
- * - 나가서 지켜보지 못했고 그림도 없는 일이 세 번 잇달았으면 모르는 것으로 돌린다(되던 것이 안 되게 됐을 수 있다).
+ * - 나가서 지켜보지 못했고 그림도 없는 일이 세 번 잇달았으면(그려진 기록을 만나기 전에) 모르는 것으로 돌린다: 되던 것이 안 되게 됐을 수 있다.
+ *   그 사이에 안 그려진 기록이 있으면 안 되는 것으로 본다.
+ * - 안 되는 것으로 가려진 지 사흘이 지나면 모르는 것으로 돌려 한 번 더 해 본다(잘못 가려진 채로 영영 남지 않게).
  */
 export function verdictOf(how: ReloadHow, tries: ReloadTry[], now: number): Verdict {
+  const need = how === 'finish' ? 1 : 2;
   let aways = 0;
   let misses = 0;
   let hurts = 0;
   let hits = 0;
-  let decided = false;
+  let prev: Outcome | null = null; // 바로 앞에 본(더 나중의) 판정 기록
+  let newest = 0; // 가장 나중 판정 기록의 시각
+  const fails = (): Verdict => (now - newest >= RETRY_AFTER_MS ? 'unknown' : 'fails');
   for (let i = tries.length - 1; i >= 0; i -= 1) {
     const t = tries[i];
     if (t.how !== how) continue;
     const outcome = outcomeOf(t, now);
     if (outcome === 'open') continue;
     if (outcome === 'away') {
-      if (!decided) {
+      if (hits === 0) {
         aways += 1;
-        if (aways >= AWAY_LIMIT) return 'unknown';
+        if (aways >= AWAY_LIMIT) return misses > 0 ? fails() : 'unknown';
       }
       continue;
     }
+    if (newest === 0) newest = t.at;
     if (outcome === 'hurt') {
-      if (decided && hurts === 0) break; // 앞의 판정 뒤에 나온 옛 기록이다
+      if (prev !== null && prev !== 'hurt') break; // 앞의 판정 뒤에 나온 옛 기록이다
       hurts += 1;
-      decided = true;
+      prev = 'hurt';
       if (hurts >= 2) return 'bad';
       continue;
     }
     if (hurts > 0) return 'unknown'; // 한 번 멈췄다: 다시 시험한다
-    decided = true;
     if (outcome === 'hit') {
       hits += 1;
-      if (how === 'finish' || hits >= 2) return 'works';
+      if (need === 1 || prev === 'hit') return 'works';
+      prev = 'hit';
       continue;
     }
-    if (hits > 0) break; // 그려진 것보다 옛 기록이다
+    if (prev === 'miss') return fails();
     misses += 1;
-    if (misses >= 2) return 'fails';
+    prev = 'miss';
   }
-  if (hurts > 0 || hits > 0 || misses === 0) return 'unknown';
-  return how === 'finish' ? 'unknown' : 'fails';
+  if (hurts > 0) return 'unknown';
+  if (misses >= 2) return fails();
+  if (misses === 1 && hits === 0) return how === 'finish' ? 'unknown' : fails();
+  return 'unknown';
 }
 
 /** 저장했을 때 쓸 방법: 되는 것으로 가려진 여러 번 쓰는 방법, 없으면 스크립트 끝내기(안 되는 것으로 가려졌으면 null). */

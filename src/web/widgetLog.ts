@@ -14,36 +14,67 @@ import { onLog } from 'firebase/app';
 export const LOG_GLOBAL = '__calfifLog';
 const KEEP = 5;
 const MAX_TEXT = 300;
-/** SDK가 콘솔에 적는 줄의 첫 인자에 들어 있는 것(`[시각]  @firebase/firestore:`). */
-const SDK_MARK = '@firebase/';
+/** SDK가 콘솔에 적는 줄의 첫 인자(`[시각]  @firebase/firestore:`)에서 SDK의 이름을 찾는다. */
+const SDK_NAME = /@firebase\/[\w-]+/;
 
 type SdkLog = { level: string; message: string; type: string };
 type SdkLogApi = { onLog(callback: (log: SdkLog) => void, options: { level: 'warn' }): void };
 type ConsoleLike = { warn(...args: unknown[]): void; error(...args: unknown[]): void };
 
+/** 콘솔에 넘긴 인자들을 한 줄로(SDK의 받는 쪽이 만드는 글과 같은 꼴로). */
+function textOf(args: unknown[]): string {
+  return args
+    .map((a) => {
+      if (a == null) return '';
+      if (typeof a === 'string') return a;
+      if (typeof a === 'number' || typeof a === 'boolean') return String(a);
+      if (a instanceof Error) return a.message;
+      try {
+        return JSON.stringify(a);
+      } catch {
+        return '';
+      }
+    })
+    .filter((t) => t !== '')
+    .join(' ');
+}
+
 /**
  * SDK의 경고와 오류를 target[LOG_GLOBAL]에 적게 하고(마지막 다섯 줄, 한 줄은 300자까지), SDK가 콘솔에 적는 경고와 오류는 막는다.
  * SDK의 것이 아닌 콘솔 줄은 그대로 둔다.
+ * 받는 길이 둘이다. SDK의 받는 쪽(onLog)으로 오면 그것을 적는다. 그 줄은 바로 이어서 콘솔로도 오므로 그때는 버리기만 한다.
+ * 받는 쪽으로 오지 않고 콘솔로만 온 줄(이 함수를 부른 뒤에 생긴 SDK의 기록 도구에는 받는 쪽이 걸리지 않는다)은 콘솔의 것을 적는다.
  */
 export function keepSdkLogs(target: Record<string, unknown>, now: () => number = () => Date.now(), api: SdkLogApi = { onLog }, con: ConsoleLike = console): void {
   const kept: { at: number; level: string; type: string; text: string }[] = [];
+  const keep = (level: string, type: string, text: string): void => {
+    try {
+      kept.push({ at: now(), level, type, text: text.slice(0, MAX_TEXT) });
+      while (kept.length > KEEP) kept.shift();
+      target[LOG_GLOBAL] = JSON.stringify(kept);
+    } catch {
+      // 적지 못해도 화면은 그대로 돈다.
+    }
+  };
+  let taken = false; // 방금 받는 쪽으로 온 줄이다: 이어서 콘솔로 오는 같은 줄은 적지 않는다
   api.onLog(
     (log) => {
-      try {
-        kept.push({ at: now(), level: String(log.level), type: String(log.type), text: String(log.message).slice(0, MAX_TEXT) });
-        while (kept.length > KEEP) kept.shift();
-        target[LOG_GLOBAL] = JSON.stringify(kept);
-      } catch {
-        // 적지 못해도 화면은 그대로 돈다.
-      }
+      taken = true;
+      keep(String(log.level), String(log.type), String(log.message));
     },
     { level: 'warn' },
   );
   for (const name of ['warn', 'error'] as const) {
     const original = con[name].bind(con);
     con[name] = (...args: unknown[]): void => {
-      if (typeof args[0] === 'string' && args[0].includes(SDK_MARK)) return; // 위에서 받아 적었다
-      original(...args);
+      const sdk = typeof args[0] === 'string' ? SDK_NAME.exec(args[0]) : null;
+      if (!sdk) {
+        taken = false;
+        original(...args);
+        return;
+      }
+      if (!taken) keep(name, sdk[0], textOf(args.slice(1)));
+      taken = false;
     };
   }
 }

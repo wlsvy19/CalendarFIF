@@ -495,6 +495,9 @@ describe('메뉴를 띄워 둔 동안의 시험', () => {
     const { host, menu, done } = await menuHost({ draws });
     await vi.advanceTimersByTimeAsync(300);
     drawFor(host);
+    // 그려지자마자 다시 하지 않는다: 위젯은 한 번에 두 번 잇달아 그려지기도 해서, 그 둘째 그림이 다시 한 것의 것으로 적힌다. 5초를 채운다.
+    await vi.advanceTimersByTimeAsync(4800);
+    expect([host.state.setWidgets.length, triesIn(host).length]).toEqual([1, 1]);
     await vi.advanceTimersByTimeAsync(300);
     expect([host.state.setWidgets.length, triesIn(host).length]).toEqual([2, 2]);
     drawFor(host);
@@ -518,11 +521,13 @@ describe('메뉴를 띄워 둔 동안의 시험', () => {
     const { host, menu, done } = await menuHost({ draws });
     await vi.advanceTimersByTimeAsync(300);
     drawFor(host);
-    await vi.advanceTimersByTimeAsync(300);
+    await vi.advanceTimersByTimeAsync(CREDIT_MS + 100);
     expect(host.state.setWidgets).toHaveLength(2);
-    await vi.advanceTimersByTimeAsync(CREDIT_MS + 300);
-    expect([host.state.setWidgets.length, open.mock.calls.length]).toEqual([2, 1]);
-    await vi.advanceTimersByTimeAsync(CREDIT_MS + SETTLE_MS);
+    await vi.advanceTimersByTimeAsync(CREDIT_MS + 100);
+    expect([host.state.setWidgets.length, open.mock.calls.length, host.state.completed]).toEqual([2, 1, 0]);
+    await vi.advanceTimersByTimeAsync(CREDIT_MS + 100);
+    expect(host.state.completed).toBe(1);
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
     menu.close();
     await vi.advanceTimersByTimeAsync(0);
     await done;

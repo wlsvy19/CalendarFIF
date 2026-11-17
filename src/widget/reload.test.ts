@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALIVE_MS, AWAY_LIMIT, CREDIT_MS, KEEP_PER_HOW, MAX_TRIES, RELOAD_EPOCH, REPEATABLE, SETTLE_MS, creditDraw, outcomeOf, pickReload, reloadCell, toProbe, triesOf, verdictOf, type ReloadTry } from './reload';
+import { ALIVE_MS, AWAY_LIMIT, CREDIT_MS, KEEP_PER_HOW, MAX_TRIES, RELOAD_EPOCH, REPEATABLE, RETRY_AFTER_MS, SETTLE_MS, creditDraw, outcomeOf, pickReload, reloadCell, toProbe, triesOf, verdictOf, type ReloadTry } from './reload';
 
 const NOW = new Date(2026, 10, 17, 14, 0, 0).getTime();
 const MIN = 60_000;
@@ -62,15 +62,22 @@ describe('creditDraw', () => {
     expect(creditDraw([fresh({ away: true })], at + 900)).toEqual([fresh({ away: true, got: at + 900 })]);
   });
 
-  it('여러 시도가 있으면 그림의 바로 앞 것에 적는다. 닫아서 무효가 된 것, 이미 적힌 것, 하지 못한 것은 건너뛴다', () => {
+  it('여러 시도가 있으면 그림의 바로 앞 것에 적는다. 닫아서 무효가 된 것과 하지 못한 것은 건너뛴다', () => {
     const older = fresh({ how: 'setWidget', at: at - 2000 });
     expect(creditDraw([older, fresh()], at + 500)).toEqual([older, fresh({ got: at + 500 })]);
     // 뒤의 시도보다 앞에 시작한 그림은 앞의 시도의 것이다.
     expect(creditDraw([older, fresh()], at - 500)).toEqual([{ ...older, got: at - 500 }, fresh()]);
-    for (const skip of [{ void: true }, { got: at + 100 }, { err: '못 했다' }]) {
+    for (const skip of [{ void: true }, { err: '못 했다' }]) {
       expect(creditDraw([older, fresh(skip)], at + 500)).toEqual([{ ...older, got: at + 500 }, fresh(skip)]);
       expect(creditDraw([fresh(skip)], at + 500)).toBeNull();
     }
+  });
+
+  it('바로 앞의 시도에 이미 그림이 적혀 있으면 아무 데도 적지 않는다: 위젯은 한 번에 두 번 잇달아 그려지기도 한다', () => {
+    const older = fresh({ how: 'setWidget', at: at - 2000 });
+    const drawn = fresh({ got: at + 900 });
+    expect(creditDraw([older, drawn], at + 2900)).toBeNull();
+    expect(creditDraw([drawn], at + 2900)).toBeNull();
   });
 });
 
@@ -112,17 +119,35 @@ describe('verdictOf', () => {
     expect(verdictOf('ping', [hit('setWidget', 6), hit('setWidget', 5), t('ping', 5, { void: true }), hit('ping', 4, { why: 'leave' })], NOW)).toBe('unknown');
   });
 
-  it('여러 번 쓰는 방법은 두 번 그려져야 된다. 한 번뿐이면 모르는 것으로 두어 다시 시험한다', () => {
+  it('여러 번 쓰는 방법은 잇달아 두 번 그려져야 된다. 한 번뿐이면 모르는 것으로 두어 다시 시험한다', () => {
     expect(verdictOf('ping', [hit('ping', 5)], NOW)).toBe('unknown');
     expect(verdictOf('ping', [hit('ping', 6), hit('ping', 5)], NOW)).toBe('works');
     // 안 그려진 적이 있어도 그 뒤에 두 번 그려졌으면 된다.
     expect(verdictOf('ping', [t('ping', 9), hit('ping', 6), hit('ping', 5)], NOW)).toBe('works');
-    // 두 번 그려진 뒤 한 번 안 그려진 것은 넘어간다. 두 번 잇달아 안 그려지면 안 된다.
+    // 두 번 그려진 뒤 한 번 안 그려진 것은 넘어간다. 그 뒤에 다시 그려져도 그대로 된다. 두 번 잇달아 안 그려지면 안 된다.
     expect(verdictOf('ping', [hit('ping', 9), hit('ping', 8), t('ping', 5)], NOW)).toBe('works');
+    expect(verdictOf('ping', [hit('ping', 9), hit('ping', 8), t('ping', 5), hit('ping', 4)], NOW)).toBe('works');
     expect(verdictOf('ping', [hit('ping', 9), hit('ping', 8), t('ping', 5), t('ping', 4)], NOW)).toBe('fails');
-    // 그려진 것 사이에 안 그려진 것이 끼면 한 번으로만 친다.
+    // 그려진 것 사이에 안 그려진 것이 끼면 잇달아 그려진 것이 아니다: 다시 시험한다.
     expect(verdictOf('ping', [hit('ping', 9), t('ping', 8), hit('ping', 5)], NOW)).toBe('unknown');
     expect(verdictOf('ping', [hit('ping', 9), t('ping', 5)], NOW)).toBe('unknown');
+  });
+
+  it('메뉴를 열 때마다 "한 번 그려지고, 다시 하면 안 그려지는" 방법은 두 번이면 안 되는 것으로 본다(끝없이 다시 시험하지 않는다)', () => {
+    expect(verdictOf('ping', [hit('ping', 9), t('ping', 8)], NOW)).toBe('unknown');
+    expect(verdictOf('ping', [hit('ping', 9), t('ping', 8), hit('ping', 5), t('ping', 4)], NOW)).toBe('fails');
+    expect(toProbe([hit('setWidget', 9), t('setWidget', 8), hit('setWidget', 5), t('setWidget', 4), t('ping', 3), t('complete', 2)], NOW)).toEqual([]);
+  });
+
+  it('안 되는 것으로 가려진 지 사흘이 지나면 모르는 것으로 돌려 한 번 더 해 본다', () => {
+    const days = (n: number): number => (n * RETRY_AFTER_MS) / 3 / MIN;
+    expect(verdictOf('ping', [t('ping', days(2.9))], NOW)).toBe('fails');
+    expect(verdictOf('ping', [t('ping', days(3))], NOW)).toBe('unknown');
+    expect(verdictOf('finish', [t('finish', days(9), { why: 'save' }), t('finish', days(8), { why: 'save' })], NOW)).toBe('unknown');
+    // 다시 해 봐서 또 안 그려지면 다시 사흘 동안 안 되는 것이다.
+    expect(verdictOf('ping', [t('ping', days(5)), t('ping', 1)], NOW)).toBe('fails');
+    // 쓰지 않기로 한 것(스크립트가 멈추거나 메뉴가 닫혔다)은 그대로다.
+    expect(verdictOf('ping', [t('ping', days(9), { alive: false }), t('ping', days(8), { alive: false })], NOW)).toBe('bad');
   });
 
   it('스크립트 끝내기는 한 번 그려지면 된다', () => {
@@ -155,8 +180,9 @@ describe('verdictOf', () => {
     expect(verdictOf('ping', [...proof, away('ping', 9), away('ping', 8), away('ping', 7)], NOW)).toBe('unknown');
     // 나갔어도 그려진 것이 사이에 있으면 다시 센다.
     expect(verdictOf('ping', [...proof, away('ping', 9), away('ping', 8), hit('ping', 7, { why: 'save', away: true }), away('ping', 6), away('ping', 5)], NOW)).toBe('works');
-    // 돌린 뒤에 메뉴에서 다시 두 번 그려지면 다시 된다.
+    // 돌린 뒤에 메뉴에서 다시 두 번 그려지면 다시 된다. 다시 시험해서 안 그려지면 안 되는 것이다(옛 근거로 되돌아가지 않는다).
     expect(verdictOf('ping', [...proof, away('ping', 9), away('ping', 8), away('ping', 7), hit('ping', 2), hit('ping', 1)], NOW)).toBe('works');
+    expect(verdictOf('ping', [...proof, away('ping', 9), away('ping', 8), away('ping', 7), t('ping', 1)], NOW)).toBe('fails');
   });
 });
 
