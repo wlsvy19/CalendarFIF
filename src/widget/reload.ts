@@ -198,11 +198,12 @@ export function pickReload(tries: ReloadTry[], now: number): ReloadHow | null {
 }
 
 /**
- * 저장한 뒤에 스크립트를 끝내는 때를 나갈 때로 미룰 것인가(leave). 안 되는 것으로 가려지기 전에는 미룬다.
- * 스크립트 끝내기(finish)까지 안 되는 것으로 가려졌으면 미루지 않는다(끝내는 것 자체가 듣지 않는다).
+ * 저장한 뒤에 스크립트를 끝내는 때를 나갈 때로 미룰 것인가(leave). 그려진 것으로 가려져 있을 때만 미룬다.
+ * 0.9.18은 가려지기 전에도 미뤘는데, 사용자의 아이폰에서 첫 저장부터 반영되지 않았다(2026-11-18: 배경을 넣고 홈 화면으로 나갔는데 위젯이 그대로였다).
+ * 나갈 때 끝내는 것이 듣지 않으면 한 번 저장한 것조차 반영되지 않는다. 그래서 확인되기 전에는 저장하자마자 끝낸다(finish).
  */
 export function waitsForLeave(tries: ReloadTry[], now: number): boolean {
-  return verdictOf('leave', tries, now) !== 'fails' && verdictOf('finish', tries, now) !== 'fails';
+  return verdictOf('leave', tries, now) === 'works' && verdictOf('finish', tries, now) !== 'fails';
 }
 
 /** 메뉴에서 시험할 방법들(차례대로). 되는 것이 이미 있으면 없다. */

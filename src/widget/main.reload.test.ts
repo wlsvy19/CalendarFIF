@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from './api';
 import { makeFakeHost, type FakeAnswer, type FakeHost, type FakeOptions, type FakeRequest } from './fakeHost';
 import { run } from './main';
-import { CREDIT_MS, SETTLE_MS, verdictOf, type ReloadTry } from './reload';
+import { CREDIT_MS, SETTLE_MS, type ReloadTry } from './reload';
 
 const cfg: Config = { projectId: 'demo-calfif', apiKey: 'demo-key', appUrl: 'https://example.test/' };
 const T0 = new Date(2026, 10, 17, 14, 0, 0).getTime();
@@ -61,6 +61,10 @@ const openHost = (cache: Record<string, unknown> = {}) => {
 };
 /** 아무 기록도 없는 host: 저장한 뒤 달력에서 나가는 순간에 끝낸다(leave). */
 const openFresh = (cache: Record<string, unknown> = {}) => make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' }, files: seed(cache) });
+/** 나갈 때 끝내기(leave)가 그려진 것으로 가려진 기록. */
+const LEAVE_WORKED: ReloadTry = { how: 'leave', why: 'save', at: T0 - 7_200_000, got: T0 - 7_199_800, alive: true, void: false, away: false, shut: false, err: '' };
+const openLeaving = () => openFresh({ reload: { epoch: 1, tries: [LEAVE_WORKED] } });
+const mine = (h: FakeHost): ReloadTry[] => triesIn(h).filter((t) => t.at !== LEAVE_WORKED.at);
 /** 달력을 열고 처음 읽기(0초, 0.3초, 0.6초)를 지나게 한다. */
 async function opened(host: FakeHost) {
   const state = { finished: false };
@@ -84,25 +88,25 @@ afterEach(() => {
 describe('저장한 뒤 달력에서 나갈 때 끝내기(leave)', () => {
   it('저장해도 바로 끝내지 않고 계속 지켜본다. 이어서 고친 것까지 받아 적고, 나가려는 순간(초점을 잃는다)에 끝낸다', async () => {
     const view = withView();
-    const host = openFresh();
+    const host = openLeaving();
     const { state, done } = await opened(host);
     // 배경을 넣어 저장했다.
     view.state = [message(2, [edit]), 'visible', '0'];
     await vi.advanceTimersByTimeAsync(300);
-    expect([state.finished, triesIn(host)]).toEqual([false, []]);
+    expect([state.finished, mine(host)]).toEqual([false, []]);
     expect(cacheOf(host).pending).toMatchObject({ edits: [edit] });
     // 서버에 올라갔고, 이어서 그 배경을 다시 지웠다(다른 편집).
     const removed = { ...edit, color: '', editedAt: T0 + 2000 };
     view.state = [message(4, [removed]), 'visible', '0'];
     await vi.advanceTimersByTimeAsync(3000);
-    expect([state.finished, triesIn(host)]).toEqual([false, []]);
+    expect([state.finished, mine(host)]).toEqual([false, []]);
     expect(cacheOf(host).pending).toMatchObject({ edits: [removed] });
     // 홈으로 미는 손짓이 시작됐다: 아직 보이지만 초점을 잃었다.
     view.state = [message(4, [removed]), 'visible', '1'];
     await vi.advanceTimersByTimeAsync(100);
     await done;
     expect(state.finished).toBe(true);
-    const tries = triesIn(host);
+    const tries = mine(host);
     expect(tries.map((t) => [t.how, t.why, t.void])).toEqual([['leave', 'save', false]]);
     // 끝낼 때 보관 파일에는 마지막으로 고친 것이 적혀 있다(위젯이 그리면서 얹는다).
     expect(cacheOf(host).pending).toMatchObject({ edits: [removed] });
@@ -110,12 +114,12 @@ describe('저장한 뒤 달력에서 나갈 때 끝내기(leave)', () => {
     // 위젯이 그리면 그 시도에 적히고, 그러면 되는 것으로 가려진다.
     const widget = make({ keychain: loggedIn, files: seed(cacheOf(host)) });
     await run(widget, cfg, now);
-    expect(verdictOf('leave', triesIn(widget), Date.now())).toBe('works');
+    expect(triesIn(widget).filter((t) => t.how === 'leave').map((t) => t.got > 0)).toEqual([true, true]);
   });
 
   it('저장한 것이 있으면 0.1초마다 읽는다(나가려는 것을 앱이 뒤로 물러나기 전에 알아채려고). 없으면 0.3초마다 읽는다', async () => {
     const view = withView();
-    const host = openFresh();
+    const host = openLeaving();
     await opened(host);
     const idle = view.reads;
     await vi.advanceTimersByTimeAsync(900);
@@ -129,21 +133,21 @@ describe('저장한 뒤 달력에서 나갈 때 끝내기(leave)', () => {
 
   it('초점을 잃은 것을 알아채지 못했으면 가려졌을 때 끝낸다(그때는 뒤로 물러난 뒤라 듣지 않을 수 있다: 판정에 들어간다)', async () => {
     const view = withView();
-    const host = openFresh();
+    const host = openLeaving();
     const { done } = await opened(host);
     view.state = [message(2, [edit]), 'visible', '0'];
     await vi.advanceTimersByTimeAsync(300);
     view.state = [message(2, [edit]), 'hidden', '0'];
     await vi.advanceTimersByTimeAsync(100);
     await done;
-    expect(triesIn(host).map((t) => [t.how, t.why, t.void])).toEqual([['leave', 'save', false]]);
+    expect(mine(host).map((t) => [t.how, t.why, t.void])).toEqual([['leave', 'save', false]]);
     // 홈 화면으로 나갔다고도 적는다.
     expect(cacheOf(host).leave).toMatchObject({ how: 'left' });
   });
 
   it('저장한 것이 없으면 초점을 잃어도 끝내지 않는다. 닫기를 누르면 전처럼 끝난다(아무 시도도 적지 않는다)', async () => {
     const view = withView();
-    const host = openFresh();
+    const host = openLeaving();
     const { state, done } = await opened(host);
     view.state = [message(1), 'visible', '1'];
     await vi.advanceTimersByTimeAsync(900);
@@ -153,25 +157,20 @@ describe('저장한 뒤 달력에서 나갈 때 끝내기(leave)', () => {
     view.close();
     await vi.advanceTimersByTimeAsync(400);
     await done;
-    expect([triesIn(host), cacheOf(host).leave]).toEqual([[], expect.objectContaining({ how: 'closed' })]);
+    expect([mine(host), cacheOf(host).leave]).toEqual([[], expect.objectContaining({ how: 'closed' })]);
   });
 
-  it('나갈 때 끝내기가 두 번 잇달아 안 그려졌으면 저장하자마자 끝낸다. 한 번 안 그려진 것으로는 바꾸지 않는다', async () => {
-    const miss = (ago: number): ReloadTry => tried('leave', 'save', T0 - ago, { alive: true });
-    const view = withView();
-    const once = openFresh({ reload: { epoch: 1, tries: [miss(600_000)] } });
-    const first = await opened(once);
-    view.state = [message(2, [edit]), 'visible', '0'];
-    await vi.advanceTimersByTimeAsync(300);
-    expect(first.state.finished).toBe(false);
-
-    const view2 = withView();
-    const twice = openFresh({ reload: { epoch: 1, tries: [miss(600_000), miss(500_000)] } });
-    const second = await opened(twice);
-    view2.state = [message(2, [edit]), 'visible', '0'];
-    await vi.advanceTimersByTimeAsync(300);
-    await second.done;
-    expect(triesIn(twice).slice(2).map((t) => [t.how, t.why])).toEqual([['finish', 'save']]);
+  it('그려진 것으로 가려지기 전에는(해 본 적이 없거나 안 그려졌다) 저장하자마자 끝낸다: 나갈 때 끝내는 것이 듣지 않으면 한 번 저장한 것도 반영되지 않는다', async () => {
+    const miss: ReloadTry = tried('leave', 'save', T0 - 600_000, { alive: true });
+    for (const cache of [{}, { reload: { epoch: 1, tries: [miss] } }, { reload: { epoch: 1, tries: [LEAVE_WORKED, miss, { ...miss, at: miss.at + 1000 }] } }]) {
+      const view = withView();
+      const host = openFresh(cache);
+      const { done } = await opened(host);
+      view.state = [message(2, [edit]), 'visible', '0'];
+      await vi.advanceTimersByTimeAsync(300);
+      await done;
+      expect(triesIn(host).at(-1)).toMatchObject({ how: 'finish', why: 'save' });
+    }
   });
 });
 
