@@ -10,6 +10,8 @@ const now = () => new Date(2026, 10, 13, 9, 0, 0);
 const REFRESH = 'calendarfif.refreshToken';
 const UID = 'calendarfif.uid';
 const CACHE = '/docs/calendarfif-cache.json';
+/** 위젯을 새로 그리게 하는 방법이 모두 안 되는 것으로 가려진 기록(reload.ts): 달력에서 저장해도 스크립트가 아무것도 하지 않고 계속 지켜본다. */
+const NO_RELOAD = { epoch: 1, tries: [2, 1].map((n) => ({ how: 'finish', why: 'save', at: now().getTime() - n * 60_000, got: 0, alive: true, void: false, away: false, shut: false, err: '' })) };
 
 const memoDoc = { fields: { days: { mapValue: { fields: { '13': { mapValue: { fields: { text: { stringValue: '리뷰' }, color: { stringValue: 'F9BC0B' } } } } } } } } };
 const err = (status: number, message: string): FakeAnswer => ({ status, body: { error: { message } } });
@@ -1439,7 +1441,7 @@ describe('위젯에서 연 달력이 아직 올리지 못한 편집', () => {
     await run(host, cfg, now);
     expect(asked[0]).toEqual(['JSON.stringify([String(window.__calfifPending || ""), String(document.visibilityState || "")])', false]);
     expect(cacheOf(host)).toEqual({
-      monthId: '2026-11', days: { '13': { text: '리뷰', color: '' } }, savedAt: 1, activeAt: NOW,
+      monthId: '2026-11', days: { '13': { text: '리뷰', color: '' } }, savedAt: 1, activeAt: NOW, session: NOW,
       pending: { uid: 'owner-test-uid', savedAt: NOW, edits: [edit('16', 'AI 생산성')] },
       bridge: expect.objectContaining({ at: NOW, fail: 0, lastOkAt: NOW, lastError: '' }),
       leave: { at: NOW, how: 'closed' },
@@ -1469,7 +1471,8 @@ describe('위젯에서 연 달력이 아직 올리지 못한 편집', () => {
         [pendingText([]), pendingText([]), pendingText([edit('16', '방금 고친 것')]), pendingText([edit('16', '닫기 직전에 고친 것')]), pendingText([edit('16', '닫히면서 저장해 둔 것')])],
         () => new Promise<void>((resolve) => { close = resolve; }),
       );
-      const host = openHost();
+      // 저장해도 스크립트가 끝내지 않는 경우로 본다(끝내는 것은 main.reload.test.ts가 본다).
+      const host = openHost({ [CACHE]: JSON.stringify({ reload: NO_RELOAD }) });
       const done = run(host, cfg, now);
       await vi.advanceTimersByTimeAsync(0);
       expect(asked).toHaveLength(1);
@@ -1651,8 +1654,8 @@ describe('위젯에서 연 달력의 주소와 상태', () => {
     const asked = withProbe(probeText('0.9.9', false, true));
     const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
     await run(host, cfg, now);
-    expect(asked.find((js) => js.includes('__calfifApp'))).toBe('JSON.stringify({ app: String(window.__calfifApp || ""), sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), bridge: typeof window.__calfifPending === "string" })');
-    expect(cacheOf(host).web).toEqual({ at: NOW, app: '0.9.9', sw: false, bridge: true });
+    expect(asked.find((js) => js.includes('__calfifApp'))).toBe('JSON.stringify({ app: String(window.__calfifApp || ""), sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), bridge: typeof window.__calfifPending === "string", log: String(window.__calfifLog || "") })');
+    expect(cacheOf(host).web).toEqual({ at: NOW, app: '0.9.9', sw: false, bridge: true, log: [] });
   });
 
   it('답이 없거나 모양이 다르면 적지 않고, 달력은 그대로 뜨고 끝난다', async () => {
@@ -1840,39 +1843,21 @@ describe('달력에서 나갈 때', () => {
     delete (globalThis as Record<string, unknown>).WebView;
   });
 
-  it('닫지 않고 홈 화면으로 나가면(보이던 웹 화면이 가려지면) 기다리지 않고 끝낸다. 그때까지 받은 편집은 적혀 있다', async () => {
+  it('닫지 않고 홈 화면으로 나가도(보이던 웹 화면이 가려져도) 스크립트를 끝내지 않는다. 나갔다고 적고 계속 지켜본다', async () => {
     vi.useFakeTimers();
     try {
       const log = neverClosing([['', 'visible'], [pendingText([edit]), 'visible'], [pendingText([edit]), 'hidden']]);
       const host = openHost();
       let finished = false;
-      const done = run(host, cfg, now).then(() => { finished = true; });
-      await vi.advanceTimersByTimeAsync(300);
+      void run(host, cfg, now).then(() => { finished = true; });
+      await vi.advanceTimersByTimeAsync(600);
       expect(finished).toBe(false);
-      await vi.advanceTimersByTimeAsync(300);
-      await done;
-      expect(finished).toBe(true);
       expect(cacheOf(host)).toMatchObject({ leave: { at: NOW, how: 'left' }, pending: { uid: 'owner-test-uid', edits: [edit] } });
-      // 끝낸 뒤에는 더 읽지 않는다.
+      // 앱 전환으로 돌아와 고칠 수 있으므로 계속 읽는다. 요청도 그대로 된다.
       const reads = log.reads;
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(log.reads).toBe(reads);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('나가면서 붙여 넣은 스크립트의 마지막 새 버전 확인이 바로 실패하게 해 둔다(네트워크를 기다리다 멈추지 않게)', async () => {
-    vi.useFakeTimers();
-    try {
-      neverClosing([['', 'visible'], ['', 'hidden']]);
-      const host = openHost();
-      const done = run(host, cfg, now);
-      await vi.advanceTimersByTimeAsync(300);
-      await done;
-      const req = new host.Request('https://example.test/widget/version.json');
-      await expect(req.loadString()).rejects.toThrow('홈 화면으로 나가는 중이라 확인을 건너뛰었다');
-      await expect(req.loadJSON()).rejects.toThrow('홈 화면으로 나가는 중이라 확인을 건너뛰었다');
+      await vi.advanceTimersByTimeAsync(3000);
+      expect([finished, log.reads > reads]).toEqual([false, true]);
+      await expect(new host.Request('https://example.test/x').loadString()).resolves.toBeDefined();
     } finally {
       vi.useRealTimers();
     }
@@ -1908,7 +1893,7 @@ describe('달력에서 나갈 때', () => {
 
   it('메뉴의 상태에 어떻게 나갔는지 적는다', async () => {
     const at = new Date(2026, 10, 13, 8, 59, 30).getTime();
-    for (const [how, text] of [['left', '달력에서 나감(08:59:30): 홈 화면으로 나가서 스크립트를 끝냄'], ['closed', '달력에서 나감(08:59:30): 닫기를 눌러 닫음']] as const) {
+    for (const [how, text] of [['left', '달력에서 나감(08:59:30): 닫지 않고 홈 화면으로 나감'], ['closed', '달력에서 나감(08:59:30): 닫기를 눌러 닫음']] as const) {
       const host = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }], files: { [CACHE]: JSON.stringify({ leave: { at, how } }) } });
       await run(host, cfg, now);
       expect(host.state.alerts[0].message).toContain(text);

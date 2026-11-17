@@ -3,12 +3,13 @@
  * (PC에서는 아이폰의 위젯을 볼 수 없다). 위젯과 달력을 띄운 스크립트가 보관 파일에 적어 두고, 메뉴가 읽어 보여 준다.
  */
 import type { PendingState, WebProbe } from './pending';
+import { REPEATABLE, outcomeOf, verdictOf, type ReloadHow, type ReloadTry, type Verdict } from './reload';
 
 /** 위젯을 한 번 그린 기록. v: 그린 코드의 버전. src: 달을 어디서 읽었나. over: 얹은(아직 올라가지 않은) 편집 수. next: 다시 그려 달라고 청한 때. */
 export type DrawNote = { at: number; v: string; src: string; over: number; next: number };
 /** 달력을 띄운 스크립트가 웹 화면에서 식을 돌린 결과. ok, fail: 성공과 실패의 수. lastError: 마지막 실패의 까닭. */
 export type BridgeNote = { at: number; ok: number; fail: number; lastOkAt: number; lastError: string };
-/** 위젯에서 연 달력에서 나간 때와 길. closed: 닫기를 눌렀다. left: 닫지 않고 홈 화면으로 나갔다(스크립트가 그때 끝냈다). */
+/** 위젯에서 연 달력에서 나간 때와 길. closed: 닫기를 눌렀다. left: 닫지 않고 홈 화면으로 나갔다(달력과 스크립트는 그대로 남는다). */
 export type LeaveNote = { at: number; how: 'closed' | 'left' };
 /** update.ts의 상태 가운데 메뉴에 적을 것. */
 export type UpdateNote = { version: string; unfinished: Record<string, number>; skipUntil: Record<string, number>; note: string; libNote: string };
@@ -57,9 +58,36 @@ const SOURCES: Record<string, string> = {
 
 const span = (ms: number): string => (ms < 90_000 ? `${Math.round(ms / 1000)}초` : `${Math.round(ms / 60_000)}분`);
 
+const VERDICTS: Record<Verdict, string> = { works: '됨', fails: '안 됨', bad: '쓰지 않음', unknown: '시험 전' };
+const WHYS: Record<ReloadTry['why'], string> = { probe: '시험', save: '저장', leave: '나간 뒤' };
+const SHOWN_TRIES = 5;
+
+/** 한 번 해 본 것의 결과를 적는다. */
+function tryResult(t: ReloadTry, now: number): string {
+  if (t.err !== '') return `못 함(${t.err.slice(0, 40)})`;
+  if (t.got > 0) return `${((t.got - t.at) / 1000).toFixed(1)}초 뒤 그림`;
+  if (t.shut) return '바로 닫힘';
+  if (t.void) return '닫아서 무효';
+  if (t.away) return '나가서 지켜보지 못함';
+  if (t.why === 'leave') return '그림 없음';
+  const outcome = outcomeOf(t, now);
+  if (outcome === 'open') return '지켜보는 중';
+  return outcome === 'hurt' ? '스크립트가 멈춤' : '안 그려짐';
+}
+
+/** 위젯을 바로 새로 그리게 하는 방법의 판정과 마지막 시도들(reload.ts). 해 본 적이 없으면 빈 목록. */
+export function reloadLines(tries: ReloadTry[], now: number): string[] {
+  if (tries.length === 0) return [];
+  const hows: ReloadHow[] = [...REPEATABLE, 'finish'];
+  const lines = [`바로 그리기: ${hows.map((how) => `${how} ${VERDICTS[verdictOf(how, tries, now)]}`).join(' · ')}`];
+  lines.push(`시도: ${tries.slice(-SHOWN_TRIES).map((t) => `${clock(t.at, now)} ${t.how}(${WHYS[t.why]}) ${tryResult(t, now)}`).join(' · ')}`);
+  return lines;
+}
+
 /** 메뉴에 적을 상태 글(여러 줄). 적을 것이 하나도 없으면 빈 글. */
 export function statusText(input: {
   now: number; draws: DrawNote[]; web: WebProbe | null; activeAt: number; leave?: LeaveNote | null; pending: PendingState | null; bridge: BridgeNote | null; update: UpdateNote;
+  reload?: ReloadTry[];
 }): string {
   const { now, draws, web, activeAt, pending, bridge, update } = input;
   const leave = input.leave ?? null;
@@ -70,13 +98,16 @@ export function statusText(input: {
     lines.push(`마지막 그림: ${last.v === '' ? '버전 모름' : last.v}, ${SOURCES[last.src] ?? last.src}, 얹은 편집 ${last.over}건, 다음 요청 ${span(Math.max(0, last.next - last.at))} 뒤`);
   }
   if (web) lines.push(`달력 화면(${clock(web.at, now)}): ${web.app === '' ? '웹앱 버전 모름' : `웹앱 ${web.app}`}, 서비스 워커 ${web.sw ? '있음' : '없음'}, 넘기기 ${web.bridge ? '켜짐' : '꺼짐'}`);
+  // 웹 화면이 남긴 Firebase SDK의 경고와 오류(Scriptable의 "Errors Logged" 상자에는 내용이 나오지 않는다).
+  for (const l of web?.log ?? []) lines.push(`웹 화면 기록(${clock(l.at, now)}): ${[l.level, l.type, l.text].filter((t) => t !== '').join(' ')}`);
   if (activeAt > 0) lines.push(`달력이 떠 있던 마지막 때: ${clock(activeAt, now)}`);
-  if (leave) lines.push(`달력에서 나감(${clock(leave.at, now)}): ${leave.how === 'left' ? '홈 화면으로 나가서 스크립트를 끝냄' : '닫기를 눌러 닫음'}`);
+  if (leave) lines.push(`달력에서 나감(${clock(leave.at, now)}): ${leave.how === 'left' ? '닫지 않고 홈 화면으로 나감' : '닫기를 눌러 닫음'}`);
   if (pending) lines.push(`넘겨받은 편집: ${pending.edits.length}건(${clock(pending.savedAt, now)})${pending.edits.length > 0 ? ` ${pending.edits.slice(0, 5).map((e) => `${e.monthId.slice(5)}-${e.day}`).join(', ')}` : ''}`);
   if (bridge) {
     const failed = bridge.fail > 0 ? `, 실패 ${bridge.fail}(마지막 실패: ${bridge.lastError === '' ? '까닭 모름' : bridge.lastError.slice(0, 120)})` : ', 실패 0';
     lines.push(`화면 읽기(${clock(bridge.at, now)}): 성공 ${bridge.ok}${bridge.lastOkAt > 0 ? `(마지막 ${clock(bridge.lastOkAt, now)})` : ''}${failed}`);
   }
+  lines.push(...reloadLines(input.reload ?? [], now));
   const stuck = Object.entries(update.unfinished).filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}번`);
   const resting = Object.entries(update.skipUntil).filter(([, until]) => until > now).map(([k, until]) => `${k} ${clock(until, now)}까지`);
   const notes = [update.note, update.libNote].filter((t) => t !== '');

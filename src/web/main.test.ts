@@ -688,7 +688,7 @@ it('웹앱: 위젯에서 연 화면은 올릴 것이 없으면 빈 목록을 적
   try {
     await startWeb('bridge-empty');
     access.emit!(server(accessDoc()));
-    await vi.waitFor(() => expect((window as unknown as Record<string, unknown>).__calfifPending).toBe('{"v":1,"uid":"bridge-empty","edits":[]}'));
+    await vi.waitFor(() => expect((window as unknown as Record<string, unknown>).__calfifPending).toBe('{"v":1,"uid":"bridge-empty","n":1,"edits":[]}'));
   } finally {
     sessionStorage.removeItem('calfif.via');
     delete (window as unknown as Record<string, unknown>).__calfifPending;

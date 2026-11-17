@@ -50,7 +50,8 @@ import { normalizeText } from '../core/text';
 import { EMPTY_DAY } from '../core/types';
 import { FirestoreMonthStore } from '../sync/firestoreStore';
 import { Outbox } from '../sync/outbox';
-import { PENDING_GLOBAL, pendingForWidget } from './widgetBridge';
+import { PENDING_GLOBAL, pendingTeller } from './widgetBridge';
+import { keepSdkLogs } from './widgetLog';
 import { SyncEngine } from '../sync/engine';
 
 const { app, auth, db } = initFirebase(import.meta.env);
@@ -91,6 +92,15 @@ const viaWidget = (): boolean => {
     return false;
   }
 };
+// 위젯에서 연 화면: Firebase SDK의 경고와 오류를 콘솔 대신 window에 적어 둔다. Scriptable은 웹 화면의 console.error를
+// "Errors Logged" 상자로 띄우는데 내용이 나오지 않는다. 적어 둔 것은 위젯 스크립트가 읽어 Scriptable의 메뉴에 보인다(widgetLog.ts).
+if (viaWidget()) {
+  try {
+    keepSdkLogs(window as unknown as Record<string, unknown>);
+  } catch {
+    // 못 하면 SDK가 전처럼 콘솔에 적는다.
+  }
+}
 // 옮긴 자리는 상자마다 따로, 앱이 켜져 있는 동안만 기억한다.
 const editorMemory = sessionMemory();
 const usersMemory = sessionMemory();
@@ -181,9 +191,10 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   // 트랜잭션은 SDK의 로컬 캐시를 거치지 않으므로, 올린 값을 다음 스냅숏이 올 때까지 화면에 남긴다.
   const offCommit = engine.onCommit((monthId, changes) => store.noteCommitted(monthId, changes));
   // 위젯에서 연 화면: 아직 올리지 못한 편집을 위젯 스크립트가 읽어 가게 적어 둔다(widgetBridge.ts). 올리고 나면 빈 목록이 된다.
+  const pendingText = pendingTeller(session.uid);
   const tellWidget = (): void => {
     try {
-      (window as unknown as Record<string, unknown>)[PENDING_GLOBAL] = pendingForWidget(session.uid, outbox.list(), (m, d) => (store.isLoaded(m) ? store.days(m)[d] ?? EMPTY_DAY : null));
+      (window as unknown as Record<string, unknown>)[PENDING_GLOBAL] = pendingText(outbox.list(), (m, d) => (store.isLoaded(m) ? store.days(m)[d] ?? EMPTY_DAY : null));
     } catch {
       // 적지 못하면 위젯은 서버의 것을 그린다.
     }

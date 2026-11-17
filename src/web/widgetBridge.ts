@@ -15,7 +15,7 @@ export const PENDING_GLOBAL = '__calfifPending';
  * valueOf가 null을 주면(그 달을 아직 서버에서 읽지 못했다) 대기열의 마지막 값을 그대로 적는다. 읽지 못한 달에 맞춰 합친 값은
  * 틀릴 수 있다(한 줄을 더한 편집이 그 한 줄만 남는다).
  */
-export function pendingForWidget(uid: string, pending: PendingEdit[], valueOf: (monthId: string, day: string) => DayValue | null): string {
+export function pendingForWidget(uid: string, pending: PendingEdit[], valueOf: (monthId: string, day: string) => DayValue | null, n = 0): string {
   const latest = new Map<string, { monthId: string; day: string; editedAt: number; next: DayValue }>();
   for (const e of pending) {
     const key = `${e.monthId}-${e.day}`;
@@ -29,5 +29,23 @@ export function pendingForWidget(uid: string, pending: PendingEdit[], valueOf: (
       const value = valueOf(e.monthId, e.day) ?? e.next;
       return { monthId: e.monthId, day: e.day, text: value.text, color: value.color, editedAt: e.editedAt };
     });
-  return JSON.stringify({ v: 1, uid, edits });
+  return JSON.stringify({ v: 1, uid, n, edits });
+}
+
+/**
+ * 적을 글을 만드는 함수를 준다. 편집 목록이 앞의 것과 달라질 때마다 n이 하나씩 는다.
+ * 스크립트는 0.3초마다 읽는데, 저장하고 서버에 올라가기까지가 그보다 짧으면 목록이 "없음 → 하나 → 없음"으로 바뀐 것을 보지 못한다.
+ * n이 있으면 그 사이에 저장이 있었음을 안다(스크립트는 그때 위젯을 새로 그리게 한다. src/widget/reload.ts).
+ */
+export function pendingTeller(uid: string): (pending: PendingEdit[], valueOf: (monthId: string, day: string) => DayValue | null) => string {
+  let n = 0;
+  let last = '';
+  return (pending, valueOf) => {
+    const plain = pendingForWidget(uid, pending, valueOf);
+    if (plain !== last) {
+      last = plain;
+      n += 1;
+    }
+    return pendingForWidget(uid, pending, valueOf, n);
+  };
 }

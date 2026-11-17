@@ -9,6 +9,8 @@ import type { DayValue } from '../core/types';
 
 /** 웹 화면이 window에 적어 두는 이름. src/web/widgetBridge.ts의 PENDING_GLOBAL과 같아야 한다. */
 export const PENDING_GLOBAL = '__calfifPending';
+/** 웹 화면이 Firebase SDK의 경고와 오류를 적어 두는 이름. src/web/widgetLog.ts의 LOG_GLOBAL과 같아야 한다. */
+export const LOG_GLOBAL = '__calfifLog';
 /**
  * 스크립트가 웹 화면에서 0.3초마다 돌리는 식. 글 두 개의 배열을 JSON으로 준다: 웹앱이 적어 둔 올리지 못한 편집(없으면 빈 글)과
  * 화면이 보이는지(document.visibilityState: 앱이 뒤로 가면 hidden).
@@ -126,18 +128,45 @@ export function applyPending(
  * app: 웹앱의 버전(웹앱이 window.__calfifApp에 적는다. 0.9.8까지의 웹앱은 적지 않아 빈 글이다).
  * sw: 서비스 워커가 이 화면을 맡고 있는가(맡고 있으면 첫 화면이 받아 둔 것에서 나온다).
  * bridge: 웹앱이 올리지 못한 편집을 적어 두는가(위젯에서 연 화면인 것을 알고 로그인했을 때만 적는다).
+ * log: 웹앱이 적어 둔 Firebase SDK의 경고와 오류(0.9.13부터. Scriptable은 웹 화면의 console.error를 "Errors Logged" 상자로 띄우는데
+ * 첫 인자만 보여 내용을 알 수 없었다. 웹앱이 그것을 콘솔 대신 여기에 적는다).
  */
-export const PROBE_JS = `JSON.stringify({ app: String(window.__calfifApp || ""), sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), bridge: typeof window.${PENDING_GLOBAL} === "string" })`;
+export const PROBE_JS = `JSON.stringify({ app: String(window.__calfifApp || ""), sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), bridge: typeof window.${PENDING_GLOBAL} === "string", log: String(window.${LOG_GLOBAL} || "") })`;
 
-/** 보관 파일의 web 칸. at은 스크립트가 적은 시각이다. */
-export type WebProbe = { at: number; app: string; sw: boolean; bridge: boolean };
+/** 웹 화면이 남긴 기록 한 줄(Firebase SDK의 경고와 오류. src/web/widgetLog.ts). */
+export type WebLogLine = { at: number; level: string; type: string; text: string };
+const MAX_LOG_LINES = 3;
+const MAX_LOG_TEXT = 160;
+
+/** 웹 화면이 적어 둔 기록(JSON 글이나 이미 읽은 배열)을 읽는다. 모양이 다른 줄은 버린다. 마지막 세 줄만 둔다. */
+export function webLogOf(v: unknown): WebLogLine[] {
+  let list: unknown = v;
+  if (typeof v === 'string') {
+    if (v === '') return [];
+    try {
+      list = JSON.parse(v);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(list)) return [];
+  const out: WebLogLine[] = [];
+  for (const l of list) {
+    if (!isObject(l) || typeof l.at !== 'number' || !Number.isFinite(l.at) || typeof l.text !== 'string') continue;
+    out.push({ at: l.at, level: typeof l.level === 'string' ? l.level.slice(0, 12) : '', type: typeof l.type === 'string' ? l.type.slice(0, 40) : '', text: l.text.slice(0, MAX_LOG_TEXT) });
+  }
+  return out.slice(-MAX_LOG_LINES);
+}
+
+/** 보관 파일의 web 칸. at은 스크립트가 적은 시각이다. log: 웹 화면이 남긴 기록(없으면 빈 목록). */
+export type WebProbe = { at: number; app: string; sw: boolean; bridge: boolean; log: WebLogLine[] };
 
 /** 웹 화면이 답한 글을 읽는다. 모양이 다르면 null. */
-export function parseProbe(text: string): { app: string; sw: boolean; bridge: boolean } | null {
+export function parseProbe(text: string): { app: string; sw: boolean; bridge: boolean; log: WebLogLine[] } | null {
   try {
     const v: unknown = JSON.parse(text);
     if (!isObject(v) || typeof v.app !== 'string' || typeof v.sw !== 'boolean' || typeof v.bridge !== 'boolean') return null;
-    return { app: v.app.slice(0, 40), sw: v.sw, bridge: v.bridge };
+    return { app: v.app.slice(0, 40), sw: v.sw, bridge: v.bridge, log: webLogOf(v.log) };
   } catch {
     return null;
   }
@@ -146,7 +175,7 @@ export function parseProbe(text: string): { app: string; sw: boolean; bridge: bo
 /** 보관 파일의 web 칸을 읽는다. 없거나 모양이 다르면 null. */
 export function webProbeOf(v: unknown): WebProbe | null {
   if (!isObject(v) || typeof v.at !== 'number' || !Number.isFinite(v.at) || typeof v.app !== 'string' || typeof v.sw !== 'boolean' || typeof v.bridge !== 'boolean') return null;
-  return { at: v.at, app: v.app, sw: v.sw, bridge: v.bridge };
+  return { at: v.at, app: v.app, sw: v.sw, bridge: v.bridge, log: webLogOf(v.log) };
 }
 
 /** Scriptable의 메뉴에 적을 한 줄. 열어 본 적이 없으면 빈 글. */

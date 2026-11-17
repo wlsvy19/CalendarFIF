@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import type { DayValue, PendingEdit } from '../core/types';
 import { PENDING_GLOBAL as WIDGET_GLOBAL, parsePendingMessage } from '../widget/pending';
-import { PENDING_GLOBAL, pendingForWidget } from './widgetBridge';
+import { PENDING_GLOBAL, pendingForWidget, pendingTeller } from './widgetBridge';
 
 const day = (text: string, color = ''): DayValue => ({ text, color });
 const edit = (monthId: string, d: string, next: DayValue, editedAt: number, extra: Partial<PendingEdit> = {}): PendingEdit => ({ monthId, day: d, base: day(''), next, editedAt, ...extra });
@@ -32,9 +32,31 @@ it('지운 날은 빈 값으로 적는다', () => {
 });
 
 it('올릴 것이 없으면 빈 목록이고, 같은 것은 늘 같은 글이다', () => {
-  expect(pendingForWidget('owner-test-uid', [], () => day(''))).toBe('{"v":1,"uid":"owner-test-uid","edits":[]}');
+  expect(pendingForWidget('owner-test-uid', [], () => day(''))).toBe('{"v":1,"uid":"owner-test-uid","n":0,"edits":[]}');
   const a = [edit('2026-11', '16', day('a'), 1), edit('2026-12', '01', day('b'), 2)];
   expect(pendingForWidget('u', a, () => day('x'))).toBe(pendingForWidget('u', [...a].reverse(), () => day('x')));
+});
+
+it('편집 목록이 달라질 때마다 n이 는다: 스크립트가 읽는 사이에 저장하고 올라가도 저장이 있었음을 안다', () => {
+  const tell = pendingTeller('owner-test-uid');
+  const shown = () => day('회의');
+  const one = [edit('2026-11', '16', day('회의'), 100)];
+  const empty = tell([], shown);
+  expect(JSON.parse(empty)).toEqual({ v: 1, uid: 'owner-test-uid', n: 1, edits: [] });
+  // 달라지지 않으면 같은 글이다(스크립트가 다시 적지 않는다).
+  expect(tell([], shown)).toBe(empty);
+  const saved = tell(one, shown);
+  expect(JSON.parse(saved).n).toBe(2);
+  expect(tell(one, shown)).toBe(saved);
+  // 올라가서 다시 빈 목록이 됐다: 처음의 빈 목록과 다른 글이다.
+  const sent = tell([], shown);
+  expect([JSON.parse(sent).n, sent === empty]).toEqual([3, false]);
+  // 같은 날을 다시 고치면(시각이 다르다) 또 는다. 위젯은 n이 있어도 그대로 읽는다.
+  const again = tell([edit('2026-11', '16', day('회의'), 200)], shown);
+  expect(JSON.parse(again).n).toBe(4);
+  expect(parsePendingMessage(again)).toEqual({ uid: 'owner-test-uid', edits: [{ monthId: '2026-11', day: '16', text: '회의', color: '', editedAt: 200 }] });
+  // 화면마다 따로 센다.
+  expect(JSON.parse(pendingTeller('u')([], shown)).n).toBe(1);
 });
 
 it('아직 서버에서 읽지 못한 달(valueOf가 null)은 대기열의 마지막 값을 그대로 적는다', () => {

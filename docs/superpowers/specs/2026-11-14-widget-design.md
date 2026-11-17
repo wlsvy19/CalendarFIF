@@ -46,7 +46,7 @@
 3. 갱신 토큰으로 ID 토큰을 받는다(`securetoken.googleapis.com/v1/token`).
 4. 이번 달 문서를 읽는다: `firestore.googleapis.com/v1/projects/<프로젝트>/databases/(default)/documents/users/<uid>/months/<YYYY-MM>`. 달의 첫 주와 마지막 주에 걸친 앞뒤 달 날짜는 번호만 흐리게 그리고 메모는 그리지 않는다(문서 1개만 읽기 위해서다).
 5. 받은 자료를 Scriptable의 파일(`calendarfif-cache.json`)에 둔다. 읽기에 실패하면 이 파일의 자료를 "오프라인" 표시와 함께 그린다.
-6. 크기(`config.widgetFamily`)에 맞게 위젯을 만든다. 기본은 기본 부품으로 그린다. Parameter에 `image`가 있으면 그림 한 장으로 그린다. 다음 갱신 희망 시각을 15분 뒤로 알린다(2026-11-17부터 5분 뒤: `src/widget/refresh.ts`).
+6. 크기(`config.widgetFamily`)에 맞게 위젯을 만든다. 기본은 기본 부품으로 그린다. Parameter에 `image`가 있으면 그림 한 장으로 그린다. 다음 갱신 희망 시각을 15분 뒤로 알린다(`src/widget/refresh.ts`. 2026-11-17에 5분, 2분으로 줄여 봤지만 아이폰이 따르지 않아 되돌렸다. 고친 것을 바로 보이는 일은 위젯에서 연 달력이 저장하는 순간 새로 그리게 하는 것으로 한다: `src/widget/reload.ts`).
 7. 토큰이 거절되면(비밀번호 변경, 사용 중지) 갱신 토큰을 지우고 2번의 안내를 그린다.
 8. 예상하지 못한 오류는 위젯에 "오류"와 그 내용(28자씩 5줄까지, 마지막 줄에 스크립트의 버전)을 그린다. 오류 위젯을 그리지 못하면 다른 방식으로, 그것도 안 되면 글자만 있는 위젯으로 오류 내용을 보인다.
 

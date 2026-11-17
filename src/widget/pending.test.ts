@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { PENDING_TTL_MS, applyPending, countPending, parsePendingMessage, parsePoll, parseProbe, pendingStateOf, probeLine, settlePending, webProbeOf, type PendingState } from './pending';
+import { LOG_GLOBAL, PENDING_TTL_MS, PROBE_JS, applyPending, countPending, parsePendingMessage, parsePoll, parseProbe, pendingStateOf, probeLine, settlePending, webLogOf, webProbeOf, type PendingState } from './pending';
+import { LOG_GLOBAL as WEB_LOG_GLOBAL } from '../web/widgetLog';
 
 const edit = (day: string, text: string, color = '', editedAt = 2000, monthId = '2026-11') => ({ monthId, day, text, color, editedAt });
 const message = (edits: unknown[], extra: Record<string, unknown> = {}): string => JSON.stringify({ v: 1, uid: 'owner-test-uid', edits, ...extra });
@@ -90,20 +91,34 @@ it('얹는 기한은 한 시간이다', () => {
 
 describe('웹 화면의 상태', () => {
   it('답한 글을 읽는다. 모양이 다르면 null', () => {
-    expect(parseProbe(JSON.stringify({ app: '0.9.9', sw: true, bridge: false, more: 1 }))).toEqual({ app: '0.9.9', sw: true, bridge: false });
+    expect(parseProbe(JSON.stringify({ app: '0.9.9', sw: true, bridge: false, more: 1 }))).toEqual({ app: '0.9.9', sw: true, bridge: false, log: [] });
     expect(parseProbe(JSON.stringify({ app: 'x'.repeat(100), sw: false, bridge: false }))?.app).toHaveLength(40);
     for (const text of ['', 'x', 'null', '[]', JSON.stringify({ app: 1, sw: true, bridge: true }), JSON.stringify({ app: '', sw: 'no', bridge: true }), JSON.stringify({ app: '', sw: true })]) expect(parseProbe(text)).toBeNull();
   });
 
   it('보관 파일의 칸을 읽는다', () => {
-    expect(webProbeOf({ at: 5, app: '0.9.9', sw: false, bridge: true })).toEqual({ at: 5, app: '0.9.9', sw: false, bridge: true });
+    expect(webProbeOf({ at: 5, app: '0.9.9', sw: false, bridge: true })).toEqual({ at: 5, app: '0.9.9', sw: false, bridge: true, log: [] });
     for (const v of [undefined, null, {}, { at: '5', app: '', sw: false, bridge: true }, { at: 5, app: '', sw: false }]) expect(webProbeOf(v)).toBeNull();
+  });
+
+  it('웹 화면이 남긴 기록(Firebase SDK의 경고와 오류)을 같이 읽는다. 마지막 세 줄, 한 줄은 160자까지', () => {
+    const line = (n: number, text = `오류 ${n}`) => ({ at: n, level: 'error', type: '@firebase/firestore', text });
+    // 웹 화면은 기록을 JSON 글로 적어 둔다(src/web/widgetLog.ts). 스크립트가 묻는 식은 그 글을 그대로 받아 온다.
+    expect(WEB_LOG_GLOBAL).toBe(LOG_GLOBAL);
+    expect(PROBE_JS).toContain(`log: String(window.${LOG_GLOBAL} || "")`);
+    const seen = parseProbe(JSON.stringify({ app: '0.9.13', sw: false, bridge: true, log: JSON.stringify([line(1), line(2), line(3), line(4, 'x'.repeat(500))]) }));
+    expect(seen?.log).toEqual([line(2), line(3), line(4, 'x'.repeat(160))]);
+    // 보관 파일에서는 배열로 읽는다.
+    expect(webProbeOf({ at: 5, app: '', sw: false, bridge: true, log: [line(7)] })?.log).toEqual([line(7)]);
+    // 모양이 다른 것은 버린다. 수준과 종류가 없으면 빈 글로 둔다.
+    expect(webLogOf([{ at: 1, text: 'a' }, { at: 'x', text: 'b' }, { at: 2 }, null, 'x'])).toEqual([{ at: 1, level: '', type: '', text: 'a' }]);
+    for (const v of [undefined, null, '', 'not json', '{}', 7, {}]) expect(webLogOf(v)).toEqual([]);
   });
 
   it('메뉴에 적을 한 줄', () => {
     const at = new Date(2026, 10, 17, 9, 5).getTime();
-    expect(probeLine({ at, app: '0.9.9', sw: false, bridge: true })).toBe('위젯에서 연 달력(11월 17일 09:05 확인): 웹앱 0.9.9, 서비스 워커 없음, 위젯에 넘기기 켜짐');
-    expect(probeLine({ at, app: '', sw: true, bridge: false })).toBe('위젯에서 연 달력(11월 17일 09:05 확인): 웹앱 버전 모름(0.9.8 이하), 서비스 워커 있음, 위젯에 넘기기 꺼짐');
+    expect(probeLine({ at, app: '0.9.9', sw: false, bridge: true, log: [] })).toBe('위젯에서 연 달력(11월 17일 09:05 확인): 웹앱 0.9.9, 서비스 워커 없음, 위젯에 넘기기 켜짐');
+    expect(probeLine({ at, app: '', sw: true, bridge: false, log: [] })).toBe('위젯에서 연 달력(11월 17일 09:05 확인): 웹앱 버전 모름(0.9.8 이하), 서비스 워커 있음, 위젯에 넘기기 꺼짐');
     expect(probeLine(null)).toBe('');
   });
 });
