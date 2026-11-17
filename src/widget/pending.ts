@@ -100,3 +100,41 @@ export function applyPending(
   }
   return out;
 }
+
+/**
+ * 웹 화면의 상태를 묻는 식. 달력을 띄운 스크립트가 가끔 돌려 Scriptable의 메뉴에 한 줄로 적는다(아이폰에서 무엇이 도는지 볼 길이 그것뿐이다).
+ * app: 웹앱의 버전(웹앱이 window.__calfifApp에 적는다. 0.9.8까지의 웹앱은 적지 않아 빈 글이다).
+ * sw: 서비스 워커가 이 화면을 맡고 있는가(맡고 있으면 첫 화면이 받아 둔 것에서 나온다).
+ * bridge: 웹앱이 올리지 못한 편집을 적어 두는가(위젯에서 연 화면인 것을 알고 로그인했을 때만 적는다).
+ */
+export const PROBE_JS = `JSON.stringify({ app: String(window.__calfifApp || ""), sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), bridge: typeof window.${PENDING_GLOBAL} === "string" })`;
+
+/** 보관 파일의 web 칸. at은 스크립트가 적은 시각이다. */
+export type WebProbe = { at: number; app: string; sw: boolean; bridge: boolean };
+
+/** 웹 화면이 답한 글을 읽는다. 모양이 다르면 null. */
+export function parseProbe(text: string): { app: string; sw: boolean; bridge: boolean } | null {
+  try {
+    const v: unknown = JSON.parse(text);
+    if (!isObject(v) || typeof v.app !== 'string' || typeof v.sw !== 'boolean' || typeof v.bridge !== 'boolean') return null;
+    return { app: v.app.slice(0, 40), sw: v.sw, bridge: v.bridge };
+  } catch {
+    return null;
+  }
+}
+
+/** 보관 파일의 web 칸을 읽는다. 없거나 모양이 다르면 null. */
+export function webProbeOf(v: unknown): WebProbe | null {
+  if (!isObject(v) || typeof v.at !== 'number' || !Number.isFinite(v.at) || typeof v.app !== 'string' || typeof v.sw !== 'boolean' || typeof v.bridge !== 'boolean') return null;
+  return { at: v.at, app: v.app, sw: v.sw, bridge: v.bridge };
+}
+
+/** Scriptable의 메뉴에 적을 한 줄. 열어 본 적이 없으면 빈 글. */
+export function probeLine(p: WebProbe | null): string {
+  if (!p) return '';
+  const d = new Date(p.at);
+  const two = (n: number): string => String(n).padStart(2, '0');
+  const when = `${d.getMonth() + 1}월 ${d.getDate()}일 ${two(d.getHours())}:${two(d.getMinutes())}`;
+  const app = p.app === '' ? '웹앱 버전 모름(0.9.8 이하)' : `웹앱 ${p.app}`;
+  return `위젯에서 연 달력(${when} 확인): ${app}, 서비스 워커 ${p.sw ? '있음' : '없음'}, 위젯에 넘기기 ${p.bridge ? '켜짐' : '꺼짐'}`;
+}

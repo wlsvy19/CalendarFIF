@@ -78,6 +78,12 @@ const VIA_KEY = 'calfif.via';
     // 기억하지 못하면 보통 화면처럼 적는다.
   }
 })();
+// 위젯 스크립트가 이 화면의 웹앱 버전을 읽어 Scriptable의 메뉴에 적는다(src/widget/pending.ts의 PROBE_JS).
+try {
+  (window as unknown as Record<string, unknown>).__calfifApp = APP_VERSION;
+} catch {
+  // 적지 못하면 메뉴에 버전이 나오지 않는다.
+}
 const viaWidget = (): boolean => {
   try {
     return sessionStorage.getItem(VIA_KEY) === 'widget';

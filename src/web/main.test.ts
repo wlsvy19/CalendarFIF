@@ -764,3 +764,8 @@ it('웹앱: via가 없으면 주소를 건드리지 않는다(t만 있는 주소
     history.replaceState(null, '', before);
   }
 });
+
+it('웹앱: 위젯 스크립트가 읽을 웹앱 버전을 window.__calfifApp에 적어 둔다', async () => {
+  await startWeb('app-version');
+  expect(typeof (window as unknown as Record<string, unknown>).__calfifApp).toBe('string');
+});

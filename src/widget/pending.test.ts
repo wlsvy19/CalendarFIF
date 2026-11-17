@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PENDING_TTL_MS, applyPending, parsePendingMessage, pendingStateOf, settlePending, type PendingState } from './pending';
+import { PENDING_TTL_MS, applyPending, parsePendingMessage, parseProbe, pendingStateOf, probeLine, settlePending, webProbeOf, type PendingState } from './pending';
 
 const edit = (day: string, text: string, color = '', editedAt = 2000, monthId = '2026-11') => ({ monthId, day, text, color, editedAt });
 const message = (edits: unknown[], extra: Record<string, unknown> = {}): string => JSON.stringify({ v: 1, uid: 'owner-test-uid', edits, ...extra });
@@ -86,4 +86,24 @@ describe('settlePending', () => {
 
 it('얹는 기한은 한 시간이다', () => {
   expect(PENDING_TTL_MS).toBe(3_600_000);
+});
+
+describe('웹 화면의 상태', () => {
+  it('답한 글을 읽는다. 모양이 다르면 null', () => {
+    expect(parseProbe(JSON.stringify({ app: '0.9.9', sw: true, bridge: false, more: 1 }))).toEqual({ app: '0.9.9', sw: true, bridge: false });
+    expect(parseProbe(JSON.stringify({ app: 'x'.repeat(100), sw: false, bridge: false }))?.app).toHaveLength(40);
+    for (const text of ['', 'x', 'null', '[]', JSON.stringify({ app: 1, sw: true, bridge: true }), JSON.stringify({ app: '', sw: 'no', bridge: true }), JSON.stringify({ app: '', sw: true })]) expect(parseProbe(text)).toBeNull();
+  });
+
+  it('보관 파일의 칸을 읽는다', () => {
+    expect(webProbeOf({ at: 5, app: '0.9.9', sw: false, bridge: true })).toEqual({ at: 5, app: '0.9.9', sw: false, bridge: true });
+    for (const v of [undefined, null, {}, { at: '5', app: '', sw: false, bridge: true }, { at: 5, app: '', sw: false }]) expect(webProbeOf(v)).toBeNull();
+  });
+
+  it('메뉴에 적을 한 줄', () => {
+    const at = new Date(2026, 10, 17, 9, 5).getTime();
+    expect(probeLine({ at, app: '0.9.9', sw: false, bridge: true })).toBe('위젯에서 연 달력(11월 17일 09:05 확인): 웹앱 0.9.9, 서비스 워커 없음, 위젯에 넘기기 켜짐');
+    expect(probeLine({ at, app: '', sw: true, bridge: false })).toBe('위젯에서 연 달력(11월 17일 09:05 확인): 웹앱 버전 모름(0.9.8 이하), 서비스 워커 있음, 위젯에 넘기기 꺼짐');
+    expect(probeLine(null)).toBe('');
+  });
 });

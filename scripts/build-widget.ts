@@ -67,6 +67,20 @@ export function escapeProblems(iife: string): string[] {
   return problems;
 }
 
+/**
+ * Scriptable(JavaScriptCore)에는 없고 브라우저와 Node에는 있는 기능을 위젯 묶음이 쓰는지 본다. 쓰면 PC의 시험은 통과하고 아이폰에서만 오류가 난다
+ * (2026-11-17: new URL로 주소를 만들던 코드가 아이폰에서 조용히 실패했다). 쓰는 것의 이름을 준다. 없으면 빈 배열.
+ * 웹 화면에서 돌릴 식(글자열 안의 window, navigator)은 스크립트가 돌리는 것이 아니라 여기에 넣지 않았다.
+ */
+export function webApiProblems(iife: string): string[] {
+  const names: [string, RegExp][] = [
+    ['new URL(', /\bnew URL\(/], ['URLSearchParams', /\bURLSearchParams\b/], ['setTimeout(', /(?<![.\w$])setTimeout\(/], ['setInterval(', /(?<![.\w$])setInterval\(/],
+    ['fetch(', /(?<![.\w$])fetch\(/], ['TextEncoder', /\bTextEncoder\b/], ['TextDecoder', /\bTextDecoder\b/], ['atob(', /(?<![.\w$])atob\(/], ['btoa(', /(?<![.\w$])btoa\(/],
+    ['AbortController', /\bAbortController\b/], ['structuredClone(', /(?<![.\w$])structuredClone\(/], ['queueMicrotask(', /(?<![.\w$])queueMicrotask\(/],
+  ];
+  return names.filter(([, re]) => re.test(iife)).map(([name]) => `Scriptable에 없는 기능을 쓴다: ${name}`);
+}
+
 /** 버전 파일(version.json)의 글. chars는 위젯 코드의 글자 수(JS 문자열의 길이)다. */
 export function versionFile(lib: string, version: string): string {
   return `${JSON.stringify({ version, chars: lib.length })}\n`;
@@ -172,7 +186,7 @@ async function main(): Promise<void> {
   const text = versionText(version, new Date());
   const script = finishBundle(iife, text);
   const lib = finishLib(iife, text);
-  const problems = bundleProblems(script);
+  const problems = [...bundleProblems(script), ...webApiProblems(iife)];
   if (problems.length === 0) problems.push(...(await startProblems(script)));
   problems.push(...[...escapeProblems(iife), ...(await libProblems(lib, text))].map((p) => `받아 쓰는 위젯 코드: ${p}`));
   if (problems.length > 0) {

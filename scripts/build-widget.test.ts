@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FAKE_HOST_MARKER, makeFakeHost } from '../src/widget/fakeHost';
 import { LIB_END } from '../src/widget/update';
-import { bundleProblems, escapeProblems, finishBundle, finishLib, libProblems, startProblems, versionFile, versionText } from './build-widget';
+import { bundleProblems, escapeProblems, finishBundle, finishLib, libProblems, startProblems, versionFile, versionText, webApiProblems } from './build-widget';
 
 const iife = 'var CalendarFIFWidget = (function(exports) {\n\texports.run = async () => {};\n\treturn exports;\n})({});';
 const VERSION = '0.4.0 (2026-11-14)';
@@ -226,5 +226,16 @@ describe('받아 쓰는 위젯 코드(자동 업데이트)', () => {
     expect(await problems(finishLib(good.replace('로그인이 필요합니다', '오류'), VERSION))).toContain('"로그인이 필요합니다"가 없다');
     const fetching = bundle(['try { await new host.Request("https://example.invalid/x").loadString(); } catch {}', 'const w = new host.ListWidget();', 'w.addText("로그인이 필요합니다");', 'host.Script.setWidget(w);']);
     expect(await problems(finishLib(fetching, VERSION))).toContain('넘겨받은 실행이 네트워크를 썼다');
+  });
+});
+
+describe('Scriptable에 없는 기능', () => {
+  it('브라우저와 Node에만 있는 기능을 쓰면 문제다', () => {
+    expect(webApiProblems('const u = new URL(a); u.searchParams.set("t", 1);')).toEqual(['Scriptable에 없는 기능을 쓴다: new URL(']);
+    expect(webApiProblems('new URLSearchParams(q); setTimeout(f, 1); setInterval(f, 1); fetch(u); new TextEncoder(); new TextDecoder(); atob(s); btoa(s); new AbortController(); structuredClone(o); queueMicrotask(f);')).toHaveLength(11);
+  });
+
+  it('host의 것(host.Timer 등)과 이름이 비슷한 것, 웹 화면에서 돌릴 식은 문제가 아니다', () => {
+    expect(webApiProblems('host.Timer.schedule(1, false, f); req.fetch(u); obj.setTimeout(f); mySetTimeout(f); const prefetch = 1; prefetch(u); const js = "String(window.__calfifPending || \"\")"; const baseURL = "x";')).toEqual([]);
   });
 });

@@ -6,7 +6,7 @@ import { clearAlarms, pendingStatus, scheduleAlarms, scheduleTest, type AlarmSta
 import { isApiError, readEvents, readMonthDoc, readPushDoc, refreshSession, signIn, type Config, type Session } from './api';
 import { pushCoversUntil } from '../push/doc';
 import type { Host, ListWidgetLike } from './host';
-import { PENDING_JS, applyPending, parsePendingMessage, pendingStateOf, settlePending, type PendingState } from './pending';
+import { PENDING_JS, PROBE_JS, applyPending, parsePendingMessage, parseProbe, pendingStateOf, probeLine, settlePending, webProbeOf, type PendingState, type WebProbe } from './pending';
 import { makeWidget } from './render';
 import { renderTree } from './renderTree';
 import { buildScene, messageScene, type MonthData, type Scene } from './scene';
@@ -110,24 +110,24 @@ function findWebView(): (new () => WebViewLike) | null {
 }
 
 /**
- * 웹앱 주소에 via=widget과 t=(지금 시각)를 붙인다. 주소를 읽지 못하면 그대로 둔다.
+ * 웹앱 주소에 via=widget과 t=(지금 시각)를 붙인다.
  * t: 열 때마다 주소가 달라져, Scriptable의 웹 화면이 받아 둔 옛 첫 화면을 쓰지 않고 서버에서 새로 받는다
  * (2026-11-17: 배포한 뒤에도 위젯에서 연 달력만 옛 버전이었다. 그 화면에는 새 버전을 스스로 받는 서비스 워커가 없다).
  */
 function withVia(appUrl: string, at: Date): string {
-  try {
-    const url = new URL(appUrl);
-    url.searchParams.set('via', 'widget');
-    url.searchParams.set('t', String(at.getTime()));
-    return url.toString();
-  } catch {
-    return appUrl;
-  }
+  // 글로 만든다. Scriptable에는 브라우저의 URL이 없다: 0.9.8까지는 new URL로 만들다가 오류가 나서 아무것도 붙지 않은 주소를 열었다
+  // (PC의 시험에서는 URL이 있어 드러나지 않았다. 빌드의 webApiProblems가 다시 들어오지 않게 막는다).
+  const hashAt = appUrl.indexOf('#');
+  const head = hashAt < 0 ? appUrl : appUrl.slice(0, hashAt);
+  const hash = hashAt < 0 ? '' : appUrl.slice(hashAt);
+  return `${head}${head.includes('?') ? '&' : '?'}via=widget&t=${at.getTime()}${hash}`;
 }
 
 /** 띄운 웹 화면에서 아직 올리지 못한 편집을 읽는 간격과, 한 번 읽는 데 기다리는 시간. */
 const PENDING_POLL_MS = 300;
 const PENDING_READ_WAIT_MS = 1500;
+/** 웹 화면의 상태(PROBE_JS)는 이만큼 읽을 때마다 한 번 묻는다(3초쯤). */
+const PROBE_EVERY = 10;
 
 /**
  * 띄운 웹 화면이 적어 두는 "아직 서버에 올리지 못한 편집"을 닫힐 때까지 되풀이해 읽어 보관 파일에 적는다(pending.ts).
@@ -162,9 +162,28 @@ async function boundedWait<T>(host: Host, work: Promise<T>, ms: number, fallback
 function watchPending(host: Host, view: WebViewLike, now: () => Date): () => Promise<void> {
   if (typeof view.evaluateJavaScript !== 'function') return async () => {};
   let last = '';
+  let lastProbe = '';
+  let reads = 0;
   let stopped = false;
   let timer: { invalidate(): void } | undefined;
+  // 웹 화면의 상태를 물어 보관 파일의 web 칸에 적는다. Scriptable의 메뉴에 한 줄로 보인다(아이폰에서 무엇이 도는지 볼 길이 그것뿐이다).
+  const probe = async (): Promise<void> => {
+    try {
+      const got = await boundedWait<unknown>(host, Promise.resolve(view.evaluateJavaScript!(PROBE_JS, false)), PENDING_READ_WAIT_MS, null);
+      if (typeof got !== 'string' || got === lastProbe) return;
+      const seen = parseProbe(got);
+      if (!seen) return;
+      lastProbe = got;
+      const web: WebProbe = { at: now().getTime(), ...seen };
+      updateCache(host, { web });
+    } catch {
+      // 다음에 다시 묻는다.
+    }
+  };
   const read = async (): Promise<void> => {
+    const turn = reads;
+    reads += 1;
+    if (turn % PROBE_EVERY === 0) await probe();
     try {
       // 화면이 아직 없거나 닫힌 뒤에는 답이 오지 않을 수 있어 기다리는 시간을 둔다.
       const got = await boundedWait<unknown>(host, Promise.resolve(view.evaluateJavaScript!(PENDING_JS, false)), PENDING_READ_WAIT_MS, null);
@@ -200,6 +219,7 @@ function watchPending(host: Host, view: WebViewLike, now: () => Date): () => Pro
     await read();
     await boundedWait<null>(host, new Promise<null>(() => {}), PENDING_POLL_MS, null);
     await read();
+    await probe();
   };
 }
 
@@ -745,7 +765,9 @@ async function runInApp(host: Host, cfg: Config, now: () => Date): Promise<void>
   const count = verifiedCount(result.scheduled, status);
   menu.title = result.source === 'push' ? `${base} · 푸시 알림 사용 중` : count === null ? base : `${base} · 알림 ${count}개 예약됨`;
   const calendarLine = calendarProblem === '' ? '' : `달력을 Scriptable 안에서 열지 못했습니다: ${calendarProblem}`;
-  menu.message = [alarmReport(result, status), updateLine(host, cfg), calendarLine].filter((t) => t !== '').join('\n\n');
+  // 위젯에서 연 달력이 마지막으로 알려 준 상태(웹앱의 버전 등). 열어 본 적이 없으면 적지 않는다.
+  const webLine = probeLine(webProbeOf(cacheObject(host)?.web));
+  menu.message = [alarmReport(result, status), updateLine(host, cfg), webLine, calendarLine].filter((t) => t !== '').join('\n\n');
   menu.addAction('미리 보기');
   menu.addAction('시험 알림 (1분 뒤)');
   menu.addAction('로그아웃');

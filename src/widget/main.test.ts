@@ -1407,7 +1407,8 @@ describe('위젯에서 연 달력이 아직 올리지 못한 편집', () => {
   const edit = (day: string, text: string, color = '', editedAt = NOW - 500) => ({ monthId: '2026-11', day, text, color, editedAt });
   const cacheOf = (h: FakeHost): Record<string, unknown> => JSON.parse(h.state.files.get(CACHE) ?? '{}');
   /** 웹 화면이 window.__calfifPending에 적어 둔 것을 돌려주는 가짜 WebView. answers는 읽을 때마다 차례로 준다(마지막 것은 되풀이한다). */
-  const withPendingView = (answers: unknown[], present: () => Promise<void> = async () => {}) => {
+  /** probe: 웹 화면의 상태를 묻는 식(PROBE_JS)에 줄 답. 그 물음은 asked에 넣지 않는다. */
+  const withPendingView = (answers: unknown[], present: () => Promise<void> = async () => {}, probe: unknown = undefined) => {
     const asked: [string, unknown][] = [];
     let i = 0;
     (globalThis as Record<string, unknown>).WebView = class {
@@ -1416,6 +1417,7 @@ describe('위젯에서 연 달력이 아직 올리지 못한 편집', () => {
         return present();
       }
       evaluateJavaScript(js: string, useCallback?: boolean): Promise<unknown> {
+        if (js.includes('__calfifApp')) return typeof probe === 'function' ? (probe as () => Promise<unknown>)() : Promise.resolve(probe);
         asked.push([js, useCallback]);
         const answer = answers[Math.min(i, answers.length - 1)];
         i += 1;
@@ -1587,5 +1589,84 @@ describe('위젯에서 연 달력이 아직 올리지 못한 편집', () => {
     await run(host, cfg, now);
     const texts = drawnTexts(host);
     expect([texts.includes('못 올림'), texts.includes('보관'), texts.includes('오프라인')]).toEqual([true, false, true]);
+  });
+});
+
+describe('위젯에서 연 달력의 주소와 상태', () => {
+  const NOW = now().getTime();
+  const cacheOf = (h: FakeHost): Record<string, unknown> => JSON.parse(h.state.files.get(CACHE) ?? '{}');
+  const openWith = async (appUrl: string): Promise<string[]> => {
+    const loaded: string[] = [];
+    (globalThis as Record<string, unknown>).WebView = class {
+      async loadURL(url: string): Promise<void> {
+        loaded.push(url);
+      }
+      async present(): Promise<void> {}
+    };
+    await run(make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } }), { ...cfg, appUrl }, now);
+    return loaded;
+  };
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).WebView;
+  });
+
+  it('주소에 via=widget과 t=지금 시각을 붙인다. 이미 든 ?와 #을 지킨다', async () => {
+    expect(await openWith('https://example.test/')).toEqual([`https://example.test/?via=widget&t=${NOW}`]);
+    expect(await openWith('https://example.test')).toEqual([`https://example.test?via=widget&t=${NOW}`]);
+    expect(await openWith('https://example.test/app?x=1#2026-11-03')).toEqual([`https://example.test/app?x=1&via=widget&t=${NOW}#2026-11-03`]);
+  });
+
+  it('Scriptable처럼 브라우저의 URL이 없어도 붙인다(0.9.8까지는 new URL로 만들다가 아이폰에서 아무것도 붙지 않았다)', async () => {
+    const g = globalThis as Record<string, unknown>;
+    const saved = { URL: g.URL, URLSearchParams: g.URLSearchParams };
+    g.URL = undefined;
+    g.URLSearchParams = undefined;
+    try {
+      expect(await openWith('https://example.test/')).toEqual([`https://example.test/?via=widget&t=${NOW}`]);
+    } finally {
+      Object.assign(g, saved);
+    }
+  });
+
+  const probeText = (app: string, sw: boolean, bridge: boolean): string => JSON.stringify({ app, sw, bridge });
+  const withProbe = (answer: unknown) => {
+    const asked: string[] = [];
+    (globalThis as Record<string, unknown>).WebView = class {
+      async loadURL(): Promise<void> {}
+      async present(): Promise<void> {}
+      evaluateJavaScript(js: string): Promise<unknown> {
+        asked.push(js);
+        if (js.includes('__calfifApp')) return typeof answer === 'function' ? (answer as () => Promise<unknown>)() : Promise.resolve(answer);
+        return Promise.resolve('');
+      }
+    };
+    return asked;
+  };
+
+  it('띄운 웹 화면에 상태를 물어(웹앱의 버전, 서비스 워커, 위젯에 넘기기) 보관 파일의 web 칸에 적는다', async () => {
+    const asked = withProbe(probeText('0.9.9', false, true));
+    const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
+    await run(host, cfg, now);
+    expect(asked.find((js) => js.includes('__calfifApp'))).toBe('JSON.stringify({ app: String(window.__calfifApp || ""), sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), bridge: typeof window.__calfifPending === "string" })');
+    expect(cacheOf(host).web).toEqual({ at: NOW, app: '0.9.9', sw: false, bridge: true });
+  });
+
+  it('답이 없거나 모양이 다르면 적지 않고, 달력은 그대로 뜨고 끝난다', async () => {
+    for (const answer of ['', 'not json', 7, undefined, JSON.stringify({ app: 1, sw: false, bridge: true }), () => Promise.reject(new Error('읽을 수 없다')), () => { throw new Error('부를 수 없다'); }]) {
+      withProbe(answer);
+      const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
+      await expect(run(host, cfg, now)).resolves.toBeUndefined();
+      expect([host.state.files.has(CACHE), host.state.alerts.length]).toEqual([false, 0]);
+    }
+  });
+
+  it('Scriptable의 메뉴에 그 상태를 한 줄로 적는다. 열어 본 적이 없으면 적지 않는다', async () => {
+    const at = new Date(2026, 10, 17, 9, 41).getTime();
+    const seen = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }], files: { [CACHE]: JSON.stringify({ web: { at, app: '0.9.9', sw: false, bridge: true } }) } });
+    await run(seen, cfg, now);
+    expect(seen.state.alerts[0].message).toContain('위젯에서 연 달력(11월 17일 09:41 확인): 웹앱 0.9.9, 서비스 워커 없음, 위젯에 넘기기 켜짐');
+    const never = make({ runsInApp: true, keychain: loggedIn, alerts: [{ button: -1 }] });
+    await run(never, cfg, now);
+    expect(never.state.alerts[0].message).not.toContain('위젯에서 연 달력');
   });
 });
