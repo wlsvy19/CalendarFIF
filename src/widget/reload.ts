@@ -10,11 +10,16 @@
  * - setWidget: 앱 안에서 Script.setWidget을 부른다(달력은 그대로 떠 있다).
  * - ping: 이 스크립트를 주소로 한 번 더 돌려 바로 끝낸다(달력은 그대로 떠 있다). 앱 안에서 스크립트 하나가 끝나는 일을 만든다.
  * - complete: Script.complete()를 부른다(달력은 그대로 떠 있다).
- * - finish: 달력을 띄운 채 스크립트를 끝낸다. 한 번 열어 한 번만 된다(끝난 뒤에는 그 달력을 지켜보는 것이 없다).
+ * - finish: 저장하자마자, 달력을 띄운 채 스크립트를 끝낸다. 한 번 열어 한 번만 된다(끝난 뒤에는 그 달력을 지켜보는 것이 없다).
+ * - leave: 저장한 뒤에도 계속 지켜보다가, 달력에서 나가려는 순간(웹 화면이 초점을 잃는다: 홈으로 미는 손짓이 시작될 때)에 스크립트를 끝낸다.
+ *   한 번 열어 여러 번 고친 것이 모두 반영된다. finish로는 첫 저장만 반영돼서, 넣었다가 다시 지운 배경이 위젯에 남았다(2026-11-18 사용자).
+ *   초점을 잃는 것이 앱이 뒤로 물러나기 전에 오는지, 그때 한 것을 iOS가 듣는지는 아이폰에서 해 봐야 안다. 두 번 잇달아 안 그려지면 finish로 돌아간다.
  * 앞의 셋은 메뉴를 띄워 둔 동안 시험한다(달력을 쓰는 중에 시험하다 스크립트가 멈추면 그때 고친 것이 위젯에 가지 않는다).
  */
 
-export type ReloadHow = 'setWidget' | 'ping' | 'complete' | 'finish';
+export type ReloadHow = 'setWidget' | 'ping' | 'complete' | 'finish' | 'leave';
+/** 스크립트를 끝내는 방법인가(끝낸 뒤에는 지켜보는 것이 없다). */
+export const endsRun = (how: ReloadHow): boolean => how === 'finish' || how === 'leave';
 /** 달력을 띄운 채 여러 번 쓸 수 있는 방법. 앞의 것부터 시험하고 쓴다. */
 export const REPEATABLE: readonly ReloadHow[] = ['setWidget', 'ping', 'complete'];
 /** probe: 메뉴에서 시험했다. save: 달력에서 저장했을 때 썼다. leave: 홈 화면으로 나간 뒤에 썼다(뒤로 물러난 뒤라 판정에 넣지 않는다). */
@@ -33,7 +38,7 @@ export type Verdict = 'works' | 'fails' | 'bad' | 'unknown';
 
 /** 판정을 처음부터 다시 하게 하려면 올린다(보관 파일의 기록을 버린다). */
 export const RELOAD_EPOCH = 1;
-export const MAX_TRIES = 28;
+export const MAX_TRIES = 34;
 /** 방법마다 판정에 들어가는 기록을 이만큼은 남긴다(다른 기록에 밀려 나가지 않게). */
 export const KEEP_PER_HOW = 6;
 /** 한 뒤 이 안에 시작한 위젯 그림을 그 시도의 것으로 본다(ping은 새 실행이 새 버전을 확인하고 끝난 뒤에야 그려진다). */
@@ -50,14 +55,14 @@ export const AWAY_LIMIT = 3;
 export const RETRY_AFTER_MS = 3 * 24 * 3_600_000;
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-const HOWS: readonly string[] = ['setWidget', 'ping', 'complete', 'finish'];
+const HOWS: readonly string[] = ['setWidget', 'ping', 'complete', 'finish', 'leave'];
 const WHYS: readonly string[] = ['probe', 'save', 'leave'];
 
 /** 판정에 끝내 들어가지 않을 기록인가(닫아서 무효가 됐다, 나간 뒤에 했다). 하자마자 메뉴가 닫힌 것은 판정에 들어간다. */
 const spent = (t: ReloadTry): boolean => (t.void && !t.shut) || t.why === 'leave';
 
 /**
- * 스물여덟 개까지만 남긴다. 방법마다 판정에 들어가는 마지막 기록 여섯 개는 꼭 남기고, 남는 자리는 가장 나중의 것들로 채운다.
+ * 서른네 개까지만 남긴다. 방법마다 판정에 들어가는 마지막 기록 여섯 개는 꼭 남기고, 남는 자리는 가장 나중의 것들로 채운다.
  * 옛 것부터만 버리면 판정의 근거(메뉴에서 시험한 기록)가 저장할 때마다 쌓이는 기록에 밀려 나가, 같은 시험을 되풀이하게 된다.
  */
 function trim(tries: ReloadTry[]): ReloadTry[] {
@@ -123,7 +128,7 @@ export function outcomeOf(t: ReloadTry, now: number): Outcome {
   if (t.err !== '') return 'miss';
   const settled = now - t.at >= SETTLE_MS;
   // 스크립트가 멈췄는지는 메뉴에서 시험한 것으로만 가린다(달력에서는 저장하자마자 홈 화면으로 나가는 일이 흔하다).
-  if (t.why === 'probe' && t.how !== 'finish' && !t.alive) return settled ? 'hurt' : 'open';
+  if (t.why === 'probe' && !endsRun(t.how) && !t.alive) return settled ? 'hurt' : 'open';
   if (t.got > 0) return 'hit';
   if (!settled) return 'open';
   return t.away ? 'away' : 'miss';
@@ -141,7 +146,7 @@ export function outcomeOf(t: ReloadTry, now: number): Outcome {
  * - 안 되는 것으로 가려진 지 사흘이 지나면 모르는 것으로 돌려 한 번 더 해 본다(잘못 가려진 채로 영영 남지 않게).
  */
 export function verdictOf(how: ReloadHow, tries: ReloadTry[], now: number): Verdict {
-  const need = how === 'finish' ? 1 : 2;
+  const need = endsRun(how) ? 1 : 2;
   let aways = 0;
   let misses = 0;
   let hurts = 0;
@@ -182,7 +187,7 @@ export function verdictOf(how: ReloadHow, tries: ReloadTry[], now: number): Verd
   }
   if (hurts > 0) return 'unknown';
   if (misses >= 2) return fails();
-  if (misses === 1 && hits === 0) return how === 'finish' ? 'unknown' : fails();
+  if (misses === 1 && hits === 0) return endsRun(how) ? 'unknown' : fails();
   return 'unknown';
 }
 
@@ -190,6 +195,14 @@ export function verdictOf(how: ReloadHow, tries: ReloadTry[], now: number): Verd
 export function pickReload(tries: ReloadTry[], now: number): ReloadHow | null {
   for (const how of REPEATABLE) if (verdictOf(how, tries, now) === 'works') return how;
   return verdictOf('finish', tries, now) === 'fails' ? null : 'finish';
+}
+
+/**
+ * 저장한 뒤에 스크립트를 끝내는 때를 나갈 때로 미룰 것인가(leave). 안 되는 것으로 가려지기 전에는 미룬다.
+ * 스크립트 끝내기(finish)까지 안 되는 것으로 가려졌으면 미루지 않는다(끝내는 것 자체가 듣지 않는다).
+ */
+export function waitsForLeave(tries: ReloadTry[], now: number): boolean {
+  return verdictOf('leave', tries, now) !== 'fails' && verdictOf('finish', tries, now) !== 'fails';
 }
 
 /** 메뉴에서 시험할 방법들(차례대로). 되는 것이 이미 있으면 없다. */

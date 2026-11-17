@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LOG_GLOBAL, PENDING_TTL_MS, PROBE_JS, applyPending, countPending, parsePendingMessage, parsePoll, parseProbe, pendingCount, pendingStateOf, probeLine, savedBetween, settlePending, webLogOf, webProbeOf, type PendingState } from './pending';
+import { LOG_GLOBAL, PENDING_TTL_MS, POLL_JS, PROBE_JS, applyPending, countPending, parsePendingMessage, parsePoll, parseProbe, pendingCount, pendingStateOf, probeLine, savedBetween, settlePending, webLogOf, webProbeOf, type PendingState } from './pending';
 
 const edit = (day: string, text: string, color = '', editedAt = 2000, monthId = '2026-11') => ({ monthId, day, text, color, editedAt });
 const message = (edits: unknown[], extra: Record<string, unknown> = {}): string => JSON.stringify({ v: 1, uid: 'owner-test-uid', edits, ...extra });
@@ -81,6 +81,21 @@ describe('settlePending', () => {
     const s = state([edit('15', '내가 새롭다', '', 2000)]);
     expect(settlePending('2026-11', { '15': 1999 }, s)).toBe(s);
     expect(settlePending('2026-11', {}, state([]))).toEqual(state([]));
+  });
+});
+
+describe('서버에 없는 날의 묵은 편집', () => {
+  const state = (savedAt: number): PendingState => ({ uid: 'owner-test-uid', savedAt, edits: [edit('19', '', 'F9BC0B', 1000), edit('20', '회의', '', 1000)] });
+
+  it('서버에 그날이 없으면: 방금 적은 것은 둔다(올라가는 중이다). 20초가 지난 것은 버린다(올라간 뒤에 지워진 것이다)', () => {
+    const times = { '20': 500 };
+    const fresh = state(100_000);
+    expect(settlePending('2026-11', times, fresh, 100_000 + 20_000)).toBe(fresh);
+    expect(settlePending('2026-11', times, fresh, 100_000 + 20_001).edits.map((e) => e.day)).toEqual(['20']);
+    // 서버에 그날이 있으면 전과 같다: 서버가 따라잡았으면 빼고, 아니면 둔다(묵었어도).
+    expect(settlePending('2026-11', { '19': 999, '20': 1000 }, fresh, 100_000 + 3_000_000).edits.map((e) => e.day)).toEqual(['19']);
+    // 다른 달의 편집은 건드리지 않는다.
+    expect(settlePending('2026-12', {}, fresh, 100_000 + 3_000_000)).toBe(fresh);
   });
 });
 
@@ -167,10 +182,38 @@ describe('웹 화면의 상태', () => {
 
 describe('0.3초마다 묻는 식의 답', () => {
   it('올리지 못한 편집의 글과 화면이 보이는지를 읽는다', () => {
-    expect(parsePoll(JSON.stringify(['{"v":1}', 'visible']))).toEqual({ pending: '{"v":1}', hidden: false, visible: true });
-    expect(parsePoll(JSON.stringify(['', 'hidden']))).toEqual({ pending: '', hidden: true, visible: false });
-    expect(parsePoll(JSON.stringify(['', 'prerender']))).toEqual({ pending: '', hidden: false, visible: false });
-    expect(parsePoll(JSON.stringify(['', '']))).toEqual({ pending: '', hidden: false, visible: false });
+    expect(parsePoll(JSON.stringify(['{"v":1}', 'visible']))).toEqual({ pending: '{"v":1}', hidden: false, visible: true, away: false });
+    expect(parsePoll(JSON.stringify(['', 'hidden']))).toEqual({ pending: '', hidden: true, visible: false, away: false });
+    expect(parsePoll(JSON.stringify(['', 'prerender']))).toEqual({ pending: '', hidden: false, visible: false, away: false });
+    expect(parsePoll(JSON.stringify(['', '']))).toEqual({ pending: '', hidden: false, visible: false, away: false });
+    // 셋째 글: 화면에서 나가려는 중인가(창이 초점을 잃었다). "1"일 때만 그렇다.
+    expect(parsePoll(JSON.stringify(['', 'visible', '1']))?.away).toBe(true);
+    expect(parsePoll(JSON.stringify(['', 'visible', '0']))?.away).toBe(false);
+  });
+
+  it('묻는 식은 웹 화면에서 돌면 처음에 듣는 것을 걸고, 초점을 잃거나 숨겨지면 나가는 중이라고 답한다', () => {
+    const listeners: Record<string, () => void> = {};
+    const doc = { visibilityState: 'visible', addEventListener: (type: string, fn: () => void) => { listeners[`document.${type}`] = fn; } };
+    const win: Record<string, unknown> = { __calfifPending: 'P', addEventListener: (type: string, fn: () => void) => { listeners[type] = fn; } };
+    const ask = (): string[] => JSON.parse(new Function('window', 'document', `return ${POLL_JS};`)(win, doc) as string) as string[];
+    expect(ask()).toEqual(['P', 'visible', '0']);
+    expect(Object.keys(listeners).sort()).toEqual(['blur', 'document.visibilitychange', 'focus', 'pagehide', 'pageshow']);
+    listeners.blur();
+    expect(ask()).toEqual(['P', 'visible', '1']);
+    listeners.focus();
+    expect(ask()[2]).toBe('0');
+    doc.visibilityState = 'hidden';
+    listeners['document.visibilitychange']();
+    expect(ask()).toEqual(['P', 'hidden', '1']);
+    doc.visibilityState = 'visible';
+    listeners['document.visibilitychange']();
+    expect(ask()[2]).toBe('0');
+    listeners.pagehide();
+    expect(ask()[2]).toBe('1');
+    // 듣는 것은 한 번만 건다.
+    const before = { ...listeners };
+    ask();
+    expect(listeners).toEqual(before);
   });
 
   it('모양이 다르면 null', () => {

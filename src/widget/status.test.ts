@@ -76,12 +76,12 @@ describe('statusText', () => {
       t('ping', 'save', at(10, 4, 58)),
     ];
     expect(reloadLines(tries, NOW)).toEqual([
-      '바로 그리기: setWidget 안 됨 · ping 됨 · complete 시험 전 · finish 시험 전',
+      '바로 그리기: setWidget 안 됨 · ping 됨 · complete 시험 전 · finish 시험 전 · leave 시험 전',
       '시도: 10:00:04 ping(시험) 0.9초 뒤 그림 · 10:00:08 complete(시험) 바로 닫힘 · 10:02:00 ping(저장) 나가서 지켜보지 못함 · 10:03:00 ping(나간 뒤) 닫아서 무효 · 10:04:58 ping(저장) 지켜보는 중',
     ]);
     expect(reloadLines(tries.slice(0, 2), NOW)[1]).toBe('시도: 09:00:00 finish(저장) 안 그려짐 · 10:00:00 setWidget(시험) 안 그려짐');
     expect(reloadLines([t('ping', 'probe', at(10, 0, 0), { alive: false }), t('setWidget', 'probe', at(10, 1, 0), { err: 'x'.repeat(60) })], NOW)[1]).toBe(`시도: 10:00:00 ping(시험) 스크립트가 멈춤 · 10:01:00 setWidget(시험) 못 함(${'x'.repeat(40)})`);
-    expect(statusText({ ...nothing, reload: tries }).split('\n')[2]).toBe('바로 그리기: setWidget 안 됨 · ping 됨 · complete 시험 전 · finish 시험 전');
+    expect(statusText({ ...nothing, reload: tries }).split('\n')[2]).toBe('바로 그리기: setWidget 안 됨 · ping 됨 · complete 시험 전 · finish 시험 전 · leave 시험 전');
   });
 
   it('위젯을 그린 기록만 없으면 그렇다고 적는다. 2분은 분으로, 버전을 모르면 모른다고 적는다', () => {

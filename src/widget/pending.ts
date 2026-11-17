@@ -12,17 +12,19 @@ export const PENDING_GLOBAL = '__calfifPending';
 /** 0.9.13~0.9.15의 웹 화면이 Firebase SDK의 경고와 오류를 적어 두던 이름. 0.9.16부터의 웹 화면은 적지 않는다(SDK의 기록을 끈다: src/web/widgetLog.ts). */
 export const LOG_GLOBAL = '__calfifLog';
 /**
- * 스크립트가 웹 화면에서 0.3초마다 돌리는 식. 글 두 개의 배열을 JSON으로 준다: 웹앱이 적어 둔 올리지 못한 편집(없으면 빈 글)과
- * 화면이 보이는지(document.visibilityState: 앱이 뒤로 가면 hidden).
+ * 스크립트가 웹 화면에서 0.3초마다 돌리는 식. 글 세 개의 배열을 JSON으로 준다: 웹앱이 적어 둔 올리지 못한 편집(없으면 빈 글),
+ * 화면이 보이는지(document.visibilityState: 앱이 뒤로 가면 hidden), 화면에서 나가려는 중인지("1"이면 나가는 중).
+ * 나가려는 중: 창이 초점을 잃었거나(blur) 쪽이 숨겨졌다(pagehide, hidden). 홈으로 미는 손짓이 시작되면 앱이 뒤로 물러나기 전에
+ * 먼저 초점을 잃는다고 보고 듣는다(처음 돌 때 듣는 것을 걸어 둔다). 다시 초점을 얻거나 보이면 되돌린다.
  */
-export const POLL_JS = `JSON.stringify([String(window.${PENDING_GLOBAL} || ""), String(document.visibilityState || "")])`;
+export const POLL_JS = `(function(){var w=window;if(!w.__calfifWatch){var s=w.__calfifWatch={away:0};var off=function(){s.away=1;};var on=function(){s.away=0;};w.addEventListener("blur",off);w.addEventListener("pagehide",off);w.addEventListener("focus",on);w.addEventListener("pageshow",on);document.addEventListener("visibilitychange",function(){if(document.visibilityState==="hidden")off();else on();});}return JSON.stringify([String(w.${PENDING_GLOBAL}||""),String(document.visibilityState||""),w.__calfifWatch.away?"1":"0"]);})()`;
 
 /** POLL_JS의 답을 읽는다. 모양이 다르면 null. */
-export function parsePoll(text: string): { pending: string; hidden: boolean; visible: boolean } | null {
+export function parsePoll(text: string): { pending: string; hidden: boolean; visible: boolean; away: boolean } | null {
   try {
     const v: unknown = JSON.parse(text);
     if (!Array.isArray(v) || typeof v[0] !== 'string' || typeof v[1] !== 'string') return null;
-    return { pending: v[0], hidden: v[1] === 'hidden', visible: v[1] === 'visible' };
+    return { pending: v[0], hidden: v[1] === 'hidden', visible: v[1] === 'visible', away: v[2] === '1' };
   } catch {
     return null;
   }
@@ -38,6 +40,12 @@ export type PendingState = { uid: string; savedAt: number; edits: PendingDay[] }
  * 짧게 둔다: 서버의 달 문서에는 지운 날의 흔적이 없어서, 올라간 뒤 다른 기기가 지운 날을 위젯이 가려내지 못한다(그날이 이 시간까지 남는다).
  */
 export const PENDING_TTL_MS = 3_600_000;
+/**
+ * 서버의 달에 그날이 없는데 적어 둔 지 이만큼 지난 편집은 버린다. 저장은 몇 초 안에 서버에 닿는다: 이만큼 지나도 서버에 그날이 없으면
+ * 올라간 뒤에 지워진 것이다(지운 날은 서버에 흔적이 없다). 버리지 않으면 지운 배경이 위젯에 한 시간 동안 다시 얹힌다(2026-11-18 사용자의 아이폰:
+ * 배경을 넣어 저장하면서 스크립트가 끝났고, 이어서 그 배경을 지운 것은 스크립트가 보지 못했다).
+ */
+export const ABSENT_DAY_TTL_MS = 20_000;
 const MAX_EDITS = 200;
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -112,8 +120,15 @@ export function pendingStateOf(v: unknown): PendingState | null {
  * 서버에서 달을 읽을 때마다 이렇게 지워 둔다: 한 번 올라간 편집이 남아 있으면, 그 뒤 다른 기기가 그날을 지웠을 때
  * (서버에 흔적이 없다) 아직 올라가지 않은 것으로 보여 다시 얹힌다.
  */
-export function settlePending(monthId: string, times: Record<string, number>, state: PendingState): PendingState {
-  const edits = state.edits.filter((e) => e.monthId !== monthId || (times[e.day] ?? 0) < e.editedAt);
+export function settlePending(monthId: string, times: Record<string, number>, state: PendingState, nowMs = 0): PendingState {
+  const stale = nowMs - state.savedAt > ABSENT_DAY_TTL_MS;
+  const edits = state.edits.filter((e) => {
+    if (e.monthId !== monthId) return true;
+    const at = times[e.day];
+    // 서버에 그날이 없다: 방금 적은 것이면 아직 올라가는 중이고, 묵은 것이면 올라간 뒤에 지워진 것이다.
+    if (at === undefined) return !stale;
+    return at < e.editedAt;
+  });
   return edits.length === state.edits.length ? state : { ...state, edits };
 }
 

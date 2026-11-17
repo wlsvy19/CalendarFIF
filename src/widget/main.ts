@@ -9,7 +9,7 @@ import type { Host, ListWidgetLike } from './host';
 import { POLL_JS, PROBE_JS, applyPending, countPending, parsePendingMessage, parsePoll, parseProbe, pendingCount, pendingStateOf, savedBetween, settlePending, webProbeOf, type PendingDay, type PendingState, type WebProbe } from './pending';
 import { MAX_DRAWS, bridgeOf, drawsOf, leaveOf, statusText, type BridgeNote, type DrawNote, type LeaveNote } from './status';
 import { withEventLines } from './eventLines';
-import { ALIVE_MS, CREDIT_MS, SETTLE_MS, SHUT_MS, creditDraw, pickReload, reloadCell, toProbe, triesOf, type ReloadHow, type ReloadTry, type ReloadWhy } from './reload';
+import { ALIVE_MS, CREDIT_MS, SETTLE_MS, SHUT_MS, creditDraw, endsRun, pickReload, reloadCell, toProbe, triesOf, waitsForLeave, type ReloadHow, type ReloadTry, type ReloadWhy } from './reload';
 import { makeWidget } from './render';
 import { renderTree } from './renderTree';
 import { buildScene, messageScene, type MonthData, type Scene } from './scene';
@@ -214,14 +214,14 @@ function reloadLog(host: Host, now: () => Date): ReloadLog {
     }
   };
   /** 아직 그림이 적힐 수 있는 시도인가. */
-  const fresh = (t: ReloadTry, at: number): boolean => t.how !== 'finish' && t.got === 0 && !t.void && t.err === '' && at - t.at < CREDIT_MS;
+  const fresh = (t: ReloadTry, at: number): boolean => !endsRun(t.how) && t.got === 0 && !t.void && t.err === '' && at - t.at < CREDIT_MS;
   return {
     tries: read,
     fire(how, why) {
       try {
         const tries = read();
         let at = now().getTime();
-        const busy = how !== 'finish' && tries.some((t) => mine.includes(t.at) && t.got === 0 && !t.void && t.err === '' && at - t.at < CREDIT_MS);
+        const busy = !endsRun(how) && tries.some((t) => mine.includes(t.at) && t.got === 0 && !t.void && t.err === '' && at - t.at < CREDIT_MS);
         if (busy) {
           doReload(host, how);
           return;
@@ -229,8 +229,8 @@ function reloadLog(host: Host, now: () => Date): ReloadLog {
         while (tries.some((t) => t.at === at)) at += 1;
         // 하기 전에 적는다: 하다가 스크립트가 멈춰도 했다는 것은 남는다.
         mine.push(at);
-        updateCache(host, { reload: reloadCell([...tries, { how, why, at, got: 0, alive: how === 'finish', void: why === 'leave', away: false, shut: false, err: '' }]) });
-        const err = how === 'finish' ? '' : doReload(host, how);
+        updateCache(host, { reload: reloadCell([...tries, { how, why, at, got: 0, alive: endsRun(how), void: why === 'leave', away: false, shut: false, err: '' }]) });
+        const err = endsRun(how) ? '' : doReload(host, how);
         if (err !== '') amend((t) => (t.at === at ? { ...t, err } : null));
       } catch {
         // 그대로 둔다.
@@ -364,6 +364,8 @@ function closedPageUrl(appUrl: string): string {
 
 /** 띄운 웹 화면에서 아직 올리지 못한 편집을 읽는 간격과, 한 번 읽는 데 기다리는 시간. */
 const PENDING_POLL_MS = 300;
+/** 저장한 것이 있어 달력에서 나가는 순간을 기다리는 동안의 읽는 간격. 나가려는 것을 앱이 뒤로 물러나기 전에 알아채야 한다. */
+const LEAVING_POLL_MS = 100;
 const PENDING_READ_WAIT_MS = 1500;
 /** 웹 화면의 상태(PROBE_JS)는 이만큼 읽을 때마다 한 번 묻는다(3초쯤). */
 const PROBE_EVERY = 10;
@@ -436,10 +438,11 @@ function keepActive(host: Host, now: () => Date): (quiet?: boolean) => void {
 /**
  * 달력을 지켜보는 쪽이 알려 주는 것들.
  * changed: 웹 화면에서 저장이 있었다(pending.ts의 savedBetween. 처음 읽은 것과 서버에 올라가기만 한 것은 알리지 않는다). visible: 그때 화면이 보이는가.
- * left: 보이던 화면이 가려졌다(앱이 뒤로 갔다). 다시 보였다가 가려지면 또 부른다. tick: 읽을 때마다.
+ * left: 보이던 화면이 가려졌다(앱이 뒤로 갔다). 다시 보였다가 가려지면 또 부른다.
+ * tick: 읽을 때마다. away: 화면에서 나가려는 중이다(창이 초점을 잃었다). pace: 다음에 읽기까지 기다릴 시간(ms).
  * check: 3초쯤마다 묻는다. true를 주면 더 지켜보지 않는다(위젯을 다시 눌러 새 달력이 떴다).
  */
-type WatchHooks = { changed(visible: boolean): void; left(): void; tick(visible: boolean): void; check(): boolean };
+type WatchHooks = { changed(visible: boolean): void; left(): void; tick(visible: boolean, away: boolean): void; check(): boolean; pace(): number };
 
 /** 돌려주는 함수의 fast: 마지막 읽기를 건너뛰고 바로 멈춘다. quiet: 멈추면서 보관 파일에 적지 않는다(새 달력이 적는 칸을 덮어쓰지 않게). */
 function watchPending(host: Host, view: WebViewLike, now: () => Date, hooks: WatchHooks): (fast?: boolean, quiet?: boolean) => Promise<void> {
@@ -513,7 +516,7 @@ function watchPending(host: Host, view: WebViewLike, now: () => Date, hooks: Wat
         seenVisible = true;
         leftTold = false;
       }
-      hooks.tick(poll.visible);
+      hooks.tick(poll.visible, poll.away);
       // 저장했다: 올리지 못한 편집은 방금 위에서 보관 파일에 적었다.
       if (changed) hooks.changed(poll.visible);
       // 보이던 화면이 가려졌다: 사용자가 홈 화면으로 나갔다.
@@ -530,7 +533,7 @@ function watchPending(host: Host, view: WebViewLike, now: () => Date, hooks: Wat
     void read().then(() => {
       if (stopped) return;
       try {
-        timer = host.Timer.schedule(PENDING_POLL_MS, false, loop);
+        timer = host.Timer.schedule(hooks.pace(), false, loop);
       } catch {
         // 타이머가 없으면 닫힐 때 한 번만 더 읽는다.
       }
@@ -584,7 +587,8 @@ function skipLateUpdateCheck(host: Host): void {
  * Scriptable 안의 웹 화면(WebView)에 달력을 띄운다. 닫을 때까지 기다린다. 띄웠으면 빈 글, 띄우지 못하면 그 까닭을 준다.
  * 달력에서 저장하면 그 순간 위젯을 새로 그리게 한다(reload.ts): Scriptable이 화면 앞에 있을 때 한 것만 iOS가 듣는다
  * (2026-11-17 사용자의 아이폰: 달력을 닫은 그 초에는 위젯이 그려졌고, 홈 화면으로 나간 뒤에 스크립트를 끝낸 0.9.12에서는 그려지지 않았다).
- * 되는 것으로 가려진 방법이 있으면 그것을 하고 달력을 계속 지켜본다. 없으면 달력을 띄운 채 스크립트를 끝낸다(그 달력은 그대로 남는다).
+ * 되는 것으로 가려진 방법이 있으면 그것을 하고 달력을 계속 지켜본다. 없으면 달력을 띄운 채 스크립트를 끝낸다(그 달력은 그대로 남는다):
+ * 저장한 뒤에도 지켜보다가 달력에서 나가려는 순간에 끝내고(leave), 그것이 안 되는 것으로 가려졌으면 저장하자마자 끝낸다(finish).
  * 닫지 않고 홈 화면으로 나가도 스크립트는 끝내지 않는다(앱 전환으로 돌아와 고쳐도 지켜보게). 위젯을 다시 눌러 새 달력이 뜨면 앞의 것은 더 지켜보지 않는다.
  * 불러오기가 끝나기를 기다리지 않고 바로 띄운다: 기다리는 동안 Scriptable의 화면이 보이지 않게, 그리고 느린 연결에서 멈춰 있지 않게.
  */
@@ -609,12 +613,25 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
     updateCache(host, { session });
     const log = reloadLog(host, now);
     let unsent = false; // 저장했는데 아직 위젯을 새로 그리게 하지 않았다
+    // 저장한 것이 있고, 달력에서 나가는 순간에 스크립트를 끝내려고 기다리는 중이다(reload.ts의 leave).
+    // 저장하자마자 끝내면 그 뒤에 이어서 고친 것을 보지 못한다(넣었다가 다시 지운 배경이 위젯에 남았다).
+    let waiting = false;
     const request = (why: 'save' | 'leave'): void => {
       unsent = false;
-      const how = pickReload(log.tries(), now().getTime());
+      const tries = log.tries();
+      const at = now().getTime();
+      const how = pickReload(tries, at);
       if (!how) return;
-      log.fire(how, why);
-      if (how === 'finish') quit('saved');
+      if (how !== 'finish') {
+        log.fire(how, why);
+        return;
+      }
+      if (why === 'save' && waitsForLeave(tries, at)) {
+        waiting = true;
+        return;
+      }
+      log.fire('finish', why);
+      quit('saved');
     };
     // 닫힌 뒤의 마지막 읽기에서는 아무것도 하지 않는다: 닫히면 스크립트가 끝나고 그것이 위젯을 그리게 한다.
     // (닫힌 웹 화면은 가려졌다고 답할 수 있다. 그것을 홈 화면으로 나간 것으로 적으면 끝나면서 그려진 것이 방금 한 시도의 것으로 적힌다.)
@@ -631,9 +648,17 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
         // 편집 화면을 연 채 나가면 웹앱이 그때 저장한다. 뒤로 물러난 뒤라 듣지 않을 수 있지만 청해 둔다.
         if (unsent) request('leave');
       },
-      tick: (visible) => {
-        if (!closed) log.tick(visible);
+      tick: (visible, away) => {
+        if (closed) return;
+        log.tick(visible);
+        // 저장한 것이 있는데 달력에서 나가려 한다(초점을 잃었다. 그것을 알아채지 못했으면 가려졌을 때): 지금 끝낸다.
+        if (waiting && (away || !visible)) {
+          waiting = false;
+          log.fire('leave', 'save');
+          quit('saved');
+        }
       },
+      pace: () => (waiting ? LEAVING_POLL_MS : PENDING_POLL_MS),
       check: () => {
         if (closed) return false;
         const other = cacheObject(host)?.session;
@@ -771,7 +796,7 @@ function withPending(host: Host, month: MonthData, times: Record<string, number>
     let state = pendingStateOf(cacheObject(host)?.pending);
     if (!state) return month;
     if (fromServer) {
-      const settled = settlePending(month.monthId, times, state);
+      const settled = settlePending(month.monthId, times, state, now.getTime());
       if (settled !== state) updateCache(host, { pending: settled });
       state = settled;
     }

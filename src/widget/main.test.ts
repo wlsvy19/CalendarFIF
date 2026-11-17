@@ -3,6 +3,7 @@ import { setOfficialHolidays } from '../core/holidays';
 import type { Config } from './api';
 import { drawnTexts, makeFakeHost, nativeTexts, widgetRecord, type FakeAnswer, type FakeNode, type FakeHost, type FakeOptions, type FakeRequest, type FakeWidgetRecord } from './fakeHost';
 import { alarmReport, readCache, run } from './main';
+import { POLL_JS } from './pending';
 import { PALETTES } from './theme';
 
 const cfg: Config = { projectId: 'demo-calfif', apiKey: 'demo-key', appUrl: 'https://example.test/' };
@@ -1459,7 +1460,7 @@ describe('위젯에서 연 달력이 아직 올리지 못한 편집', () => {
     const asked = withPendingView([pendingText([edit('16', 'AI 생산성')])]);
     const host = openHost({ [CACHE]: JSON.stringify({ monthId: '2026-11', days: { '13': { text: '리뷰', color: '' } }, savedAt: 1 }) });
     await run(host, cfg, now);
-    expect(asked[0]).toEqual(['JSON.stringify([String(window.__calfifPending || ""), String(document.visibilityState || "")])', false]);
+    expect(asked[0]).toEqual([POLL_JS, false]);
     expect(cacheOf(host)).toEqual({
       monthId: '2026-11', days: { '13': { text: '리뷰', color: '' } }, savedAt: 1, activeAt: NOW, session: NOW,
       pending: { uid: 'owner-test-uid', savedAt: NOW, edits: [edit('16', 'AI 생산성')] },
