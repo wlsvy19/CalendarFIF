@@ -1310,7 +1310,44 @@ describe('위젯을 눌렀을 때 여는 곳(매개변수 inapp)', () => {
     const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
     expect('WebView' in host).toBe(false);
     await run(host, { ...cfg, version: '0.9.1 (2026-11-16)', handedOver: true, baseVersion: '0.9.0 (2026-11-16)' }, now);
-    expect([log.loaded, log.presented, host.state.requests.length]).toEqual([['https://example.test/?via=widget'], [true], 0]);
+    // 넘겨받은 실행은 달력을 띄워 둔 동안 새 위젯 코드가 있는지 한 번 묻는다(아래의 시험). 달이나 알림은 읽지 않는다.
+    expect([log.loaded, log.presented, host.state.requests.map((r) => r.url.replace(/\?.*$/, ''))]).toEqual([['https://example.test/?via=widget'], [true], ['https://example.test/widget/version.json']]);
+  });
+
+  it('달력을 띄워 둔 동안(닫기 전에) 새 위젯 코드가 있는지 확인해 받아 둔다. 버전을 모르거나 주소가 https가 아니면 묻지 않는다', async () => {
+    const NEWER = '0.9.9 (2026-11-20)';
+    const code = `module.exports = { version: ${JSON.stringify(NEWER)}, run: async () => {} };\n// CalendarFIF widget code end\n`;
+    const handler = (req: FakeRequest): FakeAnswer => {
+      if (req.url.includes('/widget/version.json')) return { body: { version: NEWER, chars: code.length } };
+      if (req.url.includes('/widget/calendarfif-widget-lib.js')) return { body: code };
+      throw new Error(`모르는 주소: ${req.url}`);
+    };
+    let close!: () => void;
+    const open = () => {
+      (globalThis as Record<string, unknown>).WebView = class {
+        async loadURL(): Promise<void> {}
+        present(): Promise<void> {
+          return new Promise<void>((resolve) => { close = resolve; });
+        }
+      };
+    };
+    open();
+    const host = makeFakeHost({ handler, runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
+    const done = run(host, { ...cfg, version: '0.9.6 (2026-11-17)', handedOver: true, baseVersion: '0.9.0 (2026-11-16)' }, now);
+    await vi.waitFor(() => expect(host.state.files.get('/docs/calendarfif-widget-lib.js')).toBe(code));
+    expect(JSON.parse(host.state.files.get('/docs/calendarfif-update.json')!)).toMatchObject({ version: NEWER, note: '' });
+    close();
+    await done;
+
+    for (const bad of [{ ...cfg, handedOver: true }, { ...cfg, appUrl: 'http://example.test/', version: '0.9.6 (2026-11-17)', handedOver: true }]) {
+      open();
+      const quiet = makeFakeHost({ handler, runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
+      const running = run(quiet, bad, now);
+      await new Promise((r) => setTimeout(r, 20));
+      close();
+      await running;
+      expect(quiet.state.requests).toEqual([]);
+    }
   });
 
   it('예약만 하러 온 주소(schedule=1)와 같이 오면 달력을 연다. 웹앱의 단추는 schedule=1만 보낸다', async () => {

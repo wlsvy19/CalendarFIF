@@ -13,7 +13,7 @@ import { buildScene, messageScene, type MonthData, type Scene } from './scene';
 import { widgetSize, type Family, type Size } from './sizes';
 import type { Theme } from './theme';
 import { buildTree, messageTree, type Tree } from './tree';
-import { runWithUpdate, updateLine } from './update';
+import { checkForUpdate, runWithUpdate, updateLine, versionKey } from './update';
 
 const REFRESH_KEY = 'calendarfif.refreshToken';
 const UID_KEY = 'calendarfif.uid';
@@ -219,7 +219,11 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
         // 불러오지 못하면 빈 화면이 남는다. 닫으면 끝난다.
       });
     try {
-      await view.present(true);
+      const shown = view.present(true);
+      // 달력을 띄워 둔 동안 새 위젯 코드가 있는지 확인해 받아 둔다(던지지 않는다). 달력을 닫지 않고 홈 화면으로 나가는 일이 흔해서,
+      // 닫힌 뒤의 확인(update.ts의 runWithUpdate)에만 맡기면 새 코드는 위젯이 세 시간에 한 번 확인할 때에야 온다.
+      if (versionKey(cfg.version) && /^https:\/\//i.test(cfg.appUrl ?? '')) void checkForUpdate(host, cfg, now());
+      await shown;
     } finally {
       closed = true;
       await stopWatching();
