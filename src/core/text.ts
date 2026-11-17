@@ -1,4 +1,4 @@
-const DONE_MARK = '[+]';
+export const DONE_MARK = '[+]';
 
 export function normalizeText(raw: string): string {
   const lines = raw.replace(/\r\n?/g, '\n').split('\n').map((line) => line.replace(/\s+$/, ''));

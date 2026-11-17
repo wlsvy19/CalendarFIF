@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import type { DayValue, PendingEdit } from '../core/types';
 import { PENDING_GLOBAL as WIDGET_GLOBAL, parsePendingMessage, pendingCount, savedBetween } from '../widget/pending';
-import { PENDING_GLOBAL, pendingForWidget, pendingTeller } from './widgetBridge';
+import { PENDING_GLOBAL, pendingForWidget, pendingTeller, widgetHold } from './widgetBridge';
 
 const day = (text: string, color = ''): DayValue => ({ text, color });
 const edit = (monthId: string, d: string, next: DayValue, editedAt: number, extra: Partial<PendingEdit> = {}): PendingEdit => ({ monthId, day: d, base: day(''), next, editedAt, ...extra });
@@ -38,7 +38,8 @@ it('올릴 것이 없으면 빈 목록이고, 같은 것은 늘 같은 글이다
 });
 
 it('올리지 못한 편집의 목록이 달라질 때마다 n이 는다(저장 +1, 올라감 +1): 스크립트가 읽는 사이에 저장하고 올라가도 저장이 있었음을 안다', () => {
-  const tell = pendingTeller('owner-test-uid');
+  const teller = pendingTeller('owner-test-uid');
+  const tell = teller.text;
   const shown = () => day('회의');
   const one = [edit('2026-11', '16', day('회의'), 100)];
   const empty = tell([], shown);
@@ -61,8 +62,13 @@ it('올리지 못한 편집의 목록이 달라질 때마다 n이 는다(저장 
   // 위젯 쪽의 판정과 맞물린다: 저장은 저장으로, 올라간 것과 값만 달라진 것은 저장이 아닌 것으로 본다.
   const seen = (text: string) => ({ n: pendingCount(text), edits: parsePendingMessage(text)!.edits });
   expect([savedBetween(seen(empty), seen(saved)), savedBetween(seen(saved), seen(sent)), savedBetween(seen(empty), seen(sent)), savedBetween(seen(again), seen(merged))]).toEqual([true, false, true, false]);
+  // 알림이나 카운트다운을 저장해 서버에 올라갔다(bump): 목록은 그대로이고 n만 하나 는다. 위젯 쪽은 저장으로 본다.
+  teller.bump();
+  const alarm = tell([edit('2026-11', '16', day('회의'), 200)], () => day('회의\n다른 기기의 줄'));
+  expect([JSON.parse(alarm).n, JSON.parse(alarm).edits]).toEqual([5, JSON.parse(merged).edits]);
+  expect(savedBetween(seen(merged), seen(alarm))).toBe(true);
   // 화면마다 따로 센다.
-  expect(JSON.parse(pendingTeller('u')([], shown)).n).toBe(1);
+  expect(JSON.parse(pendingTeller('u').text([], shown)).n).toBe(1);
 });
 
 it('아직 서버에서 읽지 못한 달(valueOf가 null)은 대기열의 마지막 값을 그대로 적는다', () => {
@@ -80,4 +86,63 @@ it('아직 서버에서 읽지 못한 달(valueOf가 null)은 대기열의 마�
 it('고친 시각이 같은 편집이 둘이면 대기열의 뒤의 것이 마지막이다', () => {
   const text = pendingForWidget('owner-test-uid', [edit('2026-11', '16', day('앞'), 100), edit('2026-11', '16', day('뒤'), 100)], () => null);
   expect(parsePendingMessage(text)?.edits.map((e) => e.text)).toEqual(['뒤']);
+});
+
+/** 알리기를 미루는 것을 흉내 낸다. log: 일어난 일의 차례. fire: 미루는 시간이 다 됐다. */
+function holding() {
+  const log: string[] = [];
+  const timers: { fn: () => void; ms: number; cleared: boolean }[] = [];
+  const hold = widgetHold({
+    tell: () => { log.push(hold.held() ? '건너뜀' : '알림'); },
+    bump: () => { log.push('셈'); },
+    holdMs: 2500,
+    setTimer: (fn, ms) => { const t = { fn, ms, cleared: false }; timers.push(t); return t; },
+    clearTimer: (t) => { (t as { cleared: boolean }).cleared = true; },
+  });
+  return { hold, log, timers, fire: (i: number) => { if (!timers[i].cleared) timers[i].fn(); } };
+}
+const settle = async (): Promise<void> => { await Promise.resolve(); await Promise.resolve(); };
+
+it('알림이 서버에 올라가기를 기다리는 동안은 미루고, 올라가면 저장이 있었다고 세고 나서 알린다', async () => {
+  const { hold, log, timers } = holding();
+  let sent!: () => void;
+  expect(hold.held()).toBe(false);
+  hold.wait(new Promise<void>((resolve) => { sent = resolve; }));
+  expect([hold.held(), timers[0].ms]).toEqual([true, 2500]);
+  sent();
+  await settle();
+  // 세는 것이 알리는 것보다 먼저다: 알릴 때의 글에 늘어난 n이 들어간다.
+  expect([hold.held(), log, timers[0].cleared]).toEqual([false, ['셈', '알림'], true]);
+});
+
+it('올리지 못하면(연결 없음) 세지 않고 미루기만 푼다. 달의 편집은 알려진다', async () => {
+  const { hold, log } = holding();
+  hold.wait(Promise.reject(new Error('보내지 못한 변경이 남았다')));
+  await settle();
+  expect([hold.held(), log]).toEqual([false, ['알림']]);
+});
+
+it('2.5초가 지나도 올라가지 않으면 미루기를 그만두고 알린다. 그 뒤에 올라가면 그때 세고 알린다', async () => {
+  const { hold, log, fire } = holding();
+  let sent!: () => void;
+  hold.wait(new Promise<void>((resolve) => { sent = resolve; }));
+  fire(0);
+  expect([hold.held(), log]).toEqual([false, ['알림']]);
+  sent();
+  await settle();
+  expect(log).toEqual(['알림', '셈', '알림']);
+});
+
+it('두 번 잇달아 저장하면 둘 다 끝날 때까지 미룬다', async () => {
+  const { hold, log } = holding();
+  let first!: () => void;
+  let second!: () => void;
+  hold.wait(new Promise<void>((resolve) => { first = resolve; }));
+  hold.wait(new Promise<void>((resolve) => { second = resolve; }));
+  first();
+  await settle();
+  expect([hold.held(), log]).toEqual([true, ['셈', '건너뜀']]);
+  second();
+  await settle();
+  expect([hold.held(), log]).toEqual([false, ['셈', '건너뜀', '셈', '알림']]);
 });

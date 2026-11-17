@@ -8,6 +8,7 @@ import { pushCoversUntil } from '../push/doc';
 import type { Host, ListWidgetLike } from './host';
 import { POLL_JS, PROBE_JS, applyPending, countPending, parsePendingMessage, parsePoll, parseProbe, pendingCount, pendingStateOf, savedBetween, settlePending, webProbeOf, type PendingDay, type PendingState, type WebProbe } from './pending';
 import { MAX_DRAWS, bridgeOf, drawsOf, leaveOf, statusText, type BridgeNote, type DrawNote, type LeaveNote } from './status';
+import { withEventLines } from './eventLines';
 import { ALIVE_MS, CREDIT_MS, SETTLE_MS, SHUT_MS, creditDraw, pickReload, reloadCell, toProbe, triesOf, type ReloadHow, type ReloadTry, type ReloadWhy } from './reload';
 import { makeWidget } from './render';
 import { renderTree } from './renderTree';
@@ -1028,7 +1029,15 @@ async function load(host: Host, cfg: Config, env: Env, now: Date, alarmsDone = f
   const holidays = prepareHolidays(host, cfg, now);
   const drawMonth = async (month: MonthData, offline: boolean): Promise<View> => {
     await holidays;
-    return monthView(env, month, offline);
+    // 그날의 알림과 카운트다운을 메모 앞줄로 끼워 넣는다(eventLines.ts). 알림 문서는 바로 앞에서 읽어 보관 파일에 적어 두었다(syncAlarms).
+    // 읽지 못했으면 마지막으로 읽은 것을 쓴다. 끼워 넣지 못해도 달은 그린다.
+    let shown = month;
+    try {
+      shown = withEventLines(month, readCachedEvents(host));
+    } catch {
+      shown = month;
+    }
+    return monthView(env, shown, offline);
   };
   const fromCache = async (code: string | null): Promise<View> => {
     const cached = readCache(host, monthId);

@@ -855,6 +855,26 @@ describe('아이폰 알림 예약', () => {
     expect(host.state.setWidgets).toHaveLength(1);
   });
 
+  it('그날의 알림을 위젯의 날짜 칸에 메모 앞줄로 그린다(시각과 글). 알림 문서를 읽지 못하면 마지막으로 읽은 것을 그리고, 권한이 없으면 그리지 않는다', async () => {
+    const shown = (h: FakeHost): string[] => textsOf(lastWidget(h)).filter((t) => t.startsWith('09:30'));
+    const host = makeNative({ keychain: loggedIn }, withEvents());
+    await run(host, cfg, now);
+    expect(shown(host)).toHaveLength(1);
+    // 알림 문서가 없으면(알림을 만든 적이 없다) 아무것도 끼워 넣지 않는다.
+    const none = makeNative({ keychain: loggedIn }, withEvents(() => ({ status: 404, body: {} })));
+    await run(none, cfg, now);
+    expect(shown(none)).toEqual([]);
+    // 읽지 못했다: 앞서 읽어 보관해 둔 것으로 그린다.
+    const kept = JSON.stringify({ events: JSON.parse(host.state.files.get(CACHE)!).events });
+    const failing = makeNative({ keychain: loggedIn, files: { [CACHE]: kept } }, withEvents(() => ({ status: 503, body: {} })));
+    await run(failing, cfg, now);
+    expect(shown(failing)).toHaveLength(1);
+    // 권한이 없다: 보관해 둔 알림도 남기지 않고 그리지도 않는다.
+    const denied = makeNative({ keychain: loggedIn, files: { [CACHE]: kept } }, withEvents(() => err(403, 'PERMISSION_DENIED')));
+    await run(denied, cfg, now);
+    expect(shown(denied)).toEqual([]);
+  });
+
   // 아이폰에서 켰고 알림 서버가 1분 전에 확인한 푸시 문서. label이나 sender를 바꿔 다른 경우를 만든다.
   const pushDocOf = (label: string, senderAt: number | null) => ({ fields: {
     devices: { mapValue: { fields: { AAAAAAAAAAAAAAAAAAAA: { mapValue: { fields: { token: { stringValue: 't' }, label: { stringValue: label }, at: { integerValue: '1' } } } } } } },

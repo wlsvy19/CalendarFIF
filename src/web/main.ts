@@ -50,8 +50,8 @@ import { normalizeText } from '../core/text';
 import { EMPTY_DAY } from '../core/types';
 import { FirestoreMonthStore } from '../sync/firestoreStore';
 import { Outbox } from '../sync/outbox';
-import { PENDING_GLOBAL, pendingTeller } from './widgetBridge';
-import { keepSdkLogs } from './widgetLog';
+import { PENDING_GLOBAL, pendingTeller, widgetHold } from './widgetBridge';
+import { silenceSdkLogs } from './widgetLog';
 import { announceWidgetPage } from './widgetPages';
 import { SyncEngine } from '../sync/engine';
 
@@ -86,6 +86,8 @@ try {
 } catch {
   // 적지 못하면 메뉴에 버전이 나오지 않는다.
 }
+/** 위젯에서 연 화면에서 알림을 저장한 뒤, 서버에 올라가기를 기다리며 위젯 스크립트에 알리기를 미루는 시간. */
+const WIDGET_EVENT_HOLD_MS = 2500;
 const viaWidget = (): boolean => {
   try {
     return sessionStorage.getItem(VIA_KEY) === 'widget';
@@ -93,14 +95,10 @@ const viaWidget = (): boolean => {
     return false;
   }
 };
-// 위젯에서 연 화면: Firebase SDK의 경고와 오류를 콘솔 대신 window에 적어 둔다. Scriptable은 웹 화면의 console.error를
-// "Errors Logged" 상자로 띄우는데 내용이 나오지 않는다. 적어 둔 것은 위젯 스크립트가 읽어 Scriptable의 메뉴에 보인다(widgetLog.ts).
+// 위젯에서 연 화면: Firebase SDK가 콘솔에 아무것도 적지 않게 한다. Scriptable은 웹 화면의 콘솔에 찍힌 오류를 스크립트가 끝날 때
+// "Errors Logged" 상자로 띄운다(저장할 때마다 떴다). 콘솔을 가로막는 것은 듣지 않아서 SDK의 기록을 끈다(widgetLog.ts).
 if (viaWidget()) {
-  try {
-    keepSdkLogs(window as unknown as Record<string, unknown>);
-  } catch {
-    // 못 하면 SDK가 전처럼 콘솔에 적는다.
-  }
+  silenceSdkLogs();
   // 위젯을 다시 눌러 새 화면이 뜨면, 가려진 채 남은 앞의 화면은 스크립트가 없는 안내 쪽으로 바뀐다(widgetPages.ts).
   try {
     announceWidgetPage();
@@ -198,16 +196,35 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   // 트랜잭션은 SDK의 로컬 캐시를 거치지 않으므로, 올린 값을 다음 스냅숏이 올 때까지 화면에 남긴다.
   const offCommit = engine.onCommit((monthId, changes) => store.noteCommitted(monthId, changes));
   // 위젯에서 연 화면: 아직 올리지 못한 편집을 위젯 스크립트가 읽어 가게 적어 둔다(widgetBridge.ts). 올리고 나면 빈 목록이 된다.
-  const pendingText = pendingTeller(session.uid);
+  const widgetTeller = pendingTeller(session.uid);
+  // 알림이나 카운트다운을 저장해 서버에 올리는 중이면 그동안은 적지 않는다(widgetBridge.ts의 widgetHold).
   const tellWidget = (): void => {
+    if (eventHold.held()) return;
     try {
-      (window as unknown as Record<string, unknown>)[PENDING_GLOBAL] = pendingText(outbox.list(), (m, d) => (store.isLoaded(m) ? store.days(m)[d] ?? EMPTY_DAY : null));
+      (window as unknown as Record<string, unknown>)[PENDING_GLOBAL] = widgetTeller.text(outbox.list(), (m, d) => (store.isLoaded(m) ? store.days(m)[d] ?? EMPTY_DAY : null));
     } catch {
       // 적지 못하면 위젯은 서버의 것을 그린다.
     }
   };
+  const eventHold = widgetHold({
+    tell: () => tellWidget(),
+    bump: () => widgetTeller.bump(),
+    holdMs: WIDGET_EVENT_HOLD_MS,
+    setTimer: (fn, ms) => setTimeout(fn, ms),
+    clearTimer: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+  });
+  /**
+   * 위젯에서 연 화면에서 알림이나 카운트다운을 저장하거나 지웠다. 서버에 올라가면 위젯 스크립트에 저장이 있었다고 알린다
+   * (스크립트는 그때 위젯을 새로 그리게 하고, 위젯은 알림 문서를 서버에서 읽어 그 날짜 칸에 그린다).
+   */
+  const eventSavedForWidget = (): void => {
+    if (viaWidget()) eventHold.wait(events.flush());
+  };
   const offWidget = viaWidget() ? store.onChange(tellWidget) : () => {};
-  if (viaWidget()) tellWidget();
+  if (viaWidget()) {
+    tellWidget();
+    silenceSdkLogs(); // 화면이 뜬 뒤에 생긴 SDK의 기록 도구도 끈다
+  }
   const onStorage = (event: StorageEvent) => {
     if (event.key === null || event.key.startsWith('calfif.outbox.')) store.refresh();
   };
@@ -359,8 +376,14 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       doneTone: prefs?.doneTone ?? appearance?.doneTone,
       events: {
         view: events,
-        save: (id, rec) => events.save(id, rec),
-        remove: (id) => events.remove(id),
+        save: (id, rec) => {
+          events.save(id, rec);
+          eventSavedForWidget();
+        },
+        remove: (id) => {
+          events.remove(id);
+          eventSavedForWidget();
+        },
         flush: () => events.flush(),
         iosHint: push?.view().mode === 'on' ? 'push' : ios,
         now: () => new Date(),

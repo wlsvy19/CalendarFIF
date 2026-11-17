@@ -9,7 +9,7 @@ import type { DayValue } from '../core/types';
 
 /** 웹 화면이 window에 적어 두는 이름. src/web/widgetBridge.ts의 PENDING_GLOBAL과 같아야 한다. */
 export const PENDING_GLOBAL = '__calfifPending';
-/** 웹 화면이 Firebase SDK의 경고와 오류를 적어 두는 이름. src/web/widgetLog.ts의 LOG_GLOBAL과 같아야 한다. */
+/** 0.9.13~0.9.15의 웹 화면이 Firebase SDK의 경고와 오류를 적어 두던 이름. 0.9.16부터의 웹 화면은 적지 않는다(SDK의 기록을 끈다: src/web/widgetLog.ts). */
 export const LOG_GLOBAL = '__calfifLog';
 /**
  * 스크립트가 웹 화면에서 0.3초마다 돌리는 식. 글 두 개의 배열을 JSON으로 준다: 웹앱이 적어 둔 올리지 못한 편집(없으면 빈 글)과
