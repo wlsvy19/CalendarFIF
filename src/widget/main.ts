@@ -9,7 +9,7 @@ import type { Host, ListWidgetLike } from './host';
 import { POLL_JS, PROBE_JS, applyPending, countPending, parsePendingMessage, parsePoll, parseProbe, pendingCount, pendingStateOf, savedBetween, settlePending, webProbeOf, type PendingDay, type PendingState, type WebProbe } from './pending';
 import { MAX_DRAWS, bridgeOf, drawsOf, leaveOf, statusText, type BridgeNote, type DrawNote, type LeaveNote } from './status';
 import { withEventLines } from './eventLines';
-import { ALIVE_MS, CREDIT_MS, REOPEN_WAIT_MS, SETTLE_MS, SHUT_MS, creditDraw, endsRun, pickReload, reloadCell, toProbe, triesOf, waitsForLeave, type ReloadHow, type ReloadTry, type ReloadWhy } from './reload';
+import { ALIVE_MS, CREDIT_MS, SETTLE_MS, SHUT_MS, creditDraw, endsRun, pickReload, verdictOf, reloadCell, toProbe, triesOf, waitsForLeave, type ReloadHow, type ReloadTry, type ReloadWhy } from './reload';
 import { makeWidget } from './render';
 import { renderTree } from './renderTree';
 import { buildScene, messageScene, type MonthData, type Scene } from './scene';
@@ -242,7 +242,8 @@ function reloadLog(host: Host, now: () => Date): ReloadLog {
         // 하기 전에 적는다: 하다가 스크립트가 멈춰도 했다는 것은 남는다.
         mine.push(at);
         updateCache(host, { reload: reloadCell([...tries, { how, why, at, got: 0, alive: endsRun(how), void: why === 'leave', away: false, shut: false, err: '' }]) });
-        const err = endsRun(how) ? '' : doReload(host, how);
+        // 끝내는 방법은 부른 쪽이 스크립트를 끝낸다. reopen은 그 앞에 주소를 열어 둔다(끝난 뒤에 새 실행이 달력을 다시 띄운다).
+        const err = endsRun(how) && how !== 'reopen' ? '' : doReload(host, how);
         if (err !== '') amend((t) => (t.at === at ? { ...t, err } : null));
       } catch {
         // 그대로 둔다.
@@ -631,10 +632,7 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
     // 저장한 것이 있고, 달력에서 나가는 순간에 스크립트를 끝내려고 기다리는 중이다(reload.ts의 leave).
     // 저장하자마자 끝내면 그 뒤에 이어서 고친 것을 보지 못한다(넣었다가 다시 지운 배경이 위젯에 남았다).
     let waiting = false;
-    // reopen을 한 때(0이면 하지 않았다). Scriptable이 이 달력을 닫으면 이 스크립트가 끝난다. 닫지 않으면 조금 뒤에 스스로 끝낸다.
-    let reopenedAt = 0;
     const finishNow = (why: 'save' | 'leave'): void => {
-      reopenedAt = 0;
       log.fire('finish', why);
       quit('saved');
     };
@@ -647,15 +645,18 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
         log.fire(how, why);
         return;
       }
-      // 저장할 때마다 반영하는 길(reload.ts의 reopen): 이 스크립트를 주소로 다시 돌려 달력을 새로 띄운다.
-      // Scriptable이 이 달력을 닫으면서 이 스크립트가 화면 앞에서 끝나고(위젯이 그려진다), 새 실행이 달력을 다시 띄워 지켜본다.
-      // 화면 앞에서 저장했을 때만 한다. 주소를 열 수 없으면 전처럼 한다.
-      if (why === 'save' && reopenedAt === 0 && findOpenUrl() && reopenUrl(host) !== '') {
+      // 저장할 때마다 반영하는 길(reload.ts의 reopen): 이 스크립트를 주소로 다시 돌리게 해 두고 바로 끝낸다(finish와 같이 위젯이 그려진다).
+      // 끝난 뒤 Scriptable이 새로 돌리면서 달력을 다시 띄우고, 새 실행이 지켜본다. 화면 앞에서 저장했을 때만 한다.
+      // 주소를 열 수 없거나, 두 번 잇달아 안 그려졌거나, 끝내기까지 안 되는 것으로 가려졌으면 하지 않는다.
+      if (why === 'save' && how === 'finish' && findOpenUrl() && reopenUrl(host) !== '' && verdictOf('reopen', tries, at) !== 'fails') {
         log.fire('reopen', 'save');
-        reopenedAt = at;
+        if (log.tries().some((t) => t.at === log.lastAt() && t.how === 'reopen' && t.err !== '')) {
+          finishNow(why); // 주소를 열지 못했다: 그냥 끝낸다
+          return;
+        }
+        quit('saved');
         return;
       }
-      if (reopenedAt > 0) return; // 이미 다시 띄우는 중이다
       if (!how) return;
       if (why === 'save' && waitsForLeave(tries, at)) {
         waiting = true;
@@ -681,11 +682,6 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
       tick: (visible, away) => {
         if (closed) return;
         log.tick(visible);
-        // 다시 띄우게 했는데 이 달력이 닫히지 않았다(Scriptable이 닫지 않았다): 스스로 끝낸다. 새 달력이 그 위에 떠 있다.
-        if (reopenedAt > 0 && now().getTime() - reopenedAt >= REOPEN_WAIT_MS) {
-          finishNow('save');
-          return;
-        }
         // 저장한 것이 있는데 달력에서 나가려 한다(초점을 잃었다. 그것을 알아채지 못했으면 가려졌을 때): 지금 끝낸다.
         if (waiting && (away || !visible)) {
           waiting = false;
@@ -693,9 +689,9 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
           quit('saved');
         }
       },
-      pace: () => (waiting || reopenedAt > 0 ? LEAVING_POLL_MS : PENDING_POLL_MS),
+      pace: () => (waiting ? LEAVING_POLL_MS : PENDING_POLL_MS),
       check: () => {
-        if (closed || reopenedAt > 0) return false; // 다시 띄우는 중에는 스스로 끝낸다(위)
+        if (closed) return false;
         const other = cacheObject(host)?.session;
         if (typeof other !== 'number' || other <= session) return false;
         quit('over');
@@ -736,8 +732,7 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
         // 그대로 둔다.
       }
       stopActive(how === 'over'); // 새 달력이 떴으면 그쪽이 적는 것을 덮어쓰지 않는다
-      // 다시 띄우게 해서 닫힌 것이면 마지막 읽기를 건너뛴다(닫힌 웹 화면이 답하기를 기다리면 스크립트가 늦게 끝나 위젯이 늦게 그려진다).
-      await stopWatching(how !== 'closed' || reopenedAt > 0, how === 'over');
+      await stopWatching(how !== 'closed', how === 'over');
       log.end(false);
     }
     if (how === 'over') {

@@ -78,7 +78,7 @@ function tryResult(t: ReloadTry, now: number): string {
 /** 위젯을 바로 새로 그리게 하는 방법의 판정과 마지막 시도들(reload.ts). 해 본 적이 없으면 빈 목록. */
 export function reloadLines(tries: ReloadTry[], now: number): string[] {
   if (tries.length === 0) return [];
-  const hows: ReloadHow[] = [...REPEATABLE, 'finish', 'leave', 'nudge'];
+  const hows: ReloadHow[] = [...REPEATABLE, 'finish', 'leave', 'reopen'];
   const lines = [`바로 그리기: ${hows.map((how) => `${how} ${VERDICTS[verdictOf(how, tries, now)]}`).join(' · ')}`];
   lines.push(`시도: ${tries.slice(-SHOWN_TRIES).map((t) => `${clock(t.at, now)} ${t.how}(${WHYS[t.why]}) ${tryResult(t, now)}`).join(' · ')}`);
   return lines;
