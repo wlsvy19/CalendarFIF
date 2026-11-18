@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALIVE_MS, AWAY_LIMIT, CREDIT_MS, KEEP_PER_HOW, MAX_TRIES, RELOAD_EPOCH, REPEATABLE, RETRY_AFTER_MS, SETTLE_MS, creditDraw, outcomeOf, pickReload, reloadCell, toProbe, triesOf, verdictOf, type ReloadTry } from './reload';
+import { ALIVE_MS, AWAY_LIMIT, CREDIT_MS, KEEP_PER_HOW, LATE_MS, MAX_TRIES, RELOAD_EPOCH, REPEATABLE, RETRY_AFTER_MS, SETTLE_MS, creditDraw, outcomeOf, pickReload, reloadCell, toProbe, triesOf, verdictOf, type ReloadTry } from './reload';
 
 const NOW = new Date(2026, 10, 17, 14, 0, 0).getTime();
 const MIN = 60_000;
@@ -191,6 +191,12 @@ describe('relaunch', () => {
   it('그려진 적 없이 한 번 안 그려지면 안 되는 것이다(finish는 모르는 것으로 둔다)', () => {
     expect(verdictOf('relaunch', [t('relaunch', 5, save)], NOW)).toBe('fails');
     expect(verdictOf('finish', [t('finish', 5, save)], NOW)).toBe('unknown');
+  });
+  it('저장할 때 끝낸 시도는 LATE_MS가 지나기 전에는 안 그려진 것으로 치지 않는다(iOS가 미룬 그림을 기다린다)', () => {
+    const at = NOW - 20_000;
+    const one = { ...t('relaunch', 0, save), at };
+    expect([outcomeOf(one, NOW), outcomeOf(one, at + LATE_MS)]).toEqual(['open', 'miss']);
+    expect(outcomeOf({ ...t('setWidget', 0, save), at }, NOW)).toBe('miss');
   });
   it('한 번 그려지면 된다. 옛 이름(reopen)의 기록은 relaunch의 판정에 들지 않는다', () => {
     expect(verdictOf('relaunch', [t('relaunch', 5, { ...save, got: NOW - 5 * MIN + 100 })], NOW)).toBe('works');

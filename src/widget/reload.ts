@@ -25,6 +25,11 @@
  *   0.9.22의 이 방법은 아이폰에서 한 번도 돌지 않았다: 0.9.21이 같은 이름(reopen)으로 남긴 실패 기록 때문에 처음부터 안 되는 것으로 가려졌다
  *   (2026-11-18 13:23 사용자의 메뉴 사진: "reopen 안 됨", 시도는 모두 finish). 그래서 0.9.23부터 이 방법은 새 이름 relaunch로 적고, reopen은 옛 기록으로만 읽는다.
  * - relaunch: 위의 reopen(0.9.22의 차례)과 같은 일. 그려진 적 없이 한 번 안 그려지면 바로 finish만 한다(안 될 때 반영되지 않는 저장을 하나로 줄인다).
+ *   2026-11-18 13:47~13:49 사용자의 아이폰(0.9.23, 메뉴의 기록 16개): relaunch는 든다. 저장 아홉 번 가운데 넷이 4초 안에 그려졌다.
+ *   나머지는 앞의 그림에서 몇 초 안에 잇달아 저장한 것이고, iOS가 그 그리기를 미뤘다가 뒤에 한 번에 그렸다(11초, 12~20초, 15~30초 뒤).
+ *   같은 때의 finish도 그렇게 미뤄졌다(13:48:58 → 13:49:05). 미뤄진 그림도 그 앞에 저장한 것을 모두 보인다.
+ *   그래서 저장할 때 스크립트를 끝내는 방법(LATE_HOWS)은 LATE_MS 안에 그려지면 그 저장이 반영된 것으로 친다(creditDraw).
+ *   0.9.23은 미뤄진 것을 안 그려진 것으로 쳐서 relaunch를 안 되는 것으로 가렸다. 그 판정은 버린다(RELAUNCH_RULE).
  * - leave: 저장한 뒤에도 계속 지켜보다가, 달력에서 나가려는 순간(웹 화면이 초점을 잃는다: 홈으로 미는 손짓이 시작될 때)에 스크립트를 끝낸다.
  *   한 번 열어 여러 번 고친 것이 모두 반영된다. finish로는 첫 저장만 반영돼서, 넣었다가 다시 지운 배경이 위젯에 남았다(2026-11-18 사용자).
  *   초점을 잃는 것이 앱이 뒤로 물러나기 전에 오는지, 그때 한 것을 iOS가 듣는지는 아이폰에서 해 봐야 안다. 두 번 잇달아 안 그려지면 finish로 돌아간다.
@@ -59,6 +64,12 @@ export const KEEP_PER_HOW = 6;
 export const CREDIT_MS = 5000;
 /** 이만큼 지나도 그림이 없으면 그려지지 않은 것으로 본다(위젯은 다 그린 뒤에 적으므로 CREDIT_MS보다 길다). */
 export const SETTLE_MS = 10_000;
+/** 저장할 때 스크립트를 끝내는 방법은 iOS가 그리기를 미뤄도 이 안에 그려지면 반영된 것으로 친다(잇달아 저장하면 30초쯤까지 미뤘다). */
+export const LATE_MS = 45_000;
+const LATE_HOWS: readonly ReloadHow[] = ['finish', 'relaunch'];
+const late = (t: ReloadTry): boolean => t.why === 'save' && LATE_HOWS.includes(t.how);
+/** relaunch를 가리는 규칙의 번호. 보관 파일의 것과 다르면 relaunch의 기록을 버린다(미뤄진 그림을 치지 않던 0.9.23의 판정). */
+export const RELAUNCH_RULE = 2;
 /** 하고 나서 이만큼 뒤에도 돌고 있으면 스크립트가 멈추지 않은 것이다. */
 export const ALIVE_MS = 1200;
 /** 하고 나서 이 안에 메뉴가 닫히면 그 방법이 닫은 것일 수 있다. */
@@ -94,12 +105,14 @@ function trim(tries: ReloadTry[]): ReloadTry[] {
   return tries.filter((_, i) => keep.has(i));
 }
 
-/** 보관 파일의 reload 칸({ epoch, tries })을 읽는다(옛 것이 앞). 판 번호가 다르거나 모양이 다른 것은 버린다. */
+/** 보관 파일의 reload 칸({ epoch, relaunch, tries })을 읽는다(옛 것이 앞). 판 번호가 다르거나 모양이 다른 것은 버린다. relaunch의 규칙 번호가 다르면 relaunch의 기록만 버린다. */
 export function triesOf(v: unknown): ReloadTry[] {
   if (!isObject(v) || v.epoch !== RELOAD_EPOCH || !Array.isArray(v.tries)) return [];
+  const oldRelaunch = v.relaunch !== RELAUNCH_RULE;
   const out: ReloadTry[] = [];
   for (const t of v.tries) {
     if (!isObject(t) || typeof t.how !== 'string' || !HOWS.includes(t.how) || typeof t.why !== 'string' || !WHYS.includes(t.why)) continue;
+    if (oldRelaunch && t.how === 'relaunch') continue;
     if (typeof t.at !== 'number' || !Number.isFinite(t.at) || t.at <= 0) continue;
     out.push({
       how: t.how as ReloadHow, why: t.why as ReloadWhy, at: t.at,
@@ -111,23 +124,33 @@ export function triesOf(v: unknown): ReloadTry[] {
 }
 
 /** 보관 파일에 적을 모양. */
-export const reloadCell = (tries: ReloadTry[]): { epoch: number; tries: ReloadTry[] } => ({ epoch: RELOAD_EPOCH, tries: trim(tries) });
+export const reloadCell = (tries: ReloadTry[]): { epoch: number; relaunch: number; tries: ReloadTry[] } => ({ epoch: RELOAD_EPOCH, relaunch: RELAUNCH_RULE, tries: trim(tries) });
 
 /**
  * drawAt에 시작한 위젯 그림을 그것을 부른 시도에 적는다: 그 앞 CREDIT_MS 안에 한 것 가운데 가장 나중의 것.
- * 닫아서 무효가 된 것(void)과 하지 못한 것은 건너뛴다. 그 시도에 이미 그림이 적혀 있으면 아무 데도 적지 않는다. 적었으면 새 목록, 적을 데가 없으면 null.
+ * 닫아서 무효가 된 것(void)과 하지 못한 것은 건너뛴다. 그 시도에 이미 그림이 적혀 있으면 아무 데도 적지 않는다.
+ * 그와 따로, 저장할 때 스크립트를 끝낸 시도(late) 가운데 LATE_MS 안에 한 것으로 아직 그림이 없는 것에는 모두 이 그림을 적는다:
+ * iOS가 미뤘다가 그린 그림이고, 그 그림은 그 앞에 저장한 것을 모두 보인다. 적었으면 새 목록, 적을 데가 없으면 null.
  */
 export function creditDraw(tries: ReloadTry[], drawAt: number): ReloadTry[] | null {
+  let exact = -1;
   for (let i = tries.length - 1; i >= 0; i -= 1) {
     const t = tries[i];
     if (t.at > drawAt) continue;
-    if (drawAt - t.at > CREDIT_MS) return null;
+    if (drawAt - t.at > CREDIT_MS) break;
     if (t.void || t.err !== '') continue;
     // 이미 그림이 적힌 시도 뒤에 또 그려졌다: 같은 것이 부른 그림이다(위젯은 한 번에 두 번 잇달아 그려지기도 한다). 더 앞의 시도에 적지 않는다.
-    if (t.got > 0) return null;
-    return tries.map((x, j) => (j === i ? { ...x, got: drawAt } : x));
+    if (t.got === 0) exact = i;
+    break;
   }
-  return null;
+  let changed = false;
+  const out = tries.map((t, i) => {
+    const lateOne = late(t) && t.got === 0 && !t.void && t.err === '' && t.at <= drawAt && drawAt - t.at <= LATE_MS;
+    if (i !== exact && !lateOne) return t;
+    changed = true;
+    return { ...t, got: drawAt };
+  });
+  return changed ? out : null;
 }
 
 /**
@@ -140,7 +163,7 @@ export function outcomeOf(t: ReloadTry, now: number): Outcome {
   if (t.shut) return 'hurt';
   if (t.void) return 'open';
   if (t.err !== '') return 'miss';
-  const settled = now - t.at >= SETTLE_MS;
+  const settled = now - t.at >= (late(t) ? LATE_MS : SETTLE_MS);
   // 스크립트가 멈췄는지는 메뉴에서 시험한 것으로만 가린다(달력에서는 저장하자마자 홈 화면으로 나가는 일이 흔하다).
   if (t.why === 'probe' && !endsRun(t.how) && !t.alive) return settled ? 'hurt' : 'open';
   if (t.got > 0) return 'hit';

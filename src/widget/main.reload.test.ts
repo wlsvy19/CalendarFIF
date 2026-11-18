@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from './api';
 import { makeFakeHost, type FakeAnswer, type FakeHost, type FakeOptions, type FakeRequest } from './fakeHost';
 import { run } from './main';
-import { CREDIT_MS, SETTLE_MS, verdictOf, type ReloadTry } from './reload';
+import { CREDIT_MS, LATE_MS, RELAUNCH_RULE, SETTLE_MS, triesOf, verdictOf, type ReloadTry } from './reload';
 
 const cfg: Config = { projectId: 'demo-calfif', apiKey: 'demo-key', appUrl: 'https://example.test/' };
 const T0 = new Date(2026, 10, 17, 14, 0, 0).getTime();
@@ -119,7 +119,7 @@ describe('저장할 때마다 끝내고 달력을 다시 띄운다(relaunch)', (
     const old = [miss('reopen', 900_000), miss('reopen', 800_000)];
     for (const [tries, want] of [[old, 'relaunch'], [[...old, miss('relaunch', 600_000)], 'finish']] as const) {
       const view = withView();
-      const host = openFresh({ reload: { epoch: 1, tries } });
+      const host = openFresh({ reload: { epoch: 1, relaunch: RELAUNCH_RULE, tries } });
       const { done } = await opened(host);
       view.state = [message(2, [edit]), 'visible', '0'];
       await vi.advanceTimersByTimeAsync(300);
@@ -609,9 +609,34 @@ describe('위젯이 그릴 때', () => {
     expect(triesIn(host)).toEqual([tried('ping', 'probe', T0 - 60_000), { ...mine, got: T0 }]);
     expect((cacheOf(host).draws as { at: number }[]).map((d) => d.at)).toEqual([T0]);
 
-    const old = make({ keychain: loggedIn, files: seed({ reload: { epoch: 1, tries: [tried('finish', 'save', T0 - CREDIT_MS - 1)] } }) });
+    const old = make({ keychain: loggedIn, files: seed({ reload: { epoch: 1, tries: [tried('ping', 'save', T0 - CREDIT_MS - 1)] } }) });
     await run(old, cfg, now);
-    expect(triesIn(old)).toEqual([tried('finish', 'save', T0 - CREDIT_MS - 1)]);
+    expect(triesIn(old)).toEqual([tried('ping', 'save', T0 - CREDIT_MS - 1)]);
+  });
+
+  it('저장할 때 끝낸 시도(finish, relaunch)는 iOS가 미뤄 LATE_MS 안에 그려도 모두 그려진 것으로 적는다(2026-11-18 아이폰의 기록)', async () => {
+    const tries = [
+      tried('relaunch', 'save', T0 - LATE_MS - 1), // 너무 앞의 것
+      tried('relaunch', 'save', T0 - 30_000),
+      tried('relaunch', 'save', T0 - 22_000),
+      tried('finish', 'save', T0 - 8000),
+      tried('ping', 'save', T0 - 7000), // 끝내는 방법이 아니다
+    ];
+    const host = make({ keychain: loggedIn, files: seed({ reload: { epoch: 1, relaunch: RELAUNCH_RULE, tries } }) });
+    await run(host, cfg, now);
+    expect(triesIn(host).map((t) => t.got)).toEqual([0, T0, T0, T0, 0]);
+    expect(verdictOf('relaunch', triesIn(host), T0)).toBe('works');
+  });
+
+  it('0.9.23이 적은 relaunch의 기록(규칙 번호가 없다)은 버린다: 미뤄진 그림을 치지 않아 안 되는 것으로 가렸다', async () => {
+    const tries = [tried('relaunch', 'save', T0 - 300_000), tried('relaunch', 'save', T0 - 290_000), tried('finish', 'save', T0 - 200_000, { got: T0 - 199_800 })];
+    expect(triesOf({ epoch: 1, tries }).map((t) => t.how)).toEqual(['finish']);
+    expect(triesOf({ epoch: 1, relaunch: RELAUNCH_RULE, tries }).map((t) => t.how)).toEqual(['relaunch', 'relaunch', 'finish']);
+    // 다시 적을 때는 규칙 번호를 붙인다.
+    const host = make({ keychain: loggedIn, files: seed({ reload: { epoch: 1, tries: [...tries, tried('finish', 'save', T0 - 1000)] } }) });
+    await run(host, cfg, now);
+    expect((cacheOf(host).reload as { relaunch: number }).relaunch).toBe(RELAUNCH_RULE);
+    expect(triesIn(host).map((t) => t.how)).toEqual(['finish', 'finish']);
   });
 });
 
