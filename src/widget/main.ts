@@ -28,7 +28,7 @@ const HOLIDAY_RETRY_MS = 6 * 3_600_000; // 받지 못하면 이만큼 지나야 
 /** 위젯에 놓을 것: 기본은 기본 부품의 나무, 위젯 매개변수에 image가 있으면 그림 장면. */
 type View = { tree: Tree } | { scene: Scene };
 /** force: 매개변수로 고정한 밝기(없으면 기본 부품의 색이 화면 밝기를 스스로 따른다). pictureTheme: 그림을 그릴 밝기(그림을 그릴 때만 묻는다). */
-type Env = { family: Family; image: boolean; lunar: boolean; inapp: boolean; force: Theme | undefined; pictureTheme: () => Theme; size: Size; today: string };
+type Env = { family: Family; image: boolean; lunar: boolean; inapp: boolean; each: boolean; force: Theme | undefined; pictureTheme: () => Theme; size: Size; today: string };
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 const localDate = (d: Date): string => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -61,7 +61,7 @@ function makeEnv(host: Host, family: Family, now: Date): Env {
   const lunar = !(words.includes('nolunar') || words.includes('음력끔'));
   // 위젯을 누르면 Safari에서 달력이 열리는 것이 기본이고, 매개변수에 inapp(또는 앱안)이 있으면 Scriptable 안에서 연다.
   const inapp = words.includes('inapp') || words.includes('앱안');
-  return { family, image, lunar, inapp, force, pictureTheme, size: widgetSize(host.Device.screenSize(), family), today: localDate(now) };
+  return { family, image, lunar, inapp, each: eachSave(words), force, pictureTheme, size: widgetSize(host.Device.screenSize(), family), today: localDate(now) };
 }
 
 function monthView(env: Env, month: MonthData, offline: boolean): View {
@@ -78,7 +78,7 @@ function tapUrl(host: Host, env: Env, cfg: Config): string {
   if (!env.inapp) return cfg.appUrl;
   try {
     const name = host.Script.name ? host.Script.name() : '';
-    if (typeof name === 'string' && name !== '') return `scriptable:///run/${encodeURIComponent(name)}?open=calendar`;
+    if (typeof name === 'string' && name !== '') return `scriptable:///run/${encodeURIComponent(name)}?open=calendar${env.each ? '&each=1' : ''}`;
   } catch {
     // 아래의 웹앱 주소로 둔다.
   }
@@ -147,11 +147,18 @@ function pingUrl(host: Host): string {
   }
 }
 
+/**
+ * 위젯에서 연 달력에서 저장할 때마다 위젯에 바로 반영할 것인가(위젯의 Parameter에 "저장마다" 또는 each).
+ * 그러면 저장할 때마다 스크립트를 끝내고 달력을 다시 띄운다(reload.ts의 relaunch: 달력이 한 번 닫혔다 다시 뜬다).
+ * 기본은 아니다: Close를 누를 때 한 번에 반영한다(2026-11-18 사용자: "저장누를때마다 Scriptable 로 갔따가 다시 켜지는거 … 너무 불편한데").
+ */
+const eachSave = (words: string[]): boolean => words.includes('저장마다') || words.includes('each');
+
 /** 이 스크립트를 다시 돌려 달력을 새로 띄우게 하는 주소(reload.ts의 relaunch). 스크립트 이름을 모르면 빈 글. */
 function reopenUrl(host: Host): string {
   try {
     const name = host.Script.name ? host.Script.name() : '';
-    return typeof name === 'string' && name !== '' ? `scriptable:///run/${encodeURIComponent(name)}?open=calendar&again=1` : '';
+    return typeof name === 'string' && name !== '' ? `scriptable:///run/${encodeURIComponent(name)}?open=calendar&each=1&again=1` : '';
   } catch {
     return '';
   }
@@ -608,7 +615,7 @@ function skipLateUpdateCheck(host: Host): void {
  * 닫지 않고 홈 화면으로 나가도 스크립트는 끝내지 않는다(앱 전환으로 돌아와 고쳐도 지켜보게). 위젯을 다시 눌러 새 달력이 뜨면 앞의 것은 더 지켜보지 않는다.
  * 불러오기가 끝나기를 기다리지 않고 바로 띄운다: 기다리는 동안 Scriptable의 화면이 보이지 않게, 그리고 느린 연결에서 멈춰 있지 않게.
  */
-async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Promise<string> {
+async function openCalendarInApp(host: Host, cfg: Config, now: () => Date, each = false): Promise<string> {
   try {
     const Ctor = findWebView();
     if (!Ctor) return 'Scriptable의 WebView를 찾지 못했다';
@@ -645,6 +652,10 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
         log.fire(how, why);
         return;
       }
+      // 기본: 저장해도 스크립트를 끝내거나 달력을 다시 띄우지 않는다. 사용자가 Close를 누르면 스크립트가 끝나면서 위젯이 그려진다
+      // (그때까지 고친 것이 모두 나온다). 2026-11-18 사용자가 골랐다: 저장할 때마다 달력이 닫혔다 다시 뜨는 것(relaunch)이 너무 불편하다.
+      // 저장할 때마다 바로 반영하는 길은 위젯의 Parameter에 "저장마다"를 적으면 쓴다(eachSave).
+      if (!each) return;
       // 저장할 때마다 반영하는 길(reload.ts의 relaunch): 이 스크립트를 주소로 다시 돌리게 해 두고 바로 끝낸다(finish와 같이 위젯이 그려진다).
       // 끝난 뒤 Scriptable이 새로 돌리면서 달력을 다시 띄우고, 새 실행이 지켜본다. 화면 앞에서 저장했을 때만 한다.
       // 주소를 열 수 없거나, 그려지지 않은 것으로 가려졌거나, 끝내기까지 안 되는 것으로 가려졌으면 하지 않는다.
@@ -1304,7 +1315,7 @@ async function runInApp(host: Host, cfg: Config, now: () => Date): Promise<void>
   const words = paramWords(host);
   let calendarProblem = '';
   if (host.args.queryParameters?.open === 'calendar' || words.includes('inapp') || words.includes('앱안')) {
-    calendarProblem = await openCalendarInApp(host, cfg, now);
+    calendarProblem = await openCalendarInApp(host, cfg, now, host.args.queryParameters?.each === '1' || eachSave(words));
     if (calendarProblem === '') return;
   }
   const show = async (): Promise<void> => {

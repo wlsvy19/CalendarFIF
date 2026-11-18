@@ -1,7 +1,7 @@
 // 달력에서 저장하면 위젯을 바로 새로 그리게 하는 흐름(reload.ts와 main.ts가 맞물리는 곳).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from './api';
-import { makeFakeHost, type FakeAnswer, type FakeHost, type FakeOptions, type FakeRequest } from './fakeHost';
+import { makeFakeHost, widgetRecord, type FakeAnswer, type FakeHost, type FakeOptions, type FakeRequest } from './fakeHost';
 import { run } from './main';
 import { CREDIT_MS, LATE_MS, RELAUNCH_RULE, SETTLE_MS, triesOf, verdictOf, type ReloadTry } from './reload';
 
@@ -58,10 +58,12 @@ function withView() {
 /** 저장하자마자 끝내는 경우의 host(LEAVE_FAILED를 넣어 둔다). 이 파일의 시험은 따로 넣지 않으면 Safari가 없어서 달력을 다시 띄우지 않는다. */
 const openHost = (cache: Record<string, unknown> = {}) => {
   const mine = (cache.reload as { tries?: ReloadTry[] } | undefined)?.tries ?? [];
-  return make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' }, files: seed({ ...cache, reload: { epoch: 1, tries: [...SEEDS, ...mine] } }) });
+  return make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar', each: '1' }, files: seed({ ...cache, reload: { epoch: 1, tries: [...SEEDS, ...mine] } }) });
 };
-/** 넣어 둔 기록이 없는 host. */
-const openFresh = (cache: Record<string, unknown> = {}) => make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' }, files: seed(cache) });
+/** 넣어 둔 기록이 없는 host. 이 파일의 시험은 대부분 저장할 때마다 반영하는 길(each=1, 위젯의 Parameter "저장마다")을 본다. */
+const openFresh = (cache: Record<string, unknown> = {}) => make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar', each: '1' }, files: seed(cache) });
+/** 기본(Close를 누를 때 반영)의 host. */
+const openDefault = (cache: Record<string, unknown> = {}) => make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' }, files: seed(cache) });
 /** 나갈 때 끝내기(leave)가 그려진 것으로 가려진 기록. */
 const LEAVE_WORKED: ReloadTry = { how: 'leave', why: 'save', at: T0 - 7_200_000, got: T0 - 7_199_800, alive: true, void: false, away: false, shut: false, err: '' };
 const openLeaving = () => openFresh({ reload: { epoch: 1, tries: [LEAVE_WORKED] } });
@@ -86,8 +88,42 @@ afterEach(() => {
   delete (globalThis as Record<string, unknown>).Safari;
 });
 
-describe('저장할 때마다 끝내고 달력을 다시 띄운다(relaunch)', () => {
-  const AGAIN = 'scriptable:///run/CalendarFIF?open=calendar&again=1';
+describe('기본: Close를 누를 때 한 번에 반영한다(2026-11-18 사용자가 골랐다)', () => {
+  it('저장해도 스크립트를 끝내지 않고 달력을 다시 띄우지 않는다. 이어서 고친 것까지 받아 적고, Close를 누르면 끝난다(그때 위젯이 그려진다)', async () => {
+    const open = vi.fn();
+    (globalThis as Record<string, unknown>).Safari = { open };
+    const view = withView();
+    const host = openDefault();
+    const { state, done } = await opened(host);
+    view.state = [message(2, [edit]), 'visible', '0'];
+    await vi.advanceTimersByTimeAsync(3000);
+    view.state = [message(3, [edit, other]), 'visible', '0'];
+    await vi.advanceTimersByTimeAsync(3000);
+    expect([state.finished, open.mock.calls, triesIn(host)]).toEqual([false, [], []]);
+    expect(cacheOf(host).pending).toMatchObject({ edits: [edit, other] });
+    // 홈 화면으로 나가도 끝내지 않는다(돌아와 이어서 고칠 수 있게).
+    view.state = [message(3, [edit, other]), 'hidden', '1'];
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(state.finished).toBe(false);
+    view.close();
+    await vi.advanceTimersByTimeAsync(400);
+    await done;
+    expect([state.finished, triesIn(host), (cacheOf(host).leave as { how: string }).how]).toEqual([true, [], 'closed']);
+  });
+
+  it('위젯의 Parameter에 "저장마다"가 있으면 누르는 주소에 each=1을 붙인다(저장할 때마다 반영하는 길)', async () => {
+    const tap = async (parameter: string): Promise<string> => {
+      const host = make({ keychain: loggedIn, widgetParameter: parameter });
+      await run(host, cfg, now);
+      return String(widgetRecord(host.state.setWidgets.at(-1)).props.url);
+    };
+    expect(await tap('inapp')).toBe('scriptable:///run/CalendarFIF?open=calendar');
+    expect(await tap('inapp 저장마다')).toBe('scriptable:///run/CalendarFIF?open=calendar&each=1');
+  });
+});
+
+describe('저장할 때마다 끝내고 달력을 다시 띄운다(relaunch, Parameter "저장마다")', () => {
+  const AGAIN = 'scriptable:///run/CalendarFIF?open=calendar&each=1&again=1';
 
   it('저장하면 이 스크립트를 주소로 다시 돌리게 해 두고 바로 끝낸다(위젯이 그려진다). 닫히기를 기다리지 않는다', async () => {
     const open = vi.fn();
@@ -133,11 +169,11 @@ describe('저장할 때마다 끝내고 달력을 다시 띄운다(relaunch)', (
     const open = vi.fn();
     (globalThis as Record<string, unknown>).Safari = { open };
     const view = withView();
-    const named = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' }, scriptName: 'Untitled Script' });
+    const named = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar', each: '1' }, scriptName: 'Untitled Script' });
     await opened(named);
     view.state = [message(2, [edit]), 'visible', '0'];
     await vi.advanceTimersByTimeAsync(300);
-    expect(open.mock.calls).toEqual([['scriptable:///run/Untitled%20Script?open=calendar&again=1']]);
+    expect(open.mock.calls).toEqual([['scriptable:///run/Untitled%20Script?open=calendar&each=1&again=1']]);
 
     delete (globalThis as Record<string, unknown>).Safari;
     const view2 = withView();
@@ -162,7 +198,7 @@ describe('저장할 때마다 끝내고 달력을 다시 띄운다(relaunch)', (
 
   it('주소로 다시 돌린 실행(again=1)은 달력을 띄운다', async () => {
     const view = withView();
-    const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar', again: '1' } });
+    const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar', each: '1', again: '1' } });
     void run(host, cfg, now);
     await vi.advanceTimersByTimeAsync(600);
     expect([view.presented, view.loaded.length, host.state.alerts.length]).toEqual([1, 1, 0]);
@@ -379,7 +415,7 @@ describe('달력에서 저장했을 때', () => {
     const open = vi.fn();
     (globalThis as Record<string, unknown>).Safari = { open };
     const view = withView();
-    const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' }, files: seed(proven('ping')), scriptName: 'Untitled Script' });
+    const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar', each: '1' }, files: seed(proven('ping')), scriptName: 'Untitled Script' });
     await opened(host);
     view.state = [message(2, [edit]), 'visible'];
     await vi.advanceTimersByTimeAsync(300);
