@@ -149,13 +149,13 @@ it('얹는 기한은 한 시간이다', () => {
 
 describe('웹 화면의 상태', () => {
   it('답한 글을 읽는다. 모양이 다르면 null', () => {
-    expect(parseProbe(JSON.stringify({ app: '0.9.9', sw: true, bridge: false, more: 1 }))).toEqual({ app: '0.9.9', sw: true, bridge: false, log: [] });
+    expect(parseProbe(JSON.stringify({ app: '0.9.9', sw: true, bridge: false, more: 1 }))).toEqual({ app: '0.9.9', sw: true, bridge: false, log: [], view: null });
     expect(parseProbe(JSON.stringify({ app: 'x'.repeat(100), sw: false, bridge: false }))?.app).toHaveLength(40);
     for (const text of ['', 'x', 'null', '[]', JSON.stringify({ app: 1, sw: true, bridge: true }), JSON.stringify({ app: '', sw: 'no', bridge: true }), JSON.stringify({ app: '', sw: true })]) expect(parseProbe(text)).toBeNull();
   });
 
   it('보관 파일의 칸을 읽는다', () => {
-    expect(webProbeOf({ at: 5, app: '0.9.9', sw: false, bridge: true })).toEqual({ at: 5, app: '0.9.9', sw: false, bridge: true, log: [] });
+    expect(webProbeOf({ at: 5, app: '0.9.9', sw: false, bridge: true })).toEqual({ at: 5, app: '0.9.9', sw: false, bridge: true, log: [], view: null });
     for (const v of [undefined, null, {}, { at: '5', app: '', sw: false, bridge: true }, { at: 5, app: '', sw: false }]) expect(webProbeOf(v)).toBeNull();
   });
 
@@ -231,5 +231,15 @@ describe('countPending', () => {
     expect(countPending('2026-11', {}, state, 'other', 10_000)).toBe(0);
     expect(countPending('2026-11', {}, state, 'u', 9000 + PENDING_TTL_MS + 1)).toBe(0);
     expect(countPending('2026-11', {}, null, 'u', 10_000)).toBe(0);
+  });
+});
+
+describe('달력 화면에 보이는 것(view)', () => {
+  it('묻는 식이 view를 함께 묻고, 답의 view를 읽는다. 모양이 다르면 null', () => {
+    expect(PROBE_JS).toContain('view: (() =>');
+    const view = { title: '2026년 11월', cells: 35, memos: 0, sync: 'ok 저장됨', up: 4, login: false };
+    expect(parseProbe(JSON.stringify({ app: '0.9.28', sw: false, bridge: true, view }))?.view).toEqual(view);
+    expect(parseProbe(JSON.stringify({ app: '0.9.28', sw: false, bridge: true, view: { title: 1 } }))?.view).toBeNull();
+    expect(webProbeOf({ at: 5, app: '0.9.28', sw: false, bridge: true, view })?.view).toEqual(view);
   });
 });

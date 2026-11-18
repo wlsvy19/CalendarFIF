@@ -163,6 +163,22 @@ export function applyPending(
 }
 
 /**
+ * 달력 화면에 무엇이 보이는가(PROBE_JS의 view). 2026-11-18 사용자: Close로 닫고 위젯을 다시 눌러 연 달력에 메모가 하나도 안 보였다.
+ * PC의 Chromium에서는 재현되지 않아서, 아이폰에서 그때 화면의 상태를 적는다.
+ * title: 머리의 년도와 월. cells: 날짜 칸 수. memos: 메모가 그려진 칸 수. sync: 동기화 표시의 상태와 글. up: 화면을 연 지 몇 초. login: 로그인 화면이다.
+ */
+export type WebView = { title: string; cells: number; memos: number; sync: string; up: number; login: boolean };
+const VIEW_JS = `(() => { const q = (s) => document.querySelector(s); const sync = q(".sync"); const t = (s) => ((q(s) || {}).textContent || "").trim(); return { title: (t(".year") + " " + t(".app-head .month")).trim(), cells: document.querySelectorAll(".cell").length, memos: document.querySelectorAll(".cell .memo").length, sync: sync ? ((sync.getAttribute("data-state") || "") + " " + t(".sync-text")).trim() : "", up: Math.round(performance.now() / 1000), login: !!q(".login") }; })()`;
+
+function viewOf(v: unknown): WebView | null {
+  if (!isObject(v) || typeof v.title !== 'string' || typeof v.cells !== 'number' || typeof v.memos !== 'number') return null;
+  return {
+    title: v.title.slice(0, 20), cells: v.cells, memos: v.memos,
+    sync: typeof v.sync === 'string' ? v.sync.slice(0, 40) : '', up: typeof v.up === 'number' && Number.isFinite(v.up) ? v.up : 0, login: v.login === true,
+  };
+}
+
+/**
  * 웹 화면의 상태를 묻는 식. 달력을 띄운 스크립트가 가끔 돌려 Scriptable의 메뉴에 한 줄로 적는다(아이폰에서 무엇이 도는지 볼 길이 그것뿐이다).
  * app: 웹앱의 버전(웹앱이 window.__calfifApp에 적는다. 0.9.8까지의 웹앱은 적지 않아 빈 글이다).
  * sw: 서비스 워커가 이 화면을 맡고 있는가(맡고 있으면 첫 화면이 받아 둔 것에서 나온다).
@@ -170,7 +186,7 @@ export function applyPending(
  * log: 웹앱이 적어 둔 Firebase SDK의 경고와 오류(0.9.13부터. Scriptable은 웹 화면의 console.error를 "Errors Logged" 상자로 띄우는데
  * 첫 인자만 보여 내용을 알 수 없었다. 웹앱이 그것을 콘솔 대신 여기에 적는다).
  */
-export const PROBE_JS = `JSON.stringify({ app: String(window.__calfifApp || ""), sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), bridge: typeof window.${PENDING_GLOBAL} === "string", log: String(window.${LOG_GLOBAL} || "") })`;
+export const PROBE_JS = `JSON.stringify({ app: String(window.__calfifApp || ""), sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), bridge: typeof window.${PENDING_GLOBAL} === "string", log: String(window.${LOG_GLOBAL} || ""), view: ${VIEW_JS} })`;
 
 /** 웹 화면이 남긴 기록 한 줄(Firebase SDK의 경고와 오류. src/web/widgetLog.ts). */
 export type WebLogLine = { at: number; level: string; type: string; text: string };
@@ -198,14 +214,14 @@ export function webLogOf(v: unknown): WebLogLine[] {
 }
 
 /** 보관 파일의 web 칸. at은 스크립트가 적은 시각이다. log: 웹 화면이 남긴 기록(없으면 빈 목록). */
-export type WebProbe = { at: number; app: string; sw: boolean; bridge: boolean; log: WebLogLine[] };
+export type WebProbe = { at: number; app: string; sw: boolean; bridge: boolean; log: WebLogLine[]; view?: WebView | null };
 
 /** 웹 화면이 답한 글을 읽는다. 모양이 다르면 null. */
-export function parseProbe(text: string): { app: string; sw: boolean; bridge: boolean; log: WebLogLine[] } | null {
+export function parseProbe(text: string): { app: string; sw: boolean; bridge: boolean; log: WebLogLine[]; view: WebView | null } | null {
   try {
     const v: unknown = JSON.parse(text);
     if (!isObject(v) || typeof v.app !== 'string' || typeof v.sw !== 'boolean' || typeof v.bridge !== 'boolean') return null;
-    return { app: v.app.slice(0, 40), sw: v.sw, bridge: v.bridge, log: webLogOf(v.log) };
+    return { app: v.app.slice(0, 40), sw: v.sw, bridge: v.bridge, log: webLogOf(v.log), view: viewOf(v.view) };
   } catch {
     return null;
   }
@@ -214,7 +230,7 @@ export function parseProbe(text: string): { app: string; sw: boolean; bridge: bo
 /** 보관 파일의 web 칸을 읽는다. 없거나 모양이 다르면 null. */
 export function webProbeOf(v: unknown): WebProbe | null {
   if (!isObject(v) || typeof v.at !== 'number' || !Number.isFinite(v.at) || typeof v.app !== 'string' || typeof v.sw !== 'boolean' || typeof v.bridge !== 'boolean') return null;
-  return { at: v.at, app: v.app, sw: v.sw, bridge: v.bridge, log: webLogOf(v.log) };
+  return { at: v.at, app: v.app, sw: v.sw, bridge: v.bridge, log: webLogOf(v.log), view: viewOf(v.view) };
 }
 
 /** Scriptable의 메뉴에 적을 한 줄. 열어 본 적이 없으면 빈 글. */

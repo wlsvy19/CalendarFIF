@@ -3,7 +3,7 @@ import { setOfficialHolidays } from '../core/holidays';
 import type { Config } from './api';
 import { drawnTexts, makeFakeHost, nativeTexts, widgetRecord, type FakeAnswer, type FakeNode, type FakeHost, type FakeOptions, type FakeRequest, type FakeWidgetRecord } from './fakeHost';
 import { alarmReport, readCache, run } from './main';
-import { POLL_JS } from './pending';
+import { POLL_JS, PROBE_JS } from './pending';
 import { PALETTES } from './theme';
 
 const cfg: Config = { projectId: 'demo-calfif', apiKey: 'demo-key', appUrl: 'https://example.test/' };
@@ -1679,8 +1679,8 @@ describe('위젯에서 연 달력의 주소와 상태', () => {
     const asked = withProbe(probeText('0.9.9', false, true));
     const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' } });
     await run(host, cfg, now);
-    expect(asked.find((js) => js.includes('__calfifApp'))).toBe('JSON.stringify({ app: String(window.__calfifApp || ""), sw: !!(navigator.serviceWorker && navigator.serviceWorker.controller), bridge: typeof window.__calfifPending === "string", log: String(window.__calfifLog || "") })');
-    expect(cacheOf(host).web).toEqual({ at: NOW, app: '0.9.9', sw: false, bridge: true, log: [] });
+    expect(asked.find((js) => js.includes('__calfifApp'))).toBe(PROBE_JS);
+    expect(cacheOf(host).web).toEqual({ at: NOW, app: '0.9.9', sw: false, bridge: true, log: [], view: null });
   });
 
   it('답이 없거나 모양이 다르면 적지 않고, 달력은 그대로 뜨고 끝난다', async () => {

@@ -99,6 +99,9 @@ export function statusText(input: {
   }
   if (web) lines.push(`달력 화면(${clock(web.at, now)}): ${web.app === '' ? '웹앱 버전 모름' : `웹앱 ${web.app}`}, 서비스 워커 ${web.sw ? '있음' : '없음'}, 넘기기 ${web.bridge ? '켜짐' : '꺼짐'}`);
   // 웹 화면이 남긴 Firebase SDK의 경고와 오류(Scriptable의 "Errors Logged" 상자에는 내용이 나오지 않는다).
+  // 그때 달력 화면에 보이던 것(달, 메모가 그려진 칸 수, 동기화 표시). 메모가 안 보인 까닭을 가리려고 적는다.
+  const v = web?.view;
+  if (web && v) lines.push(`달력 내용(${clock(web.at, now)}): ${v.login ? '로그인 화면' : `${v.title === '' ? '달 모름' : v.title}, 메모 칸 ${v.memos}/${v.cells}`}, 동기화 ${v.sync === '' ? '표시 없음' : v.sync}, 연 지 ${v.up}초`);
   for (const l of web?.log ?? []) lines.push(`웹 화면 기록(${clock(l.at, now)}): ${[l.level, l.type, l.text].filter((t) => t !== '').join(' ')}`);
   if (activeAt > 0) lines.push(`달력이 떠 있던 마지막 때: ${clock(activeAt, now)}`);
   if (leave) lines.push(`달력에서 나감(${clock(leave.at, now)}): ${leave.how === 'left' ? '닫지 않고 홈 화면으로 나감' : '닫기를 눌러 닫음'}`);
