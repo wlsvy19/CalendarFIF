@@ -110,3 +110,36 @@ export function announceWidgetPage(win: Window = window): void {
     retire: () => win.location.replace(new URL(CLOSED_PAGE, win.document.baseURI).href),
   });
 }
+
+/**
+ * 위젯에서 연 달력은 저장할 때마다 새로 뜬다(위젯을 새로 그리게 하려고 스크립트가 달력을 다시 띄운다: src/widget/reload.ts의 reopen).
+ * 새로 뜬 달력이 보던 달 그대로 뜨도록, 보고 있는 달을 localStorage에 적어 두고 새 화면이 그것을 읽는다.
+ * 방금(20초 안에) 적은 것만 쓴다: 한참 뒤에 위젯을 눌러 연 달력은 이번 달로 뜬다.
+ */
+export const MONTH_KEY = 'calfif.widgetMonth';
+export const MONTH_KEEP_MS = 20_000;
+
+type MonthStorage = { getItem(key: string): string | null; setItem(key: string, value: string): void };
+
+/** 보고 있는 달을 적어 둔다. 던지지 않는다. */
+export function rememberMonth(storage: MonthStorage | null, monthId: string, now: number): void {
+  try {
+    storage?.setItem(MONTH_KEY, JSON.stringify({ m: monthId, at: now }));
+  } catch {
+    // 적지 못하면 새 화면이 이번 달로 뜬다.
+  }
+}
+
+/** 방금 적어 둔 달. 없거나 오래됐거나 모양이 다르면 null. 던지지 않는다. */
+export function recalledMonth(storage: MonthStorage | null, now: number): string | null {
+  try {
+    const raw = storage?.getItem(MONTH_KEY);
+    if (!raw) return null;
+    const { m, at } = JSON.parse(raw) as { m?: unknown; at?: unknown };
+    if (typeof m !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(m)) return null;
+    if (typeof at !== 'number' || !Number.isFinite(at) || now < at || now - at > MONTH_KEEP_MS) return null;
+    return m;
+  } catch {
+    return null;
+  }
+}

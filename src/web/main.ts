@@ -52,7 +52,7 @@ import { FirestoreMonthStore } from '../sync/firestoreStore';
 import { Outbox } from '../sync/outbox';
 import { PENDING_GLOBAL, pendingTeller, widgetHold } from './widgetBridge';
 import { silenceSdkLogs } from './widgetLog';
-import { announceWidgetPage } from './widgetPages';
+import { announceWidgetPage, recalledMonth, rememberMonth } from './widgetPages';
 import { SyncEngine } from '../sync/engine';
 
 const { app, auth, db } = initFirebase(import.meta.env);
@@ -189,7 +189,8 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     source,
     outbox,
     editedBy,
-    initialMonth: splitDateKey(todayKey())!.monthId,
+    // 위젯에서 연 달력은 저장할 때마다 새로 뜬다. 방금 보던 달이 있으면 그 달로 뜬다(widgetPages.ts).
+    initialMonth: (viaWidget() ? recalledMonth(storage.store, Date.now()) : null) ?? splitDateKey(todayKey())!.monthId,
   });
   const stopAutoFlush = startAutoFlush(engine, window, document);
   const offStatus = engine.subscribe(() => store.refresh());
@@ -199,6 +200,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   const widgetTeller = pendingTeller(session.uid);
   // 알림이나 카운트다운을 저장해 서버에 올리는 중이면 그동안은 적지 않는다(widgetBridge.ts의 widgetHold).
   const tellWidget = (): void => {
+    rememberMonth(storage.store, store.current(), Date.now()); // 새로 뜰 달력이 이 달로 뜨게
     if (eventHold.held()) return;
     try {
       (window as unknown as Record<string, unknown>)[PENDING_GLOBAL] = widgetTeller.text(outbox.list(), (m, d) => (store.isLoaded(m) ? store.days(m)[d] ?? EMPTY_DAY : null));

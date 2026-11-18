@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CLOSED_PAGE, PAGES_KEY, announcePage, announceWidgetPage, type PagesEnv } from './widgetPages';
+import { CLOSED_PAGE, MONTH_KEEP_MS, MONTH_KEY, PAGES_KEY, announcePage, announceWidgetPage, recalledMonth, rememberMonth, type PagesEnv } from './widgetPages';
 
 /** 같은 저장소를 쓰는 화면들을 흉내 낸다: 한 화면이 알리면 다른 화면들의 채널과 storage 이벤트로 간다(자기에게는 가지 않는다). */
 function world() {
@@ -107,5 +107,35 @@ describe('announceWidgetPage', () => {
     announceWidgetPage(win);
     announceWidgetPage(win);
     expect([state.set.length, state.listeners.length, state.replaced]).toEqual([1, 1, []]);
+  });
+});
+
+describe('보던 달', () => {
+  const memory = () => {
+    const map = new Map<string, string>();
+    return { map, getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => { map.set(k, v); } };
+  };
+
+  it('적어 둔 달을 20초 안에는 돌려준다. 그 뒤에는 돌려주지 않는다(이번 달로 뜬다)', () => {
+    const store = memory();
+    expect(recalledMonth(store, 1000)).toBeNull();
+    rememberMonth(store, '2026-12', 1000);
+    expect(recalledMonth(store, 1000 + MONTH_KEEP_MS)).toBe('2026-12');
+    expect(recalledMonth(store, 1000 + MONTH_KEEP_MS + 1)).toBeNull();
+    // 시계가 뒤로 갔으면 쓰지 않는다.
+    expect(recalledMonth(store, 999)).toBeNull();
+  });
+
+  it('모양이 다른 것은 쓰지 않고, 저장소가 없거나 막혀 있어도 던지지 않는다', () => {
+    const store = memory();
+    for (const raw of ['', 'x', '{}', JSON.stringify({ m: '2026-13', at: 1000 }), JSON.stringify({ m: '2026-12', at: 'x' }), JSON.stringify({ m: 12, at: 1000 })]) {
+      store.map.set(MONTH_KEY, raw);
+      expect(recalledMonth(store, 1000)).toBeNull();
+    }
+    expect(recalledMonth(null, 1000)).toBeNull();
+    expect(() => rememberMonth(null, '2026-12', 1000)).not.toThrow();
+    const broken = { getItem: () => { throw new Error('막혔다'); }, setItem: () => { throw new Error('막혔다'); } };
+    expect(recalledMonth(broken, 1000)).toBeNull();
+    expect(() => rememberMonth(broken, '2026-12', 1000)).not.toThrow();
   });
 });

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from './api';
 import { makeFakeHost, type FakeAnswer, type FakeHost, type FakeOptions, type FakeRequest } from './fakeHost';
 import { run } from './main';
-import { CREDIT_MS, NUDGE_NO_DRAW, NUDGE_WAIT_MS, SETTLE_MS, type ReloadTry } from './reload';
+import { CREDIT_MS, REOPEN_WAIT_MS, SETTLE_MS, type ReloadTry } from './reload';
 
 const cfg: Config = { projectId: 'demo-calfif', apiKey: 'demo-key', appUrl: 'https://example.test/' };
 const T0 = new Date(2026, 10, 17, 14, 0, 0).getTime();
@@ -17,11 +17,9 @@ const make = (o: FakeOptions): FakeHost => makeFakeHost({ handler, ...o });
 const cacheOf = (h: FakeHost): Record<string, unknown> => JSON.parse(h.state.files.get(CACHE) ?? '{}');
 /** 나갈 때 끝내기(leave)가 두 번 잇달아 안 그려진 기록. 이것이 있으면 저장하자마자 끝낸다(finish). 아래의 시험들은 대부분 그 경우를 본다. */
 const LEAVE_FAILED: ReloadTry[] = [3_600_000, 3_500_000].map((ago) => ({ how: 'leave', why: 'save', at: T0 - ago, got: 0, alive: true, void: false, away: false, shut: false, err: '' }));
-/** 저장할 때 이 스크립트를 한 번 더 돌리는 것(nudge)이 안 그려진 기록. 이것이 있으면 nudge를 하지 않는다. */
-const NUDGE_FAILED: ReloadTry = { how: 'nudge', why: 'save', at: T0 - 3_400_000, got: 0, alive: false, void: false, away: false, shut: false, err: NUDGE_NO_DRAW };
-const SEEDS: ReloadTry[] = [...LEAVE_FAILED, NUDGE_FAILED];
+const SEEDS: ReloadTry[] = [...LEAVE_FAILED];
 const seeded = (at: number): boolean => SEEDS.some((t) => t.at === at);
-/** 보관 파일의 시도들(시험이 미리 넣어 둔 LEAVE_FAILED와 NUDGE_FAILED는 뺀다). */
+/** 보관 파일의 시도들(시험이 미리 넣어 둔 LEAVE_FAILED는 뺀다). */
 const triesIn = (h: FakeHost): ReloadTry[] => ((cacheOf(h).reload as { tries?: ReloadTry[] } | undefined)?.tries ?? []).filter((t) => !seeded(t.at));
 const seed = (cache: Record<string, unknown>): Record<string, string> => ({ [CACHE]: JSON.stringify(cache) });
 
@@ -57,7 +55,7 @@ function withView() {
   };
   return view;
 }
-/** 저장하자마자 끝내는 경우의 host(LEAVE_FAILED와 NUDGE_FAILED를 넣어 둔다). */
+/** 저장하자마자 끝내는 경우의 host(LEAVE_FAILED를 넣어 둔다). 이 파일의 시험은 따로 넣지 않으면 Safari가 없어서 달력을 다시 띄우지 않는다. */
 const openHost = (cache: Record<string, unknown> = {}) => {
   const mine = (cache.reload as { tries?: ReloadTry[] } | undefined)?.tries ?? [];
   return make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' }, files: seed({ ...cache, reload: { epoch: 1, tries: [...SEEDS, ...mine] } }) });
@@ -66,7 +64,7 @@ const openHost = (cache: Record<string, unknown> = {}) => {
 const openFresh = (cache: Record<string, unknown> = {}) => make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' }, files: seed(cache) });
 /** 나갈 때 끝내기(leave)가 그려진 것으로 가려진 기록. */
 const LEAVE_WORKED: ReloadTry = { how: 'leave', why: 'save', at: T0 - 7_200_000, got: T0 - 7_199_800, alive: true, void: false, away: false, shut: false, err: '' };
-const openLeaving = () => openFresh({ reload: { epoch: 1, tries: [NUDGE_FAILED, LEAVE_WORKED] } });
+const openLeaving = () => openFresh({ reload: { epoch: 1, tries: [LEAVE_WORKED] } });
 const mine = (h: FakeHost): ReloadTry[] => triesIn(h).filter((t) => t.at !== LEAVE_WORKED.at);
 /** 달력을 열고 처음 읽기(0초, 0.3초, 0.6초)를 지나게 한다. */
 async function opened(host: FakeHost) {
@@ -88,45 +86,10 @@ afterEach(() => {
   delete (globalThis as Record<string, unknown>).Safari;
 });
 
-describe('저장할 때마다 이 스크립트를 한 번 더 돌린다(nudge)', () => {
-  /** 위젯이 그리면서 적는 것을 흉내 낸다: 마지막 nudge에 그 0.8초 뒤의 그림을 적는다. */
-  const drawFor = (host: FakeHost): void => {
-    const cache = cacheOf(host);
-    const tries = (cache.reload as { tries: ReloadTry[] }).tries;
-    const last = [...tries].reverse().find((t) => t.how === 'nudge' && t.got === 0)!;
-    host.state.files.set(CACHE, JSON.stringify({ ...cache, reload: { epoch: 1, tries: tries.map((t) => (t === last ? { ...t, got: t.at + 800 } : t)) } }));
-  };
+describe('저장할 때마다 달력을 새로 띄운다(reopen)', () => {
+  const AGAIN = 'scriptable:///run/CalendarFIF?open=calendar&again=1';
 
-  it('저장하면 달력을 띄운 채 이 스크립트를 주소로 한 번 더 돌리고, 위젯이 그려지면 계속 지켜본다. 이어서 고칠 때마다 또 한다', async () => {
-    const open = vi.fn();
-    (globalThis as Record<string, unknown>).Safari = { open };
-    const view = withView();
-    const host = openFresh();
-    const { state } = await opened(host);
-    view.state = [message(2, [edit]), 'visible', '0'];
-    await vi.advanceTimersByTimeAsync(300);
-    expect(open.mock.calls).toEqual([['scriptable:///run/CalendarFIF?open=calendar&ping=1']]);
-    expect(triesIn(host)).toEqual([tried('nudge', 'save', T0 + 900)]);
-    // 1초 뒤에 위젯이 그렸다고 적혔다: 스크립트를 끝내지 않는다.
-    await vi.advanceTimersByTimeAsync(1000);
-    drawFor(host);
-    await vi.advanceTimersByTimeAsync(NUDGE_WAIT_MS + 2000);
-    expect([state.finished, triesIn(host).map((t) => t.how)]).toEqual([false, ['nudge']]);
-    // 이어서 다른 날을 고쳤다: 또 한다. 이것도 그려졌다.
-    view.state = [message(4, [other]), 'visible', '0'];
-    await vi.advanceTimersByTimeAsync(300);
-    expect(open.mock.calls).toHaveLength(2);
-    drawFor(host);
-    await vi.advanceTimersByTimeAsync(NUDGE_WAIT_MS + 2000);
-    expect([state.finished, triesIn(host).map((t) => [t.how, t.got > 0])]).toEqual([false, [['nudge', true], ['nudge', true]]]);
-    // 두 번 잇달아 그려졌다: 이제 그려지기를 기다렸다가 끝내는 뒷받침 없이 한다(안 그려져도 끝내지 않는다).
-    view.state = [message(6, [edit]), 'visible', '0'];
-    await vi.advanceTimersByTimeAsync(300);
-    await vi.advanceTimersByTimeAsync(NUDGE_WAIT_MS + 6000);
-    expect([state.finished, open.mock.calls.length, triesIn(host).map((t) => t.how)]).toEqual([false, 3, ['nudge', 'nudge', 'nudge']]);
-  });
-
-  it('3.5초를 화면 앞에서 기다려도 위젯이 그려지지 않으면, 안 되는 것으로 적고 전처럼 스크립트를 끝낸다(첫 저장은 반영된다). 그 뒤로는 하지 않는다', async () => {
+  it('저장하면 이 스크립트를 주소로 다시 돌린다. Scriptable이 이 달력을 닫으면 이 스크립트가 끝난다(위젯이 그려진다)', async () => {
     const open = vi.fn();
     (globalThis as Record<string, unknown>).Safari = { open };
     const view = withView();
@@ -134,62 +97,79 @@ describe('저장할 때마다 이 스크립트를 한 번 더 돌린다(nudge)',
     const { state, done } = await opened(host);
     view.state = [message(2, [edit]), 'visible', '0'];
     await vi.advanceTimersByTimeAsync(300);
-    await vi.advanceTimersByTimeAsync(NUDGE_WAIT_MS - 200);
+    expect(open.mock.calls).toEqual([[AGAIN]]);
     expect(state.finished).toBe(false);
-    await vi.advanceTimersByTimeAsync(300);
+    // 끝나기 전에 올리지 못한 편집을 적어 두었다(위젯이 그리면서 얹는다).
+    expect(cacheOf(host).pending).toMatchObject({ edits: [edit] });
+    // Scriptable이 새 실행을 시작하면서 이 달력을 닫았다: 마지막 읽기를 기다리지 않고 바로 끝난다.
+    const reads = view.reads;
+    view.close();
+    await vi.advanceTimersByTimeAsync(0);
     await done;
-    expect(triesIn(host).map((t) => [t.how, t.err])).toEqual([['nudge', NUDGE_NO_DRAW], ['finish', '']]);
-    // 끝낸 뒤에 그려진 것은 끝내기의 것으로 적힌다(안 된 시도에 적히지 않는다).
-    const widget = make({ keychain: loggedIn, files: seed(cacheOf(host)) });
-    await run(widget, cfg, now);
-    expect(triesIn(widget).map((t) => [t.how, t.got > 0])).toEqual([['nudge', false], ['finish', true]]);
-    // 다음에 열면 저장하자마자 끝낸다.
-    const view2 = withView();
-    const again = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' }, files: seed(cacheOf(widget)) });
-    const second = await opened(again);
-    view2.state = [message(2, [edit]), 'visible', '0'];
-    await vi.advanceTimersByTimeAsync(300);
-    await second.done;
-    expect([open.mock.calls.length, triesIn(again).at(-1)?.how]).toEqual([1, 'finish']);
+    expect([state.finished, view.reads]).toEqual([true, reads]);
+    expect(triesIn(host).map((t) => [t.how, t.why])).toEqual([['reopen', 'save']]);
+    expect(cacheOf(host).leave).toMatchObject({ how: 'closed' });
+    // 붙여 넣은 스크립트의 요청은 그대로 된다(닫혀서 끝난 것이다).
+    await expect(new host.Request('https://example.test/x').loadString()).resolves.toBeDefined();
   });
 
-  it('그려지기 전에 달력에서 나가면 그때라도 스크립트를 끝낸다. 그 시도는 안 되는 것으로 적지 않는다(다음에 또 해 본다)', async () => {
+  it('1.5초가 지나도 닫히지 않으면(Scriptable이 닫지 않았다) 스스로 끝낸다. 그 사이에 또 저장해도 한 번만 다시 띄운다', async () => {
+    const open = vi.fn();
+    (globalThis as Record<string, unknown>).Safari = { open };
+    const view = withView();
+    const host = openFresh();
+    const { state, done } = await opened(host);
+    view.state = [message(2, [edit]), 'visible', '0'];
+    await vi.advanceTimersByTimeAsync(300);
+    view.state = [message(3, [edit, other]), 'visible', '0'];
+    await vi.advanceTimersByTimeAsync(REOPEN_WAIT_MS - 300);
+    expect([state.finished, open.mock.calls.length]).toEqual([false, 1]);
+    await vi.advanceTimersByTimeAsync(400);
+    await done;
+    expect(triesIn(host).map((t) => t.how)).toEqual(['reopen', 'finish']);
+    expect(cacheOf(host).pending).toMatchObject({ edits: [edit, other] });
+  });
+
+  it('다시 띄우는 중에는 새 달력이 떴다고 해서 지켜보기를 그만두고 남지 않는다(스스로 끝내야 위젯이 그려진다)', async () => {
     (globalThis as Record<string, unknown>).Safari = { open: vi.fn() };
     const view = withView();
     const host = openFresh();
     const { done } = await opened(host);
     view.state = [message(2, [edit]), 'visible', '0'];
     await vi.advanceTimersByTimeAsync(300);
-    view.state = [message(2, [edit]), 'visible', '1'];
-    await vi.advanceTimersByTimeAsync(100);
+    // 새 실행이 자기 번호를 적었다(더 크다).
+    host.state.files.set(CACHE, JSON.stringify({ ...cacheOf(host), session: Date.now() + 500 }));
+    await vi.advanceTimersByTimeAsync(REOPEN_WAIT_MS + 300);
     await done;
-    expect(triesIn(host).map((t) => [t.how, t.err])).toEqual([['nudge', ''], ['finish', '']]);
+    expect(triesIn(host).map((t) => t.how)).toEqual(['reopen', 'finish']);
   });
 
-  it('주소를 열 수 없으면(Safari.open이 없다) 전처럼 저장하자마자 끝낸다', async () => {
-    const view = withView();
-    const host = openFresh();
-    const { done } = await opened(host);
-    view.state = [message(2, [edit]), 'visible', '0'];
-    await vi.advanceTimersByTimeAsync(300);
-    await done;
-    expect(triesIn(host).map((t) => [t.how, t.err])).toEqual([['nudge', 'Safari.open이 없다'], ['finish', '']]);
-  });
-
-  it('곧바로 또 저장하면(앞의 것을 아직 기다리는 중) 또 하기는 하지만 기다림은 앞의 것 그대로다', async () => {
+  it('스크립트 이름에 빈칸이 있으면 주소에 맞게 바꿔 적는다. 주소를 열 수 없으면(Safari.open이 없다) 전처럼 저장하자마자 끝낸다', async () => {
     const open = vi.fn();
     (globalThis as Record<string, unknown>).Safari = { open };
     const view = withView();
-    const host = openFresh();
-    const { done } = await opened(host);
+    const named = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar' }, scriptName: 'Untitled Script' });
+    await opened(named);
     view.state = [message(2, [edit]), 'visible', '0'];
     await vi.advanceTimersByTimeAsync(300);
-    view.state = [message(3, [edit, other]), 'visible', '0'];
-    await vi.advanceTimersByTimeAsync(1000);
-    expect([open.mock.calls.length, triesIn(host).length]).toEqual([2, 1]);
-    await vi.advanceTimersByTimeAsync(NUDGE_WAIT_MS);
-    await done;
-    expect(triesIn(host).map((t) => t.how)).toEqual(['nudge', 'finish']);
+    expect(open.mock.calls).toEqual([['scriptable:///run/Untitled%20Script?open=calendar&again=1']]);
+
+    delete (globalThis as Record<string, unknown>).Safari;
+    const view2 = withView();
+    const host = openFresh();
+    const second = await opened(host);
+    view2.state = [message(2, [edit]), 'visible', '0'];
+    await vi.advanceTimersByTimeAsync(300);
+    await second.done;
+    expect(triesIn(host).map((t) => t.how)).toEqual(['finish']);
+  });
+
+  it('주소로 다시 돌린 실행(again=1)은 달력을 띄운다', async () => {
+    const view = withView();
+    const host = make({ runsInApp: true, keychain: loggedIn, queryParameters: { open: 'calendar', again: '1' } });
+    void run(host, cfg, now);
+    await vi.advanceTimersByTimeAsync(600);
+    expect([view.presented, view.loaded.length, host.state.alerts.length]).toEqual([1, 1, 0]);
   });
 });
 
@@ -271,7 +251,7 @@ describe('저장한 뒤 달력에서 나갈 때 끝내기(leave)', () => {
   it('그려진 것으로 가려지기 전에는(해 본 적이 없거나 안 그려졌다) 저장하자마자 끝낸다: 나갈 때 끝내는 것이 듣지 않으면 한 번 저장한 것도 반영되지 않는다', async () => {
     const miss: ReloadTry = tried('leave', 'save', T0 - 600_000, { alive: true });
     for (const tries of [[], [miss], [LEAVE_WORKED, miss, { ...miss, at: miss.at + 1000 }]]) {
-      const cache = { reload: { epoch: 1, tries: [NUDGE_FAILED, ...tries] } };
+      const cache = { reload: { epoch: 1, tries } };
       const view = withView();
       const host = openFresh(cache);
       const { done } = await opened(host);

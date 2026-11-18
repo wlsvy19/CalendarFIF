@@ -16,13 +16,17 @@
  *   ping은 메뉴에서 시험했을 때 메뉴가 닫히거나 스크립트가 멈춰 쓰지 않는 것으로 가려졌다. 그러나 메뉴(알림 상자)와 달력(웹 화면)은 다르다:
  *   2026-11-17에 닫지 않은 달력이 여럿 겹쳐 있었고 닫기를 누를 때마다 위젯이 그려졌다(스크립트를 새로 돌려도 앞의 달력과 스크립트는 남는다).
  *   그려지는지 3.5초 지켜보고, 안 그려지면 전처럼 스크립트를 끝낸다(finish). 그래서 듣지 않아도 첫 저장은 반영된다.
+ *   2026-11-18 사용자의 아이폰(0.9.20): 달력에서 nudge를 하면 Scriptable이 떠 있던 달력을 닫는다("저장 누르면 자동으로 Close가 되서 달력이 닫아지고
+ *   Scriptable 화면나와"). 스크립트를 주소로 돌리면 Scriptable은 띄워 둔 것을 닫는다. 그래서 nudge는 쓰지 않는다.
+ * - reopen: 그 성질을 쓴다. 저장할 때마다 이 스크립트를 주소로 다시 돌려 달력을 새로 띄운다. Scriptable이 앞의 달력을 닫으면서 앞의 스크립트가
+ *   화면 앞에서 끝나고(위젯이 그려진다), 새 실행이 달력을 다시 띄워 계속 지켜본다. 한 번 열어 고칠 때마다 반영된다. 저장할 때마다 달력이 한 번 닫혔다 다시 뜬다.
  * - leave: 저장한 뒤에도 계속 지켜보다가, 달력에서 나가려는 순간(웹 화면이 초점을 잃는다: 홈으로 미는 손짓이 시작될 때)에 스크립트를 끝낸다.
  *   한 번 열어 여러 번 고친 것이 모두 반영된다. finish로는 첫 저장만 반영돼서, 넣었다가 다시 지운 배경이 위젯에 남았다(2026-11-18 사용자).
  *   초점을 잃는 것이 앱이 뒤로 물러나기 전에 오는지, 그때 한 것을 iOS가 듣는지는 아이폰에서 해 봐야 안다. 두 번 잇달아 안 그려지면 finish로 돌아간다.
  * 앞의 셋은 메뉴를 띄워 둔 동안 시험한다(달력을 쓰는 중에 시험하다 스크립트가 멈추면 그때 고친 것이 위젯에 가지 않는다).
  */
 
-export type ReloadHow = 'setWidget' | 'ping' | 'complete' | 'finish' | 'leave' | 'nudge';
+export type ReloadHow = 'setWidget' | 'ping' | 'complete' | 'finish' | 'leave' | 'nudge' | 'reopen';
 /** 스크립트를 끝내는 방법인가(끝낸 뒤에는 지켜보는 것이 없다). */
 export const endsRun = (how: ReloadHow): boolean => how === 'finish' || how === 'leave';
 /** 달력을 띄운 채 여러 번 쓸 수 있는 방법. 앞의 것부터 시험하고 쓴다. */
@@ -56,15 +60,13 @@ export const ALIVE_MS = 1200;
 export const SHUT_MS = 1500;
 /** 나가서 지켜보지 못했고 그림도 없는 일이 이만큼 잇달으면, 되던 방법도 모르는 것으로 돌린다(다시 시험한다). */
 export const AWAY_LIMIT = 3;
-/** nudge를 한 뒤 위젯이 그려지기를 이만큼 기다린다. 그 안에 그려지지 않으면 스크립트를 끝낸다(finish). */
-export const NUDGE_WAIT_MS = 3500;
-/** nudge를 했는데 그려지지 않았을 때 그 시도에 적는 까닭(안 그려진 것으로 판정에 들어간다). */
-export const NUDGE_NO_DRAW = '그려지지 않아 스크립트를 끝냈다';
+/** reopen을 한 뒤 이만큼 지나도 이 달력이 닫히지 않으면(Scriptable이 닫지 않았다) 스크립트를 스스로 끝낸다. */
+export const REOPEN_WAIT_MS = 1500;
 /** 안 되는 것으로 가려진 지 이만큼 지나면 모르는 것으로 돌려 한 번 더 해 본다. */
 export const RETRY_AFTER_MS = 3 * 24 * 3_600_000;
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-const HOWS: readonly string[] = ['setWidget', 'ping', 'complete', 'finish', 'leave', 'nudge'];
+const HOWS: readonly string[] = ['setWidget', 'ping', 'complete', 'finish', 'leave', 'nudge', 'reopen'];
 const WHYS: readonly string[] = ['probe', 'save', 'leave'];
 
 /** 판정에 끝내 들어가지 않을 기록인가(닫아서 무효가 됐다, 나간 뒤에 했다). 하자마자 메뉴가 닫힌 것은 판정에 들어간다. */
@@ -204,15 +206,6 @@ export function verdictOf(how: ReloadHow, tries: ReloadTry[], now: number): Verd
 export function pickReload(tries: ReloadTry[], now: number): ReloadHow | null {
   for (const how of REPEATABLE) if (verdictOf(how, tries, now) === 'works') return how;
   return verdictOf('finish', tries, now) === 'fails' ? null : 'finish';
-}
-
-/**
- * 저장했을 때 nudge를 할 것인가. 안 되는 것(그려지지 않았다)이나 쓰지 않을 것으로 가려지기 전에는 한다.
- * safe: 그려진 것으로 가려져 있다(두 번 잇달아 그려졌다). 그때는 그려지기를 기다렸다가 스크립트를 끝내는 뒷받침을 두지 않는다.
- */
-export function nudges(tries: ReloadTry[], now: number): { use: boolean; safe: boolean } {
-  const verdict = verdictOf('nudge', tries, now);
-  return { use: verdict !== 'fails' && verdict !== 'bad', safe: verdict === 'works' };
 }
 
 /**
