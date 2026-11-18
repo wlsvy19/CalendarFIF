@@ -5,7 +5,7 @@ import { lunarLabel, lunarShort } from '../core/lunar';
 import { seasonNames } from '../core/solarTerms';
 import type { GridCell } from '../core/dates';
 import type { DayValue } from '../core/types';
-import type { MonthData } from './scene';
+import { dayOfCell, type MonthData } from './scene';
 import type { Family, Size } from './sizes';
 import { ALARM_MARK, COUNTDOWN_MARK } from './eventLines';
 import { capLines, fitText, memoLines } from './text';
@@ -73,7 +73,9 @@ function memoLine(line: { text: string; done: boolean }, size: number, width: nu
   const symbol: IconNode['symbol'] | null = line.text.startsWith(`${ALARM_MARK} `) ? 'bell' : line.text.startsWith(`${COUNTDOWN_MARK} `) ? 'hourglass' : null;
   const mark = symbol === 'bell' ? ALARM_MARK : COUNTDOWN_MARK;
   const body = (line.done ? DONE_MARK : '') + (symbol ? line.text.slice(mark.length + 1) : line.text);
-  const dim = line.done ? { opacity: 0.55 } : {};
+  // 끝낸 줄은 0.55, 다른 달의 칸(extra.opacity 0.4)이면 거기에 곱한다.
+  const fade = Math.round((extra.opacity ?? 1) * (line.done ? 0.55 : 1) * 100) / 100;
+  const dim = fade < 1 ? { opacity: fade } : {};
   const room = width === null ? null : symbol ? width - size - ICON_GAP : width;
   const words = text(room === null ? body : fitText(body, size, room), size, 'regular', C.ink, 1, { ...extra, ...dim });
   if (!symbol) return leading(words);
@@ -109,10 +111,11 @@ function dayCell(cell: GridCell, day: DayValue | undefined, today: string, lay: 
   const holiday = holidayLabel(cell.dateKey);
   const numberColor = cell.dateKey === today ? C.onAccent : hasColor ? C.ink : holiday !== '' ? C.sun : dowColor(cell.dow);
   const numberText = text(String(cell.dayOfMonth), DAY_NUMBER_SIZE, 'semibold', numberColor, 1, cell.inMonth ? {} : { opacity: 0.4 });
-  // 머리 줄: 숫자는 앞쪽, 음력은 뒤쪽 가장자리. 이번 달의 칸에만 음력과 공휴일 이름을 적는다.
-  // 절기나 복날이면 음력 대신 그 이름을 초록으로 적는다(둘이 겹치면 절기).
-  const season = lay.lunar && cell.inMonth ? seasonNames(cell.dateKey)[0] ?? '' : '';
-  const lunar = season !== '' ? season : lay.lunar && cell.inMonth ? lunarShort(cell.dateKey) : '';
+  // 머리 줄: 숫자는 앞쪽, 음력은 뒤쪽 가장자리. 절기나 복날이면 음력 대신 그 이름을 초록으로 적는다(둘이 겹치면 절기).
+  // 다른 달의 칸(앞뒤 며칠)도 웹앱의 칸처럼 음력, 공휴일 이름, 메모를 흐리게(0.4) 적고 배경은 그대로 칠한다.
+  const faded: Partial<TextNode> = cell.inMonth ? {} : { opacity: 0.4 };
+  const season = lay.lunar ? seasonNames(cell.dateKey)[0] ?? '' : '';
+  const lunar = season !== '' ? season : lay.lunar ? lunarShort(cell.dateKey) : '';
   // 오늘 표시: 크기를 정한 동그라미(두 자리 날은 조금 넓은 알약). 크기를 정하지 않으면 iOS가 머리 줄의 폭을
   // 숫자, 빈칸, 음력에 나눠 줄 때 숫자 상자가 모자라 날짜가 "…"로 잘린다(2026-11-17 아이폰에서 17일이 그랬다).
   // 그 안에서 숫자는 양옆의 안쪽 여백으로 가운데에 놓는다. 늘어나는 빈칸(flex)을 양옆에 두면 iOS가 상자의 폭을
@@ -130,23 +133,23 @@ function dayCell(cell: GridCell, day: DayValue | undefined, today: string, lay: 
     : numberText;
   const head: Node[] = [number, flex()];
   // 폭이 모자라면 iOS가 글자를 이만큼까지 줄인다. 그래도 안 들어가면 "…"로 자른다.
-  if (lunar !== '') head.push(text(lunar, 7.5, 'regular', season !== '' ? C.term : C.muted, 1, { minScale: 0.7 }));
+  if (lunar !== '') head.push(text(lunar, 7.5, 'regular', season !== '' ? C.term : C.muted, 1, { minScale: 0.7, ...faded }));
   const children: Node[] = [{ kind: 'stack', dir: 'h', align: 'center', children: head }];
   // 공휴일 이름은 메모 한 줄의 자리를 쓴다.
   let capacity = lay.capacity;
-  if (cell.inMonth && holiday !== '' && capacity > 0) {
-    children.push(leading(text(holiday, 8, 'semibold', C.sun, 1, { minScale: 0.8 })));
+  if (holiday !== '' && capacity > 0) {
+    children.push(leading(text(holiday, 8, 'semibold', C.sun, 1, { minScale: 0.8, ...faded })));
     capacity -= 1;
   }
-  if (cell.inMonth && day && capacity > 0) {
+  if (day && capacity > 0) {
     // 줄마다 한 줄짜리 글이다. 실제 폭이 어림보다 좁으면 iOS가 조금 줄이고, 그래도 넘치면 "…"로 자른다(다음 줄로 접지 않는다).
     const memo = (t: string, extra: Partial<TextNode> = {}): Node => leading(text(t, 9, 'regular', C.ink, 1, { minScale: 0.9, ...extra }));
     const { shown, more } = capLines(memoLines(day.text), capacity);
-    for (const l of shown) children.push(memoLine(l, 9, lay.innerWidth, { minScale: 0.9 }));
-    if (more > 0) children.push(memo(`+${more}`));
+    for (const l of shown) children.push(memoLine(l, 9, lay.innerWidth, { minScale: 0.9, ...faded }));
+    if (more > 0) children.push(memo(`+${more}`, faded));
   }
   children.push(flex());
-  return { kind: 'stack', dir: 'v', padding: [2, 2, 2, 2], background: hasColor && cell.inMonth ? dayPair(color) : C.surface, children };
+  return { kind: 'stack', dir: 'v', padding: [2, 2, 2, 2], background: hasColor ? dayPair(color) : C.surface, children };
 }
 
 function weekRow(cells: GridCell[], month: MonthData, today: string, lay: CellLayout): StackNode {
@@ -154,7 +157,7 @@ function weekRow(cells: GridCell[], month: MonthData, today: string, lay: CellLa
     kind: 'stack', dir: 'h', spacing: 1,
     children: cells.map((c) => {
       const inMonth = c.monthId === month.monthId;
-      return dayCell({ ...c, inMonth }, inMonth ? month.days[c.day] : undefined, today, lay);
+      return dayCell({ ...c, inMonth }, dayOfCell(month, c), today, lay);
     }),
   };
 }

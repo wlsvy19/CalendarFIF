@@ -76,15 +76,15 @@ describe('buildTree large', () => {
     }
   });
 
-  it('머리 줄의 뒤쪽 끝에 음력을 적는다(이번 달의 칸에만). lunar가 false면 적지 않는다', () => {
+  it('머리 줄의 뒤쪽 끝에 음력을 적는다(다른 달의 칸에는 흐리게). lunar가 false면 적지 않는다', () => {
     const head = (tree: Tree, day: number): Node[] => (cellOf(tree, day).children[0] as StackNode).children;
     expect(head(t, 14)).toHaveLength(3);
     expect(head(t, 14)[2]).toMatchObject({ kind: 'text', text: '10.6', size: 7.5, color: pair('muted'), lines: 1, minScale: 0.7 });
-    // 2026년 12월의 달력에는 11월 29, 30일이 앞에 붙는다. 그 칸에는 음력이 없다.
+    // 2026년 12월의 달력에는 11월 29, 30일이 앞에 붙는다. 그 칸의 음력은 웹앱처럼 흐리게(0.4) 적는다.
     const december = build('large', month({}, '2026-12'), '2026-12-10');
     const others = cells(december).filter((c) => ((c.children[0] as StackNode).children[0] as TextNode).opacity === 0.4);
     expect(others.length).toBeGreaterThan(0);
-    for (const c of others) expect((c.children[0] as StackNode).children).toHaveLength(2);
+    for (const c of others) expect((c.children[0] as StackNode).children[2]).toMatchObject({ kind: 'text', opacity: 0.4 });
     const off = buildTree({ family: 'large', size: widgetSize(SCREEN, 'large'), today: TODAY, month: month({}), offline: false, lunar: false });
     for (const c of cells(off)) expect(isFlex((c.children[0] as StackNode).children.at(-1))).toBe(true);
   });
@@ -385,5 +385,18 @@ describe('칸 폭과 수용량', () => {
 
   it('수용량이 1이고 줄이 더 있으면 +N만 보인다', () => {
     expect(memosOf(cell10(jan(282)))).toEqual([{ kind: 'text', text: '+10', ...MEMO }]);
+  });
+});
+
+describe('다른 달의 칸', () => {
+  it('11월 쪽 끝의 12월 1일에도 12월의 메모와 배경을 그린다. 글은 웹앱처럼 흐리게(0.4), 배경은 그대로다', () => {
+    const m: MonthData = { ...month({}), others: { '2026-12': { '01': { text: '12월 일', color: 'F12424' } } } };
+    const dec1 = cells(build('large', m)).at(-5)!; // 11월 쪽의 마지막 줄: 11/29, 11/30, 12/1 … 12/5
+    expect(((dec1.children[0] as StackNode).children[0] as TextNode)).toMatchObject({ text: '1', opacity: 0.4 });
+    const memo = (dec1.children[1] as StackNode).children[0] as TextNode;
+    expect(memo).toMatchObject({ kind: 'text', text: '12월 일', opacity: 0.4 });
+    expect(dec1.background).toEqual({ light: dayBackground('F12424', 'light'), dark: dayBackground('F12424', 'dark') });
+    // others가 없으면 그 칸은 비어 있다(전과 같다).
+    expect(cells(build('large', month({}))).at(-5)!.children).toHaveLength(2);
   });
 });

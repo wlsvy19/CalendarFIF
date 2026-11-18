@@ -14,11 +14,30 @@ export type Draw =
   | { kind: 'text'; x: number; y: number; w: number; h: number; text: string; size: number; weight: 'regular' | 'semibold' | 'bold'; color: string; alpha?: number; align: 'left' | 'center' | 'right' }
   | { kind: 'line'; x1: number; y1: number; x2: number; y2: number; color: string; alpha?: number; width: number };
 export type Scene = { width: number; height: number; background: string; draws: Draw[] };
-export type MonthData = { monthId: string; days: Record<string, DayValue> }; // days의 키는 '01'~'31'
+/**
+ * days의 키는 '01'~'31'. others: 그 달 밖이지만 위젯에 칸이 보이는 달들의 메모(달 id → days). 큰 위젯의 앞뒤 며칠, 중간 위젯의 주가 걸친 달.
+ * 웹앱의 칸처럼 그 칸에도 메모와 배경을 흐리게 그린다(2026-11-18 사용자: 11월 위젯의 12월 1일에 쓴 것이 안 보였다).
+ */
+export type MonthData = { monthId: string; days: Record<string, DayValue>; others?: Record<string, Record<string, DayValue>> };
+
+/** 칸의 메모. 그 달의 칸은 days에서, 앞뒤 달의 칸은 others에서 찾는다. */
+export const dayOfCell = (month: MonthData, cell: { monthId: string; day: string }): DayValue | undefined =>
+  cell.monthId === month.monthId ? month.days[cell.day] : month.others?.[cell.monthId]?.[cell.day];
 
 const r2 = (n: number): number => Math.round(n * 100) / 100;
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const MONTH_OPTS = { layout: 'month', maxRows: 6, pastWeeks: 0, weekStart: 0, firstWeek: 'jan1' } as const;
+
+/** 큰 위젯은 그 달 쪽(앞뒤 며칠이 걸친다), 중간 위젯은 오늘이 든 한 주의 줄들. */
+const gridRows = (family: Family, today: string) =>
+  family === 'medium' ? buildPage({ ...MONTH_OPTS, layout: 'week' }, today).rows : buildPage(MONTH_OPTS, `${today.slice(0, 7)}-01`).rows;
+
+/** 위젯에 칸이 보이는 다른 달들(오늘이 든 달 밖). 작은 위젯은 없다. */
+export function otherMonthsShown(family: Family, today: string): string[] {
+  if (family === 'small') return [];
+  const monthId = today.slice(0, 7);
+  return [...new Set(gridRows(family, today).flatMap((r) => r.cells.map((c) => c.monthId)))].filter((m) => m !== monthId).sort();
+}
 
 type TextOpts = { size: number; weight?: 'regular' | 'semibold' | 'bold'; color: string; alpha?: number; align?: 'left' | 'center' | 'right' };
 
@@ -38,13 +57,14 @@ function pushText(draws: Draw[], x: number, y: number, w: number, h: number, tex
   return cmd;
 }
 
-/** 메모 한 줄. 완료 줄은 흐리게 하고 글자 가운데를 지나는 줄을 긋는다. 글자가 안 그려지면 줄도 긋지 않는다. */
-function pushMemoLine(draws: Draw[], x: number, y: number, w: number, h: number, line: { text: string; done: boolean }, size: number, color: string, strokeWidth: number): void {
-  const cmd = pushText(draws, x, y, w, h, line.text, { size, color, ...(line.done ? { alpha: 0.55 } : {}) });
+/** 메모 한 줄. 완료 줄은 흐리게 하고 글자 가운데를 지나는 줄을 긋는다. 글자가 안 그려지면 줄도 긋지 않는다. fade: 다른 달의 칸이면 0.4. */
+function pushMemoLine(draws: Draw[], x: number, y: number, w: number, h: number, line: { text: string; done: boolean }, size: number, color: string, strokeWidth: number, fade = 1): void {
+  const alpha = r2((line.done ? 0.55 : 1) * fade);
+  const cmd = pushText(draws, x, y, w, h, line.text, { size, color, ...(alpha < 1 ? { alpha } : {}) });
   if (!cmd || !line.done) return;
   const mid = r2(y + h / 2);
   const len = Math.min(estimateWidth(cmd.text, cmd.size), w);
-  draws.push({ kind: 'line', x1: r2(x), y1: mid, x2: r2(x + len), y2: mid, color, alpha: 0.55, width: r2(strokeWidth) });
+  draws.push({ kind: 'line', x1: r2(x), y1: mid, x2: r2(x + len), y2: mid, color, alpha, width: r2(strokeWidth) });
 }
 
 const validColor = (day: DayValue | undefined): string => (day && day.color !== '' && isColor(day.color) ? day.color : '');
@@ -107,7 +127,7 @@ function drawCell(c: Ctx, cell: GridCell, x: number, y: number, w: number, h: nu
   } else {
     pushText(draws, x + pad, y + pad, innerW, 13.5 * s, num, { size: numSize, weight: 'semibold', color: numberColor, ...dimmed });
   }
-  if (!cell.inMonth) return;
+  // 다른 달의 칸도 웹앱처럼 음력, 공휴일 이름, 메모를 흐리게(0.4) 적는다. 배경은 그대로다.
 
   // 음력: 머리 줄의 오른쪽. 오늘 칸은 숫자 상자가 넓어서 자리가 모자라면 글자를 6.5까지 줄인다. 그래도 숫자와 겹치면 적지 않는다.
   // 절기나 복날이면 음력 대신 그 이름을 초록으로 적는다(둘이 겹치면 절기).
@@ -121,7 +141,7 @@ function drawCell(c: Ctx, cell: GridCell, x: number, y: number, w: number, h: nu
     let lunarSize = Math.max(MIN_FONT, 7.5 * s);
     if (isToday && units * lunarSize > room) lunarSize = Math.max(TIGHT_MIN_FONT, room / units);
     if (units * lunarSize <= room + 1e-9) {
-      draws.push({ kind: 'text', x: r2(x + pad), y: r2(y + pad + 2.5 * s), w: r2(innerW), h: r2(10 * s), text: lunar, size: r2(lunarSize), weight: 'regular', color: season !== '' ? p.term : p.muted, align: 'right' });
+      draws.push({ kind: 'text', x: r2(x + pad), y: r2(y + pad + 2.5 * s), w: r2(innerW), h: r2(10 * s), text: lunar, size: r2(lunarSize), weight: 'regular', color: season !== '' ? p.term : p.muted, ...dimmed, align: 'right' });
     }
   }
   // 공휴일 이름은 메모 한 줄의 자리를 쓴다.
@@ -130,7 +150,7 @@ function drawCell(c: Ctx, cell: GridCell, x: number, y: number, w: number, h: nu
     // '대체공휴일'처럼 칸보다 긴 이름은 글자를 줄여 넣고, 그래도 넘치면 뒤를 자른다.
     const nameSize = Math.max(TIGHT_MIN_FONT, Math.min(Math.max(MIN_FONT, 8 * s), innerW / estimateWidth(holiday, 1)));
     const fitted = fitText(holiday, nameSize, innerW);
-    if (fitted !== '') draws.push({ kind: 'text', x: r2(x + pad), y: r2(top), w: r2(innerW), h: r2(10.5 * s), text: fitted, size: r2(nameSize), weight: 'semibold', color: p.sun, align: 'left' });
+    if (fitted !== '') draws.push({ kind: 'text', x: r2(x + pad), y: r2(top), w: r2(innerW), h: r2(10.5 * s), text: fitted, size: r2(nameSize), weight: 'semibold', color: p.sun, ...dimmed, align: 'left' });
     top += 10.5 * s;
   }
 
@@ -141,10 +161,10 @@ function drawCell(c: Ctx, cell: GridCell, x: number, y: number, w: number, h: nu
   const { shown, more } = capLines(memoLines(day.text), capacity);
   let ly = top;
   for (const line of shown) {
-    pushMemoLine(draws, x + pad, ly, innerW, lineH, line, size, p.ink, 0.75 * s);
+    pushMemoLine(draws, x + pad, ly, innerW, lineH, line, size, p.ink, 0.75 * s, cell.inMonth ? 1 : 0.4);
     ly += lineH;
   }
-  if (more > 0) pushText(draws, x + pad, ly, innerW, lineH, `+${more}`, { size, color: p.muted });
+  if (more > 0) pushText(draws, x + pad, ly, innerW, lineH, `+${more}`, { size, color: p.muted, ...dimmed });
 }
 
 /** 큰 위젯(달 전체)과 중간 위젯(오늘이 든 한 주)이 같이 쓰는 그리기. */
@@ -173,7 +193,7 @@ function buildGrid(input: Parameters<typeof buildScene>[0], p: Palette): Scene {
   rows.forEach((row, r) => {
     row.cells.forEach((cell, i) => {
       const inMonth = cell.monthId === month.monthId;
-      const day = inMonth ? month.days[cell.day] : undefined;
+      const day = dayOfCell(month, cell);
       drawCell(c, { ...cell, inMonth }, gridX + i * (cellW + gap), gridTop + r * (cellH + gap), cellW, cellH, day, today, maxLines);
     });
   });

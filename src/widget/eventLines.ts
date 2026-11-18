@@ -8,6 +8,7 @@
  */
 import { DONE_MARK } from '../core/text';
 import { eventsByDate, type EventMap } from '../core/events';
+import type { DayValue } from '../core/types';
 import type { MonthData } from './scene';
 
 /** 알림 줄 앞의 종과 카운트다운 줄 앞의 모래시계. */
@@ -39,15 +40,33 @@ function lineOf(mark: string, time: string, text: string, done: boolean): string
  * 넣을 것이 없으면 month를 그대로 돌려준다. 메모가 없던 날은 색 없는 날로 생긴다.
  */
 export function withEventLines(month: MonthData, items: EventMap): MonthData {
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month.monthId)) return month;
+  const days = daysWithEvents(month.monthId, month.days, items);
+  let others = month.others;
+  // 위젯에 칸이 보이는 다른 달(앞뒤 며칠)에도 끼워 넣는다: 웹앱의 칸이 그 날짜에도 알림을 보인다.
+  if (others) {
+    let otherChanged = false;
+    const next: Record<string, Record<string, DayValue>> = {};
+    for (const [monthId, d] of Object.entries(others)) {
+      next[monthId] = daysWithEvents(monthId, d, items);
+      if (next[monthId] !== d) otherChanged = true;
+    }
+    if (otherChanged) others = next;
+  }
+  if (days === month.days && others === month.others) return month;
+  return others ? { monthId: month.monthId, days, others } : { monthId: month.monthId, days };
+}
+
+/** 그 달의 days에 알림과 카운트다운 줄을 끼워 넣은 것. 넣을 것이 없으면 받은 것 그대로다. */
+function daysWithEvents(monthId: string, source: Record<string, DayValue>, items: EventMap): Record<string, DayValue> {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthId)) return source;
   let byDate: ReturnType<typeof eventsByDate>;
   try {
-    byDate = eventsByDate(items, `${month.monthId}-01`, lastDayOf(month.monthId));
+    byDate = eventsByDate(items, `${monthId}-01`, lastDayOf(monthId));
   } catch {
-    return month;
+    return source;
   }
-  if (byDate.size === 0) return month;
-  const days = { ...month.days };
+  if (byDate.size === 0) return source;
+  const days = { ...source };
   let changed = false;
   for (const [dateKey, lines] of byDate) {
     const texts = lines
@@ -59,5 +78,5 @@ export function withEventLines(month: MonthData, items: EventMap): MonthData {
     days[day] = { text: had && had.text !== '' ? `${texts.join('\n')}\n${had.text}` : texts.join('\n'), color: had?.color ?? '' };
     changed = true;
   }
-  return changed ? { monthId: month.monthId, days } : month;
+  return changed ? days : source;
 }

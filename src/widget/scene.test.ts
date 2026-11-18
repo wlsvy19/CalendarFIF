@@ -84,12 +84,16 @@ describe('large scene, November 2026', () => {
     expect(more.color).toBe(p.muted);
   });
 
-  it('dims the trailing December days and gives them no memo or colour', () => {
-    // 12월 1일의 키 '01'은 11월 1일의 키와 같다. 데이터는 11월 1일 칸에만 그려진다.
+  it('dims the trailing December days and draws their memo and colour from others, like the web calendar', () => {
+    // 12월 1일의 키 '01'은 11월 1일의 키와 같다. 11월의 데이터는 11월 1일 칸에만 그려진다.
     const s = large(nov({ '01': { text: '한 번만', color: 'F12424' } }));
-    expect(texts(s).filter((t) => t.alpha === 0.4).map((t) => t.text)).toEqual(['1', '2', '3', '4', '5']);
+    expect(texts(s).filter((t) => t.alpha === 0.4 && /^\d+$/.test(t.text)).map((t) => t.text)).toEqual(['1', '2', '3', '4', '5']);
     expect(texts(s).filter((t) => t.text === '한 번만')).toHaveLength(1);
     expect(rects(s).filter((r) => r.color === dayBackground('F12424', 'light'))).toHaveLength(1);
+    // 12월의 메모(others)는 12월 1일 칸에 흐리게(0.4) 그리고, 배경은 그대로 칠한다(2026-11-18 사용자).
+    const withDec = large({ ...nov({ '01': { text: '한 번만', color: '' } }), others: { '2026-12': { '01': { text: '12월 일', color: 'F12424' } } } });
+    expect(texts(withDec).filter((t) => t.text === '12월 일')).toMatchObject([{ alpha: 0.4 }]);
+    expect(rects(withDec).filter((r) => r.color === dayBackground('F12424', 'light'))).toHaveLength(1);
   });
 });
 
@@ -186,7 +190,7 @@ describe('medium scene', () => {
   });
   it('uses the week across the month edge as dimmed days', () => {
     const edge = buildScene({ family: 'medium', theme: 'light', size: sizeOf('medium'), today: '2026-11-30', month: busy, offline: false });
-    expect(texts(edge).filter((t) => t.alpha === 0.4).map((t) => t.text)).toEqual(['1', '2', '3', '4', '5']);
+    expect(texts(edge).filter((t) => t.alpha === 0.4 && /^\d+$/.test(t.text)).map((t) => t.text)).toEqual(['1', '2', '3', '4', '5']);
   });
 });
 
@@ -259,10 +263,11 @@ describe('holidays and lunar dates in the grid', () => {
     expect(name.size).toBeGreaterThanOrEqual(6.5);
     expect(estimateWidth(name.text, name.size)).toBeLessThanOrEqual(name.w + 0.05); // 소수 둘째 자리로 반올림한 만큼
   });
-  it('writes the lunar date at the right of the number row, for days of this month only', () => {
+  it('writes the lunar date at the right of the number row, dimmed on the days of the next and previous month', () => {
     expect(lunar(s).map((t) => t.text)).toEqual(expect.arrayContaining(['8.23', '8.25', '9.1']));
-    // 31일 가운데 8일(한로)과 23일(상강)은 음력 대신 이름이 들어간다.
-    expect(lunar(s)).toHaveLength(29);
+    // 31일 가운데 8일(한로)과 23일(상강)은 음력 대신 이름이 들어간다. 앞에 붙은 9월 27~30일 넷은 흐리게 적는다(웹앱의 칸과 같다).
+    expect(lunar(s)).toHaveLength(33);
+    expect(lunar(s).filter((t) => t.alpha === 0.4)).toHaveLength(4);
     for (const t of lunar(s)) expect(t.size).toBeGreaterThanOrEqual(8);
     expect(lunar(october({ lunar: false }))).toEqual([]);
   });

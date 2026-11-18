@@ -52,7 +52,7 @@ describe('위젯으로 실행', () => {
   it('토큰이 있으면 갱신하고, 읽고, 보관하고, 위젯을 둔다', async () => {
     const host = make({ keychain: loggedIn });
     await run(host, cfg, now);
-    expect(host.state.requests.map((r) => r.method)).toEqual(['POST', 'GET', 'GET', 'GET']); // 갱신, 달, 알림 문서, 푸시 문서
+    expect(host.state.requests.map((r) => r.method)).toEqual(['POST', 'GET', 'GET', 'GET', 'GET']); // 갱신, 달, 쪽 끝에 보이는 12월, 알림 문서, 푸시 문서
     expect(host.state.requests[1].url).toContain('/users/owner-test-uid/months/2026-11');
     expect(host.state.requests[1].headers.Authorization).toBe('Bearer ID2');
     expect(JSON.parse(host.state.files.get(CACHE)!)).toMatchObject({ monthId: '2026-11', days: { '13': { text: '리뷰', color: 'F9BC0B' } } });
@@ -849,7 +849,7 @@ describe('아이폰 알림 예약', () => {
   it('위젯 실행 뒤 알림을 예약한다', async () => {
     const host = makeNative({ keychain: loggedIn }, withEvents());
     await run(host, cfg, now);
-    expect(host.state.requests.map((r) => r.url.split('/documents/')[1] ?? '')).toEqual(['', 'users/owner-test-uid/months/2026-11', 'users/owner-test-uid/data/events', 'users/owner-test-uid/data/push']);
+    expect(host.state.requests.map((r) => r.url.split('/documents/')[1] ?? '')).toEqual(['', 'users/owner-test-uid/months/2026-11', 'users/owner-test-uid/months/2026-12', 'users/owner-test-uid/data/events', 'users/owner-test-uid/data/push']);
     expect(host.state.scheduled.map((n) => n.identifier)).toEqual([ID]);
     expect(host.state.scheduled[0]).toMatchObject({ body: '09:30 회의', openURL: 'https://example.test/#2026-11-16' });
     expect(JSON.parse(host.state.files.get(CACHE)!)).toMatchObject({ monthId: '2026-11', events: { abc123: { text: '회의' } } });
@@ -1923,5 +1923,42 @@ describe('달력에서 나갈 때', () => {
       await run(host, cfg, now);
       expect(host.state.alerts[0].message).toContain(text);
     }
+  });
+});
+
+describe('쪽 끝에 보이는 다른 달의 칸', () => {
+  const day = (text: string, color = '') => ({ mapValue: { fields: { text: { stringValue: text }, color: { stringValue: color } } } });
+  const decDoc = { fields: { days: { mapValue: { fields: { '01': day('12월 일', 'F12424') } } } } };
+  const read = (req: FakeRequest): FakeAnswer => ({ body: req.url.includes('/months/2026-12') ? decDoc : memoDoc });
+
+  it('11월 위젯의 12월 1~5일 칸에 12월의 메모를 그린다. 그 달은 함께 읽어 보관하고, 오프라인이면 보관한 것을 그린다(2026-11-18 사용자)', async () => {
+    const host = make({ keychain: loggedIn }, { read });
+    await run(host, cfg, now);
+    expect(drawnTexts(host)).toEqual(expect.arrayContaining(['리뷰', '12월 일']));
+    const cache = JSON.parse(host.state.files.get(CACHE)!);
+    expect(cache.others['2026-12'].days).toEqual({ '01': { text: '12월 일', color: 'F12424' } });
+
+    const offline = make({ keychain: loggedIn, files: Object.fromEntries(host.state.files) }, { read: () => ({ status: 503, body: {} }) });
+    await run(offline, cfg, now);
+    expect(drawnTexts(offline)).toEqual(expect.arrayContaining(['12월 일', '오프라인']));
+  });
+
+  it('12월을 읽지 못해도 11월은 그린다', async () => {
+    const host = make({ keychain: loggedIn }, { read: (req) => (req.url.includes('/months/2026-12') ? { status: 503, body: {} } : { body: memoDoc }) });
+    await run(host, cfg, now);
+    expect(drawnTexts(host)).toContain('리뷰');
+    expect(drawnTexts(host)).not.toContain('오프라인');
+  });
+
+  it('위젯에서 연 달력이 아직 올리지 못한 12월 1일의 편집도 그 칸에 얹는다', async () => {
+    const pending = { uid: 'owner-test-uid', savedAt: now().getTime(), edits: [{ monthId: '2026-12', day: '01', text: '방금 쓴 것', color: '', editedAt: now().getTime() }] };
+    const first = make({ keychain: loggedIn }, { read });
+    await run(first, cfg, now);
+    const files = Object.fromEntries(first.state.files);
+    files[CACHE] = JSON.stringify({ ...JSON.parse(files[CACHE]), pending });
+    const host = make({ keychain: loggedIn, files }, { read });
+    await run(host, cfg, now);
+    expect(drawnTexts(host)).toContain('방금 쓴 것');
+    expect(drawnTexts(host)).not.toContain('12월 일');
   });
 });

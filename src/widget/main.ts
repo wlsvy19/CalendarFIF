@@ -12,7 +12,7 @@ import { withEventLines } from './eventLines';
 import { ALIVE_MS, CREDIT_MS, SETTLE_MS, SHUT_MS, creditDraw, endsRun, pickReload, verdictOf, reloadCell, toProbe, triesOf, waitsForLeave, type ReloadHow, type ReloadTry, type ReloadWhy } from './reload';
 import { makeWidget } from './render';
 import { renderTree } from './renderTree';
-import { buildScene, messageScene, type MonthData, type Scene } from './scene';
+import { buildScene, messageScene, otherMonthsShown, type MonthData, type Scene } from './scene';
 import { widgetSize, type Family, type Size } from './sizes';
 import type { Theme } from './theme';
 import { buildTree, messageTree, type Tree } from './tree';
@@ -785,9 +785,51 @@ function updateCache(host: Host, patch: Record<string, unknown>): void {
   }
 }
 
-/** times: 서버가 가진 날짜별 고친 시각. 보관해 둔 달 위에 올리지 못한 편집을 얹을 때 쓴다. */
-function writeCache(host: Host, data: MonthData, times: Record<string, number>, now: Date): void {
-  updateCache(host, { monthId: data.monthId, days: data.days, times, savedAt: now.getTime() });
+/** times: 서버가 가진 날짜별 고친 시각. 보관해 둔 달 위에 올리지 못한 편집을 얹을 때 쓴다. near: 위젯에 칸이 보이는 다른 달들. */
+function writeCache(host: Host, data: MonthData, times: Record<string, number>, now: Date, near: NearMonth[] = []): void {
+  const others: Record<string, { days: Record<string, DayValue>; times: Record<string, number> }> = {};
+  for (const n of near) others[n.monthId] = { days: n.days, times: n.times };
+  updateCache(host, { monthId: data.monthId, days: data.days, times, others, savedAt: now.getTime() });
+}
+
+/**
+ * 위젯에 칸이 보이는 다른 달(앞뒤 며칠)의 메모. fresh: 이번에 서버에서 읽었다(그때만 서버가 따라잡은 편집을 지운다).
+ * 읽지 못하면 보관해 둔 것을, 그것도 없으면 빈 달을 쓴다. 그 달을 읽지 못해도 이번 달은 그린다.
+ */
+type NearMonth = { monthId: string; days: Record<string, DayValue>; times: Record<string, number>; fresh: boolean };
+
+/** 보관 파일의 others 칸에서 그 달을 꺼낸다. 없으면 빈 달. */
+function cachedNear(host: Host, monthId: string): NearMonth {
+  const empty: NearMonth = { monthId, days: {}, times: {}, fresh: false };
+  try {
+    const others = cacheObject(host)?.others;
+    if (typeof others !== 'object' || others === null) return empty;
+    const cell = (others as Record<string, unknown>)[monthId];
+    if (typeof cell !== 'object' || cell === null) return empty;
+    const { days, times } = cell as { days?: unknown; times?: unknown };
+    return { monthId, days: daysOf(days), times: timesOf(times), fresh: false };
+  } catch {
+    return empty;
+  }
+}
+
+/** 보관 파일의 days를 읽는다. 모양이 다른 날은 버린다. */
+function daysOf(days: unknown): Record<string, DayValue> {
+  const out: Record<string, DayValue> = {};
+  if (typeof days !== 'object' || days === null) return out;
+  for (const [key, v] of Object.entries(days)) {
+    if (!/^(0[1-9]|[12][0-9]|3[01])$/.test(key)) continue;
+    const day = v as Partial<DayValue> | null;
+    if (day && typeof day.text === 'string' && typeof day.color === 'string' && isColor(day.color)) out[key] = { text: day.text, color: day.color };
+  }
+  return out;
+}
+
+function timesOf(times: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (typeof times !== 'object' || times === null) return out;
+  for (const [key, v] of Object.entries(times)) if (typeof v === 'number' && Number.isFinite(v)) out[key] = v;
+  return out;
 }
 
 /** 보관 파일을 통째로 읽는다. 없거나 깨졌으면 null. */
@@ -820,22 +862,29 @@ function readCachedTimes(host: Host, monthId: string): Record<string, number> {
 /** 이번 실행에서 달을 어디서 읽었고(src) 올라가지 않은 편집을 몇 건 얹었는지(over). 위젯을 그린 기록에 적는다. */
 const loadNote = { src: 'none', over: 0 };
 
-function withPending(host: Host, month: MonthData, times: Record<string, number>, now: Date, fromServer: boolean): MonthData {
+function withPending(host: Host, month: MonthData, times: Record<string, number>, now: Date, fromServer: boolean, near: NearMonth[] = []): MonthData {
   loadNote.src = fromServer ? 'server' : 'cache';
   loadNote.over = 0;
+  const plain: MonthData = near.length > 0 ? { ...month, others: Object.fromEntries(near.map((n) => [n.monthId, n.days])) } : month;
   try {
     let state = pendingStateOf(cacheObject(host)?.pending);
-    if (!state) return month;
+    if (!state) return plain;
+    const at = now.getTime();
     if (fromServer) {
-      const settled = settlePending(month.monthId, times, state, now.getTime());
+      let settled = settlePending(month.monthId, times, state, at);
+      for (const n of near) if (n.fresh) settled = settlePending(n.monthId, n.times, settled, at);
       if (settled !== state) updateCache(host, { pending: settled });
       state = settled;
     }
     const uid = host.Keychain.contains(UID_KEY) ? host.Keychain.get(UID_KEY) : '';
-    loadNote.over = countPending(month.monthId, times, state, uid, now.getTime());
-    return { monthId: month.monthId, days: applyPending(month.monthId, month.days, times, state, uid, now.getTime()) };
+    loadNote.over = countPending(month.monthId, times, state, uid, at) + near.reduce((sum, n) => sum + countPending(n.monthId, n.times, state, uid, at), 0);
+    const days = applyPending(month.monthId, month.days, times, state, uid, at);
+    if (near.length === 0) return { monthId: month.monthId, days };
+    // 위젯에서 연 달력에서 11월 쪽 끝의 12월 1일을 고친 것도 그 칸에 얹는다.
+    const others = Object.fromEntries(near.map((n) => [n.monthId, applyPending(n.monthId, n.days, n.times, state, uid, at)]));
+    return { monthId: month.monthId, days, others };
   } catch {
-    return month;
+    return plain;
   }
 }
 
@@ -928,13 +977,7 @@ export function readCache(host: Host, monthId: string): MonthData | null {
     if (typeof parsed !== 'object' || parsed === null) return null;
     const { monthId: id, days } = parsed as { monthId?: unknown; days?: unknown };
     if (id !== monthId || typeof days !== 'object' || days === null) return null;
-    const out: Record<string, DayValue> = {};
-    for (const [key, v] of Object.entries(days)) {
-      if (!/^(0[1-9]|[12][0-9]|3[01])$/.test(key)) continue;
-      const day = v as Partial<DayValue> | null;
-      if (day && typeof day.text === 'string' && typeof day.color === 'string' && isColor(day.color)) out[key] = { text: day.text, color: day.color };
-    }
-    return { monthId, days: out };
+    return { monthId, days: daysOf(days) };
   } catch {
     return null;
   }
@@ -1095,9 +1138,11 @@ async function load(host: Host, cfg: Config, env: Env, now: Date, alarmsDone = f
     }
     return monthView(env, shown, offline);
   };
+  // 위젯에 칸이 보이는 다른 달(큰 위젯의 앞뒤 며칠, 중간 위젯의 주가 걸친 달). 그 칸에도 메모를 흐리게 그린다.
+  const nearIds = otherMonthsShown(env.family, env.today);
   const fromCache = async (code: string | null): Promise<View> => {
     const cached = readCache(host, monthId);
-    if (cached) return drawMonth(withPending(host, cached, readCachedTimes(host, monthId), now, false), true);
+    if (cached) return drawMonth(withPending(host, cached, readCachedTimes(host, monthId), now, false, nearIds.map((m) => cachedNear(host, m))), true);
     return code === null
       ? message(env, '불러오지 못했습니다', ['네트워크를 확인하세요.'])
       : message(env, '불러오지 못했습니다', ['잠시 뒤 다시 시도합니다.', `(${Array.from(code).slice(0, 40).join('')})`]);
@@ -1105,12 +1150,20 @@ async function load(host: Host, cfg: Config, env: Env, now: Date, alarmsDone = f
   try {
     const session = await refreshSession(host, cfg, token);
     if (session.refreshToken !== token) storeLogin(host, session.refreshToken, session.uid);
-    const doc = await readMonthDoc(host, cfg, session, monthId);
+    // 다른 달은 함께 읽는다. 읽지 못하면 보관해 둔 것을 쓴다(이번 달을 읽은 것으로 그린다).
+    const [doc, ...nearDocs] = await Promise.all([
+      readMonthDoc(host, cfg, session, monthId),
+      ...nearIds.map((m) => readMonthDoc(host, cfg, session, m).catch(() => null)),
+    ]);
+    const near: NearMonth[] = nearIds.map((m, i) => {
+      const got = nearDocs[i];
+      return got ? { monthId: m, days: got.days, times: got.times, fresh: true } : cachedNear(host, m);
+    });
     const month: MonthData = { monthId, days: doc.days };
-    writeCache(host, month, doc.times, now);
+    writeCache(host, month, doc.times, now, near);
     // 던지지 않는다. 알림 기능이 멈춰 끝나지 않아도 5초 뒤에는 그린다(예약은 다음 실행에 다시 한다).
     if (!alarmsDone) await waitAtMost(host, syncAlarms(host, cfg, session, now), ALARM_SYNC_WAIT_MS, SYNC_UNKNOWN);
-    return await drawMonth(withPending(host, month, doc.times, now, true), false);
+    return await drawMonth(withPending(host, month, doc.times, now, true, near), false);
   } catch (e) {
     if (!isApiError(e)) throw e;
     if (e.kind === 'network') return fromCache(null);

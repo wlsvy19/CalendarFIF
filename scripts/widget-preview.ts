@@ -31,6 +31,8 @@ const november: MonthData = {
     '27': { text: '출장 준비\n[+]표 예매\n숙소 예약', color: '' },
     '30': { text: '월말 정산', color: '' },
   },
+  // 쪽 끝에 보이는 12월의 칸(흐리게 그린다).
+  others: { '2026-12': { '01': { text: '12월 첫날', color: 'F12424' }, '03': { text: '송년회', color: '' } } },
 };
 const january: MonthData = {
   monthId: '2027-01',
