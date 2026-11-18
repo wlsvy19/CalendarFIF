@@ -1773,15 +1773,15 @@ describe('메뉴의 상태에 적을 기록', () => {
     delete (globalThis as Record<string, unknown>).WebView;
   });
 
-  it('위젯을 그릴 때마다 그린 때, 버전, 달을 읽은 곳, 얹은 편집 수, 다음에 청한 때를 적는다(마지막 여덟 번)', async () => {
+  it('위젯을 그릴 때마다 그린 때, 버전, 달을 읽은 곳, 얹은 편집 수, 다음에 청한 때를 적는다(마지막 열여섯 번)', async () => {
     const pending = { uid: 'owner-test-uid', savedAt: NOW - 1000, edits: [{ monthId: '2026-11', day: '20', text: '새 메모', color: '', editedAt: NOW - 500 }] };
-    const old = Array.from({ length: 8 }, (_, i) => ({ at: NOW - 10_000 + i, v: '0.9.11', src: 'server', over: 0, next: NOW }));
+    const old = Array.from({ length: 16 }, (_, i) => ({ at: NOW - 10_000 + i, v: '0.9.11', src: 'server', over: 0, next: NOW }));
     const host = make({ keychain: loggedIn, files: { [CACHE]: JSON.stringify({ pending, draws: old }) } });
     await run(host, { ...cfg, version: '0.9.11 (2026-11-17)' }, now);
     const draws = cacheOf(host).draws as { at: number }[];
-    expect(draws).toHaveLength(8);
+    expect(draws).toHaveLength(16);
     expect(draws[0].at).toBe(NOW - 10_000 + 1);
-    expect(draws[7]).toEqual({ at: NOW, v: '0.9.11 (2026-11-17)', src: 'server', over: 1, next: NOW + 900_000 });
+    expect(draws[15]).toEqual({ at: NOW, v: '0.9.11 (2026-11-17)', src: 'server', over: 1, next: NOW + 900_000 });
   });
 
   it('네트워크가 안 되면 보관해 둔 것으로, 로그인이 없으면 로그인 안내로 적는다', async () => {

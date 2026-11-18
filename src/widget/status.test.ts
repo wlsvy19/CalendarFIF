@@ -8,9 +8,9 @@ const NO_UPDATE: UpdateNote = { version: '', unfinished: {}, skipUntil: {}, note
 const nothing = { now: NOW, draws: [], web: null, activeAt: 0, pending: null, bridge: null, update: NO_UPDATE };
 
 describe('기록 읽기', () => {
-  it('draws: 모양이 다른 것은 버리고 마지막 여덟 개만 남긴다', () => {
+  it('draws: 모양이 다른 것은 버리고 마지막 열여섯 개만 남긴다', () => {
     expect(drawsOf([{ at: 5, v: 'a', src: 'server', over: 1, next: 9 }, { at: 0 }, null, 'x', { at: 6 }])).toEqual([{ at: 5, v: 'a', src: 'server', over: 1, next: 9 }, { at: 6, v: '', src: '', over: 0, next: 0 }]);
-    expect(drawsOf(Array.from({ length: 12 }, (_, i) => ({ at: i + 1 }))).map((d) => d.at)).toEqual([5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(drawsOf(Array.from({ length: 20 }, (_, i) => ({ at: i + 1 }))).map((d) => d.at)).toEqual(Array.from({ length: 16 }, (_, i) => i + 5));
     expect(drawsOf(undefined)).toEqual([]);
   });
 
@@ -61,12 +61,13 @@ describe('statusText', () => {
     ]);
   });
 
-  it('위젯을 바로 새로 그리게 하는 방법의 판정과 마지막 시도 다섯 개를 적는다. 해 본 적이 없으면 적지 않는다', () => {
+  it('위젯을 바로 새로 그리게 하는 방법의 판정과 마지막 시도 열여섯 개를 적는다. 해 본 적이 없으면 적지 않는다', () => {
     const t = (how: ReloadTry['how'], why: ReloadTry['why'], when: number, more: Partial<ReloadTry> = {}): ReloadTry => ({ how, why, at: when, got: 0, alive: true, void: false, away: false, shut: false, err: '', ...more });
     expect(reloadLines([], NOW)).toEqual([]);
     expect(statusText({ ...nothing, reload: [] })).toBe('');
     const tries = [
-      t('finish', 'save', at(9, 0, 0)), // 마지막 다섯 개보다 앞의 것은 시도 줄에 나오지 않는다
+      ...Array.from({ length: 9 }, (_, i) => t('nudge', 'save', at(8, i, 0))), // 마지막 열여섯 개보다 앞의 것은 시도 줄에 나오지 않는다
+      t('finish', 'save', at(9, 0, 0)),
       t('setWidget', 'probe', at(10, 0, 0)),
       t('ping', 'probe', at(9, 30, 0), { got: at(9, 30, 0) + 700 }),
       t('ping', 'probe', at(10, 0, 4), { got: at(10, 0, 4) + 900 }),
@@ -77,9 +78,9 @@ describe('statusText', () => {
     ];
     expect(reloadLines(tries, NOW)).toEqual([
       '바로 그리기: setWidget 안 됨 · ping 됨 · complete 시험 전 · finish 시험 전 · leave 시험 전 · relaunch 시험 전',
-      '시도: 10:00:04 ping(시험) 0.9초 뒤 그림 · 10:00:08 complete(시험) 바로 닫힘 · 10:02:00 ping(저장) 나가서 지켜보지 못함 · 10:03:00 ping(나간 뒤) 닫아서 무효 · 10:04:58 ping(저장) 지켜보는 중',
+      '시도: 08:01:00 nudge(저장) 안 그려짐 · 08:02:00 nudge(저장) 안 그려짐 · 08:03:00 nudge(저장) 안 그려짐 · 08:04:00 nudge(저장) 안 그려짐 · 08:05:00 nudge(저장) 안 그려짐 · 08:06:00 nudge(저장) 안 그려짐 · 08:07:00 nudge(저장) 안 그려짐 · 08:08:00 nudge(저장) 안 그려짐 · 09:00:00 finish(저장) 안 그려짐 · 10:00:00 setWidget(시험) 안 그려짐 · 09:30:00 ping(시험) 0.7초 뒤 그림 · 10:00:04 ping(시험) 0.9초 뒤 그림 · 10:00:08 complete(시험) 바로 닫힘 · 10:02:00 ping(저장) 나가서 지켜보지 못함 · 10:03:00 ping(나간 뒤) 닫아서 무효 · 10:04:58 ping(저장) 지켜보는 중',
     ]);
-    expect(reloadLines(tries.slice(0, 2), NOW)[1]).toBe('시도: 09:00:00 finish(저장) 안 그려짐 · 10:00:00 setWidget(시험) 안 그려짐');
+    expect(reloadLines(tries.slice(9, 11), NOW)[1]).toBe('시도: 09:00:00 finish(저장) 안 그려짐 · 10:00:00 setWidget(시험) 안 그려짐');
     expect(reloadLines([t('ping', 'probe', at(10, 0, 0), { alive: false }), t('setWidget', 'probe', at(10, 1, 0), { err: 'x'.repeat(60) })], NOW)[1]).toBe(`시도: 10:00:00 ping(시험) 스크립트가 멈춤 · 10:01:00 setWidget(시험) 못 함(${'x'.repeat(40)})`);
     expect(statusText({ ...nothing, reload: tries }).split('\n')[2]).toBe('바로 그리기: setWidget 안 됨 · ping 됨 · complete 시험 전 · finish 시험 전 · leave 시험 전 · relaunch 시험 전');
   });

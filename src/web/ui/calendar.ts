@@ -68,7 +68,7 @@ export type WebLook = { memoSize: MemoSize; lineSpacing?: LineSpacing };
 
 type CellLine = { text: string; done: boolean; ev?: { type: 'alarm' | 'countdown'; kind: CountdownKind | null } };
 
-export type CalendarHandle = { destroy(): void; setAppearance(a: Appearance, web?: WebLook): void; goToday(): void; showMonth(monthId: string): void };
+export type CalendarHandle = { destroy(): void; setAppearance(a: Appearance, web?: WebLook): void; goToday(): void; showMonth(monthId: string, dateKey?: string): void };
 
 const dowSpan = (dow: number): string => `<span${dow === 0 ? ' class="sun"' : dow === 6 ? ' class="sat"' : ''}>${WEEKDAYS[dow]}</span>`;
 
@@ -560,9 +560,12 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     },
     goToday,
     // 열려는 날짜의 달로 간다. 전체 월은 보이는 달이 아니면 그 달로 넘어가고, 다른 배치는 이미 구독 중이면(보이는 쪽에 있으면) 그대로 둔다.
+    // 전체 월이라도 지금 쪽에 그 날짜가 보이면(11월 쪽 끝의 12월 1~5일) 그대로 둔다: 고치고 닫으면 보던 달로 돌아와야 한다(2026-11-18 사용자).
     // 그대로 둘 때 다시 그리지 않는다: 여는 쪽(main.ts)이 이어서 store.refresh()로 다시 그린다.
-    showMonth(monthId) {
-      const shown = appearance.layout === 'month' ? pager.anchor().slice(0, 7) === monthId : store.covers(monthId);
+    showMonth(monthId, dateKey) {
+      const onPage = (): boolean =>
+        dateKey !== undefined && buildPage(pageOptions(appearance), pager.anchor()).rows.some((r) => r.cells.some((c) => c.dateKey === dateKey));
+      const shown = appearance.layout === 'month' ? pager.anchor().slice(0, 7) === monthId || onPage() : store.covers(monthId);
       if (shown) return;
       const today = deps.today();
       pager.jump(monthId === today.slice(0, 7) ? today : `${monthId}-01`);

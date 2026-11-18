@@ -14,7 +14,7 @@ export type LeaveNote = { at: number; how: 'closed' | 'left' };
 /** update.ts의 상태 가운데 메뉴에 적을 것. */
 export type UpdateNote = { version: string; unfinished: Record<string, number>; skipUntil: Record<string, number>; note: string; libNote: string };
 
-export const MAX_DRAWS = 8;
+export const MAX_DRAWS = 16;
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
@@ -60,7 +60,7 @@ const span = (ms: number): string => (ms < 90_000 ? `${Math.round(ms / 1000)}초
 
 const VERDICTS: Record<Verdict, string> = { works: '됨', fails: '안 됨', bad: '쓰지 않음', unknown: '시험 전' };
 const WHYS: Record<ReloadTry['why'], string> = { probe: '시험', save: '저장', leave: '나간 뒤' };
-const SHOWN_TRIES = 5;
+const SHOWN_TRIES = 16;
 
 /** 한 번 해 본 것의 결과를 적는다. */
 function tryResult(t: ReloadTry, now: number): string {

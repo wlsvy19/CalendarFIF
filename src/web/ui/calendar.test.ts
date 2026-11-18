@@ -432,6 +432,15 @@ describe('구독과 날짜 열기', () => {
     expect([store.current(), title(root)]).toEqual(['2026-12', '12월']);
     expect(store.show.mock.calls).toEqual([['2026-12', ['2026-09', '2026-10', '2027-02', '2027-03']]]); // 한 번, 앞뒤 두 쪽의 달과 함께
   });
+  it('전체 월에서 지금 쪽 끝에 보이는 다음 달의 날짜(11월 쪽의 12월 1~5일)를 열면 넘어가지 않는다. 쪽에 없는 날짜는 넘어간다', () => {
+    const { root, store, handle } = mountS(undefined);
+    store.show.mockClear();
+    handle.showMonth('2026-12', '2026-12-01');
+    handle.showMonth('2026-12', '2026-12-05');
+    expect([store.current(), title(root), store.show.mock.calls.length]).toEqual(['2026-11', '11월', 0]);
+    handle.showMonth('2026-12', '2026-12-06');
+    expect([store.current(), title(root)]).toEqual(['2026-12', '12월']);
+  });
   it('전체 월에서 보이는 달의 날짜를 열면 쪽을 다시 그리지 않는다', () => {
     const { root, store, handle } = mountS(undefined);
     const day = cell(root, '2026-11-20');

@@ -469,7 +469,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     if (editor?.dateKey === route.dateKey || waiting?.dateKey === route.dateKey) return;
     closeEditor();
     const { monthId } = splitDateKey(route.dateKey)!;
-    calendar.showMonth(monthId);
+    calendar.showMonth(monthId, route.dateKey);
     store.refresh();
     if (store.isLoaded(monthId)) {
       openEditor(route.dateKey);
