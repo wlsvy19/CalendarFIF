@@ -186,6 +186,18 @@ describe('verdictOf', () => {
   });
 });
 
+describe('relaunch', () => {
+  const save = { why: 'save' as const };
+  it('그려진 적 없이 한 번 안 그려지면 안 되는 것이다(finish는 모르는 것으로 둔다)', () => {
+    expect(verdictOf('relaunch', [t('relaunch', 5, save)], NOW)).toBe('fails');
+    expect(verdictOf('finish', [t('finish', 5, save)], NOW)).toBe('unknown');
+  });
+  it('한 번 그려지면 된다. 옛 이름(reopen)의 기록은 relaunch의 판정에 들지 않는다', () => {
+    expect(verdictOf('relaunch', [t('relaunch', 5, { ...save, got: NOW - 5 * MIN + 100 })], NOW)).toBe('works');
+    expect(verdictOf('relaunch', [t('reopen', 9, save), t('reopen', 8, save)], NOW)).toBe('unknown');
+  });
+});
+
 describe('pickReload', () => {
   it('되는 것으로 가려진 여러 번 쓰는 방법을 앞의 것부터 고른다', () => {
     const twice = (how: ReloadTry['how'], ago: number): ReloadTry[] => [hit(how, ago + 1), hit(how, ago)];

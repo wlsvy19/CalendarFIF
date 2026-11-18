@@ -22,16 +22,18 @@
  *   스크립트가 끝난 뒤 Scriptable이 그 주소를 받아 새로 돌리면 앞의 달력을 닫고 새 달력을 띄운다. 새 실행이 계속 지켜보므로 고칠 때마다 반영된다.
  *   0.9.21은 주소로 다시 돌리게 하고 앞의 스크립트가 닫히기를 기다렸는데, Scriptable이 앞의 스크립트를 정상으로 끝내지 않고 멈춘 것으로 보인다(위젯이
  *   그려지지 않았다: 2026-11-18 사용자). 그래서 끝내는 것을 먼저, 그것도 같은 차례 안에서 한다(주소를 받는 것은 그 뒤다).
- *   두 번 잇달아 안 그려지면 finish만 한다(달력은 다시 뜨지 않는다).
+ *   0.9.22의 이 방법은 아이폰에서 한 번도 돌지 않았다: 0.9.21이 같은 이름(reopen)으로 남긴 실패 기록 때문에 처음부터 안 되는 것으로 가려졌다
+ *   (2026-11-18 13:23 사용자의 메뉴 사진: "reopen 안 됨", 시도는 모두 finish). 그래서 0.9.23부터 이 방법은 새 이름 relaunch로 적고, reopen은 옛 기록으로만 읽는다.
+ * - relaunch: 위의 reopen(0.9.22의 차례)과 같은 일. 그려진 적 없이 한 번 안 그려지면 바로 finish만 한다(안 될 때 반영되지 않는 저장을 하나로 줄인다).
  * - leave: 저장한 뒤에도 계속 지켜보다가, 달력에서 나가려는 순간(웹 화면이 초점을 잃는다: 홈으로 미는 손짓이 시작될 때)에 스크립트를 끝낸다.
  *   한 번 열어 여러 번 고친 것이 모두 반영된다. finish로는 첫 저장만 반영돼서, 넣었다가 다시 지운 배경이 위젯에 남았다(2026-11-18 사용자).
  *   초점을 잃는 것이 앱이 뒤로 물러나기 전에 오는지, 그때 한 것을 iOS가 듣는지는 아이폰에서 해 봐야 안다. 두 번 잇달아 안 그려지면 finish로 돌아간다.
  * 앞의 셋은 메뉴를 띄워 둔 동안 시험한다(달력을 쓰는 중에 시험하다 스크립트가 멈추면 그때 고친 것이 위젯에 가지 않는다).
  */
 
-export type ReloadHow = 'setWidget' | 'ping' | 'complete' | 'finish' | 'leave' | 'nudge' | 'reopen';
+export type ReloadHow = 'setWidget' | 'ping' | 'complete' | 'finish' | 'leave' | 'nudge' | 'reopen' | 'relaunch';
 /** 스크립트를 끝내는 방법인가(끝낸 뒤에는 지켜보는 것이 없다). */
-export const endsRun = (how: ReloadHow): boolean => how === 'finish' || how === 'leave' || how === 'reopen';
+export const endsRun = (how: ReloadHow): boolean => how === 'finish' || how === 'leave' || how === 'reopen' || how === 'relaunch';
 /** 달력을 띄운 채 여러 번 쓸 수 있는 방법. 앞의 것부터 시험하고 쓴다. */
 export const REPEATABLE: readonly ReloadHow[] = ['setWidget', 'ping', 'complete'];
 /** probe: 메뉴에서 시험했다. save: 달력에서 저장했을 때 썼다. leave: 홈 화면으로 나간 뒤에 썼다(뒤로 물러난 뒤라 판정에 넣지 않는다). */
@@ -67,7 +69,7 @@ export const AWAY_LIMIT = 3;
 export const RETRY_AFTER_MS = 3 * 24 * 3_600_000;
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-const HOWS: readonly string[] = ['setWidget', 'ping', 'complete', 'finish', 'leave', 'nudge', 'reopen'];
+const HOWS: readonly string[] = ['setWidget', 'ping', 'complete', 'finish', 'leave', 'nudge', 'reopen', 'relaunch'];
 const WHYS: readonly string[] = ['probe', 'save', 'leave'];
 
 /** 판정에 끝내 들어가지 않을 기록인가(닫아서 무효가 됐다, 나간 뒤에 했다). 하자마자 메뉴가 닫힌 것은 판정에 들어간다. */
@@ -199,7 +201,8 @@ export function verdictOf(how: ReloadHow, tries: ReloadTry[], now: number): Verd
   }
   if (hurts > 0) return 'unknown';
   if (misses >= 2) return fails();
-  if (misses === 1 && hits === 0) return endsRun(how) ? 'unknown' : fails();
+  // relaunch는 안 되면 저장한 것이 반영되지 않으므로 한 번으로 가린다(finish는 마지막 수단이라 한 번 더 해 본다).
+  if (misses === 1 && hits === 0) return endsRun(how) && how !== 'relaunch' ? 'unknown' : fails();
   return 'unknown';
 }
 

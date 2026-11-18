@@ -112,7 +112,7 @@ export function announceWidgetPage(win: Window = window): void {
 }
 
 /**
- * 위젯에서 연 달력은 저장할 때마다 새로 뜬다(위젯을 새로 그리게 하려고 스크립트가 달력을 다시 띄운다: src/widget/reload.ts의 reopen).
+ * 위젯에서 연 달력은 저장할 때마다 새로 뜬다(위젯을 새로 그리게 하려고 스크립트가 달력을 다시 띄운다: src/widget/reload.ts의 relaunch).
  * 새로 뜬 달력이 보던 달 그대로 뜨도록, 보고 있는 달을 localStorage에 적어 두고 새 화면이 그것을 읽는다.
  * 방금(20초 안에) 적은 것만 쓴다: 한참 뒤에 위젯을 눌러 연 달력은 이번 달로 뜬다.
  */

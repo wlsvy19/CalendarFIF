@@ -147,7 +147,7 @@ function pingUrl(host: Host): string {
   }
 }
 
-/** 이 스크립트를 다시 돌려 달력을 새로 띄우게 하는 주소(reload.ts의 reopen). 스크립트 이름을 모르면 빈 글. */
+/** 이 스크립트를 다시 돌려 달력을 새로 띄우게 하는 주소(reload.ts의 relaunch). 스크립트 이름을 모르면 빈 글. */
 function reopenUrl(host: Host): string {
   try {
     const name = host.Script.name ? host.Script.name() : '';
@@ -165,10 +165,10 @@ function doReload(host: Host, how: ReloadHow): string {
   try {
     if (how === 'setWidget') host.Script.setWidget(new host.ListWidget());
     else if (how === 'complete') host.Script.complete();
-    else if (how === 'ping' || how === 'nudge' || how === 'reopen') {
+    else if (how === 'ping' || how === 'nudge' || how === 'reopen' || how === 'relaunch') {
       const open = findOpenUrl();
       if (!open) return 'Safari.open이 없다';
-      const url = how === 'reopen' ? reopenUrl(host) : pingUrl(host);
+      const url = how === 'reopen' || how === 'relaunch' ? reopenUrl(host) : pingUrl(host);
       if (url === '') return '스크립트 이름을 모른다';
       void Promise.resolve(open(url)).catch(() => {});
     }
@@ -242,8 +242,8 @@ function reloadLog(host: Host, now: () => Date): ReloadLog {
         // 하기 전에 적는다: 하다가 스크립트가 멈춰도 했다는 것은 남는다.
         mine.push(at);
         updateCache(host, { reload: reloadCell([...tries, { how, why, at, got: 0, alive: endsRun(how), void: why === 'leave', away: false, shut: false, err: '' }]) });
-        // 끝내는 방법은 부른 쪽이 스크립트를 끝낸다. reopen은 그 앞에 주소를 열어 둔다(끝난 뒤에 새 실행이 달력을 다시 띄운다).
-        const err = endsRun(how) && how !== 'reopen' ? '' : doReload(host, how);
+        // 끝내는 방법은 부른 쪽이 스크립트를 끝낸다. relaunch는 그 앞에 주소를 열어 둔다(끝난 뒤에 새 실행이 달력을 다시 띄운다).
+        const err = endsRun(how) && how !== 'relaunch' ? '' : doReload(host, how);
         if (err !== '') amend((t) => (t.at === at ? { ...t, err } : null));
       } catch {
         // 그대로 둔다.
@@ -645,12 +645,12 @@ async function openCalendarInApp(host: Host, cfg: Config, now: () => Date): Prom
         log.fire(how, why);
         return;
       }
-      // 저장할 때마다 반영하는 길(reload.ts의 reopen): 이 스크립트를 주소로 다시 돌리게 해 두고 바로 끝낸다(finish와 같이 위젯이 그려진다).
+      // 저장할 때마다 반영하는 길(reload.ts의 relaunch): 이 스크립트를 주소로 다시 돌리게 해 두고 바로 끝낸다(finish와 같이 위젯이 그려진다).
       // 끝난 뒤 Scriptable이 새로 돌리면서 달력을 다시 띄우고, 새 실행이 지켜본다. 화면 앞에서 저장했을 때만 한다.
-      // 주소를 열 수 없거나, 두 번 잇달아 안 그려졌거나, 끝내기까지 안 되는 것으로 가려졌으면 하지 않는다.
-      if (why === 'save' && how === 'finish' && findOpenUrl() && reopenUrl(host) !== '' && verdictOf('reopen', tries, at) !== 'fails') {
-        log.fire('reopen', 'save');
-        if (log.tries().some((t) => t.at === log.lastAt() && t.how === 'reopen' && t.err !== '')) {
+      // 주소를 열 수 없거나, 그려지지 않은 것으로 가려졌거나, 끝내기까지 안 되는 것으로 가려졌으면 하지 않는다.
+      if (why === 'save' && how === 'finish' && findOpenUrl() && reopenUrl(host) !== '' && verdictOf('relaunch', tries, at) !== 'fails') {
+        log.fire('relaunch', 'save');
+        if (log.tries().some((t) => t.at === log.lastAt() && t.how === 'relaunch' && t.err !== '')) {
           finishNow(why); // 주소를 열지 못했다: 그냥 끝낸다
           return;
         }

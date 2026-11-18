@@ -86,7 +86,7 @@ afterEach(() => {
   delete (globalThis as Record<string, unknown>).Safari;
 });
 
-describe('저장할 때마다 끝내고 달력을 다시 띄운다(reopen)', () => {
+describe('저장할 때마다 끝내고 달력을 다시 띄운다(relaunch)', () => {
   const AGAIN = 'scriptable:///run/CalendarFIF?open=calendar&again=1';
 
   it('저장하면 이 스크립트를 주소로 다시 돌리게 해 두고 바로 끝낸다(위젯이 그려진다). 닫히기를 기다리지 않는다', async () => {
@@ -100,22 +100,24 @@ describe('저장할 때마다 끝내고 달력을 다시 띄운다(reopen)', () 
     await done;
     expect([state.finished, open.mock.calls]).toEqual([true, [[AGAIN]]]);
     // 주소를 연 다음에 끝냈다(끝내기가 먼저 일어나도록 같은 차례 안에서 끝난다: 시계를 움직이지 않았다).
-    expect(triesIn(host)).toEqual([tried('reopen', 'save', T0 + 900, { alive: true })]);
+    expect(triesIn(host)).toEqual([tried('relaunch', 'save', T0 + 900, { alive: true })]);
     expect(cacheOf(host).pending).toMatchObject({ edits: [edit] });
     expect(cacheOf(host).leave).toBeUndefined();
     await expect(new host.Request('https://example.test/widget/version.json').loadString()).rejects.toThrow('스크립트를 바로 끝내려고');
     // 끝난 뒤 위젯이 그리면 그 시도에 적힌다.
     const widget = make({ keychain: loggedIn, files: seed(cacheOf(host)) });
     await run(widget, cfg, now);
-    expect(triesIn(widget).map((t) => [t.how, t.got > 0])).toEqual([['reopen', true]]);
-    expect(verdictOf('reopen', triesIn(widget), Date.now())).toBe('works');
+    expect(triesIn(widget).map((t) => [t.how, t.got > 0])).toEqual([['relaunch', true]]);
+    expect(verdictOf('relaunch', triesIn(widget), Date.now())).toBe('works');
   });
 
-  it('두 번 잇달아 안 그려졌으면 다시 띄우지 않고 그냥 끝낸다(finish). 한 번으로는 바꾸지 않는다', async () => {
+  it('그려진 적 없이 한 번 안 그려졌으면 다시 띄우지 않고 그냥 끝낸다(finish). 0.9.21의 옛 기록(reopen)의 실패는 치지 않는다', async () => {
     const open = vi.fn();
     (globalThis as Record<string, unknown>).Safari = { open };
-    const miss = (ago: number): ReloadTry => tried('reopen', 'save', T0 - ago);
-    for (const [tries, want] of [[[miss(600_000)], 'reopen'], [[miss(600_000), miss(500_000)], 'finish']] as const) {
+    const miss = (how: 'reopen' | 'relaunch', ago: number): ReloadTry => tried(how, 'save', T0 - ago);
+    // 2026-11-18 사용자의 아이폰: 0.9.21의 reopen 실패 둘 때문에 0.9.22가 한 번도 다시 띄우지 않았다.
+    const old = [miss('reopen', 900_000), miss('reopen', 800_000)];
+    for (const [tries, want] of [[old, 'relaunch'], [[...old, miss('relaunch', 600_000)], 'finish']] as const) {
       const view = withView();
       const host = openFresh({ reload: { epoch: 1, tries } });
       const { done } = await opened(host);
@@ -155,7 +157,7 @@ describe('저장할 때마다 끝내고 달력을 다시 띄운다(reopen)', () 
     view.state = [message(2, [edit]), 'visible', '0'];
     await vi.advanceTimersByTimeAsync(300);
     await done;
-    expect(triesIn(host).map((t) => [t.how, t.err])).toEqual([['reopen', '열 수 없다'], ['finish', '']]);
+    expect(triesIn(host).map((t) => [t.how, t.err])).toEqual([['relaunch', '열 수 없다'], ['finish', '']]);
   });
 
   it('주소로 다시 돌린 실행(again=1)은 달력을 띄운다', async () => {
