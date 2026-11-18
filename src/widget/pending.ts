@@ -166,15 +166,17 @@ export function applyPending(
  * 달력 화면에 무엇이 보이는가(PROBE_JS의 view). 2026-11-18 사용자: Close로 닫고 위젯을 다시 눌러 연 달력에 메모가 하나도 안 보였다.
  * PC의 Chromium에서는 재현되지 않아서, 아이폰에서 그때 화면의 상태를 적는다.
  * title: 머리의 년도와 월. cells: 날짜 칸 수. memos: 메모가 그려진 칸 수. sync: 동기화 표시의 상태와 글. up: 화면을 연 지 몇 초. login: 로그인 화면이다.
+ * seed, server: 화면을 연 뒤 적어 둔 달(src/web/monthSeed.ts)과 서버의 첫 스냅숏을 받은 때(ms). 아직 없으면 -1, 그것을 적지 않는 웹앱이면 -2.
  */
-export type WebView = { title: string; cells: number; memos: number; sync: string; up: number; login: boolean };
-const VIEW_JS = `(() => { const q = (s) => document.querySelector(s); const sync = q(".sync"); const t = (s) => ((q(s) || {}).textContent || "").trim(); return { title: (t(".year") + " " + t(".app-head .month")).trim(), cells: document.querySelectorAll(".cell").length, memos: document.querySelectorAll(".cell .memo").length, sync: sync ? ((sync.getAttribute("data-state") || "") + " " + t(".sync-text")).trim() : "", up: Math.round(performance.now() / 1000), login: !!q(".login") }; })()`;
+export type WebView = { title: string; cells: number; memos: number; sync: string; up: number; login: boolean; seed: number; server: number };
+const VIEW_JS = `(() => { const q = (s) => document.querySelector(s); const sync = q(".sync"); const t = (s) => ((q(s) || {}).textContent || "").trim(); return { title: (t(".year") + " " + t(".app-head .month")).trim(), cells: document.querySelectorAll(".cell").length, memos: document.querySelectorAll(".cell .memo").length, sync: sync ? ((sync.getAttribute("data-state") || "") + " " + t(".sync-text")).trim() : "", up: Math.round(performance.now() / 1000), login: !!q(".login"), seed: window.__calfifLoad ? window.__calfifLoad.seed : -2, server: window.__calfifLoad ? window.__calfifLoad.server : -2 }; })()`;
 
 function viewOf(v: unknown): WebView | null {
   if (!isObject(v) || typeof v.title !== 'string' || typeof v.cells !== 'number' || typeof v.memos !== 'number') return null;
   return {
     title: v.title.slice(0, 20), cells: v.cells, memos: v.memos,
     sync: typeof v.sync === 'string' ? v.sync.slice(0, 40) : '', up: typeof v.up === 'number' && Number.isFinite(v.up) ? v.up : 0, login: v.login === true,
+    seed: typeof v.seed === 'number' && Number.isFinite(v.seed) ? v.seed : -2, server: typeof v.server === 'number' && Number.isFinite(v.server) ? v.server : -2,
   };
 }
 

@@ -95,8 +95,8 @@ describe('statusText', () => {
 
 describe('달력 내용 줄', () => {
   it('그때 달력 화면의 달, 메모가 그려진 칸 수, 동기화 표시, 연 지 몇 초를 적는다. 로그인 화면이면 그렇게 적는다', () => {
-    const web = { at: at(10, 4), app: '0.9.28', sw: false, bridge: true, log: [], view: { title: '2026년 11월', cells: 35, memos: 0, sync: 'ok', up: 6, login: false } };
-    expect(statusText({ ...nothing, web })).toContain('달력 내용(10:04:00): 2026년 11월, 메모 칸 0/35, 동기화 ok, 연 지 6초');
-    expect(statusText({ ...nothing, web: { ...web, view: { ...web.view, login: true, sync: '' } } })).toContain('달력 내용(10:04:00): 로그인 화면, 동기화 표시 없음, 연 지 6초');
+    const web = { at: at(10, 4), app: '0.9.28', sw: false, bridge: true, log: [], view: { title: '2026년 11월', cells: 35, memos: 0, sync: 'ok', up: 6, login: false, seed: 120, server: 2850 } };
+    expect(statusText({ ...nothing, web })).toContain('달력 내용(10:04:00): 2026년 11월, 메모 칸 0/35, 동기화 ok, 연 지 6초, 처음 그림 보관본 0.1초 · 서버 2.9초');
+    expect(statusText({ ...nothing, web: { ...web, view: { ...web.view, login: true, sync: '' } } })).toContain('달력 내용(10:04:00): 로그인 화면, 동기화 표시 없음, 연 지 6초, 처음 그림 보관본 0.1초 · 서버 2.9초');
   });
 });

@@ -53,6 +53,7 @@ import { Outbox } from '../sync/outbox';
 import { PENDING_GLOBAL, pendingTeller, widgetHold } from './widgetBridge';
 import { silenceSdkLogs } from './widgetLog';
 import { announceWidgetPage, recalledMonth, rememberMonth } from './widgetPages';
+import { seededSource, type LoadTimes } from './monthSeed';
 import { SyncEngine } from '../sync/engine';
 
 const { app, auth, db } = initFirebase(import.meta.env);
@@ -185,8 +186,12 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   // 웹앱의 설정(밝기, 색상, 달력과 메모의 표시). 이 기기의 브라우저에만 저장한다.
   let prefs: Prefs | undefined = DESKTOP ? undefined : loadPrefs(storage.store);
   const engine = new SyncEngine({ store: source, outbox, editedBy });
+  // 위젯에서 연 달력: 지난번에 받은 달을 먼저 그린다(Scriptable의 웹 화면은 열 때마다 처음부터 불러와 첫 스냅숏까지 칸이 빈다: monthSeed.ts).
+  // 처음 그린 때를 적어 둔다(위젯의 메뉴가 읽는다).
+  const loadTimes: LoadTimes = { seed: -1, server: -1 };
+  if (viaWidget()) (window as unknown as Record<string, unknown>).__calfifLoad = loadTimes;
   const store = new CalendarStore({
-    source,
+    source: viaWidget() ? seededSource(source, storage.store, session.uid, () => performance.now(), loadTimes) : source,
     outbox,
     editedBy,
     // 위젯에서 연 달력은 저장할 때마다 새로 뜬다. 방금 보던 달이 있으면 그 달로 뜬다(widgetPages.ts).

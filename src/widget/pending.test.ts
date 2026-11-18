@@ -237,7 +237,7 @@ describe('countPending', () => {
 describe('달력 화면에 보이는 것(view)', () => {
   it('묻는 식이 view를 함께 묻고, 답의 view를 읽는다. 모양이 다르면 null', () => {
     expect(PROBE_JS).toContain('view: (() =>');
-    const view = { title: '2026년 11월', cells: 35, memos: 0, sync: 'ok 저장됨', up: 4, login: false };
+    const view = { title: '2026년 11월', cells: 35, memos: 0, sync: 'ok 저장됨', up: 4, login: false, seed: 90, server: -1 };
     expect(parseProbe(JSON.stringify({ app: '0.9.28', sw: false, bridge: true, view }))?.view).toEqual(view);
     expect(parseProbe(JSON.stringify({ app: '0.9.28', sw: false, bridge: true, view: { title: 1 } }))?.view).toBeNull();
     expect(webProbeOf({ at: 5, app: '0.9.28', sw: false, bridge: true, view })?.view).toEqual(view);
