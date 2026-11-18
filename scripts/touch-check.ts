@@ -212,6 +212,11 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
   await sleep(600);
   const opened = await cdp.evaluate<boolean>("!!document.querySelector('.sheet')");
   record('지금 쪽의 날짜 칸을 짧게 누르면 편집 화면이 열린다', opened, opened ? '.sheet 있음' : '.sheet 없음');
+  // 열면 메모 칸의 글 끝에 커서가 있다(2026-11-18 사용자). 글자판은 아이폰에서만 보인다.
+  const caret = await cdp.evaluate<{ focused: boolean; at: number; len: number }>(
+    "(() => { const a = document.querySelector('.sheet .memo-input'); return { focused: document.activeElement === a, at: a?.selectionStart ?? -1, len: a?.value.length ?? -2 }; })()",
+  );
+  record('편집 화면을 열면 메모 칸의 글 끝에 커서가 있다', opened && caret.focused && caret.at === caret.len, `초점 ${caret.focused ? '메모 칸' : '다른 곳'}, 커서 ${caret.at}/${caret.len}`);
   if (opened) {
     await cdp.evaluate("document.querySelector('.sheet .textbtn.start').click()");
     await sleep(600);

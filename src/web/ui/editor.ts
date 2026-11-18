@@ -21,6 +21,8 @@ const ICONS = {
 
 const WEEKDAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 const WIDE_PX = 880;
+/** 날짜를 누를 때 글자판을 미리 띄우는 숨은 입력 칸의 class(main.ts의 raiseKeyboard). */
+export const KEYBOARD_PROXY_CLASS = 'kbd-proxy';
 
 function titleOf(dateKey: string): string {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -321,12 +323,12 @@ export function mountEditor(
   // 알림 상자에서 다른 날짜를 누를 때도(close) 같다.
   const closeKeeping = (): void => (changed() ? save() : cancel());
   const swipe = attachSwipeToClose(sheet, scrim, { onClose: closeKeeping });
-  if (env?.focusText || window.innerWidth >= WIDE_PX) {
-    area.focus();
-    area.setSelectionRange(area.value.length, area.value.length);
-  } else {
-    sheet.focus();
-  }
+  // 열면 메모 칸의 글 끝에 커서를 둔다(2026-11-18 사용자: "포커스가 글 끝에 딱 있으면 좋겠어 그 입력하는 키보드 바로 딱 나오면서").
+  // 폰에서 글자판이 바로 올라오는 것은 날짜를 누른 그 순간에 main.ts가 숨은 입력 칸에 초점을 줘 두었기 때문이다(iOS는 누르는 동작 밖에서
+  // 준 초점에는 글자판을 띄우지 않고, 이미 떠 있으면 다른 칸으로 옮겨 준다). 폰에서는 화면이 밀리지 않게 한다.
+  area.focus({ preventScroll: true });
+  area.setSelectionRange(area.value.length, area.value.length);
+  area.scrollTop = area.scrollHeight;
 
   return {
     close: closeKeeping,
@@ -344,7 +346,8 @@ export function mountEditor(
       drag?.destroy();
       swipe.destroy();
       dismiss(scrim, sheet);
-      if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
+      // 날짜를 누를 때 글자판을 띄우려고 초점을 줬던 숨은 칸(main.ts)으로는 돌려주지 않는다: 닫은 뒤에 글자판이 다시 뜬다.
+      if (previouslyFocused?.isConnected && !previouslyFocused.classList.contains(KEYBOARD_PROXY_CLASS)) previouslyFocused.focus({ preventScroll: true });
     },
   };
 }

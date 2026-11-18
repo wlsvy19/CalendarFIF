@@ -31,7 +31,7 @@ import { Interactivity } from './desktop/interactive';
 import { playDoneTone } from './desktop/tone';
 import { mountBlocked, type BlockedKind } from './ui/blocked';
 import { mountCalendar } from './ui/calendar';
-import { mountEditor, type EditorHandle } from './ui/editor';
+import { KEYBOARD_PROXY_CLASS, mountEditor, type EditorHandle } from './ui/editor';
 import { mountSettings } from './ui/settings';
 import { APP_VERSION } from './version';
 import { mountUsers } from './ui/users';
@@ -141,6 +141,34 @@ if (!DESKTOP && typeof navigator !== 'undefined' && navigator.serviceWorker) {
 // 저장되지 않아 이 페이지의 메모리에만 있는 편집이 있는가. mountMain이 로그인 중에만 채운다(새 버전으로 다시 읽기를 미룰지 정한다).
 let unsavedOnlyInMemory: () => boolean = () => false;
 let deskActions: { goToday(): void; openSettings(page?: SettingsPage): void; signOut(): void } | null = null;
+
+/**
+ * 폰의 글자판을 미리 띄운다. iOS(Safari, Scriptable의 웹 화면)는 누르는 동작 안에서 준 초점에만 글자판을 띄운다.
+ * 편집 화면은 주소가 바뀐 뒤(hashchange)에 열려서 그때 메모 칸에 초점을 줘도 글자판이 뜨지 않는다.
+ * 그래서 날짜를 누른 그 순간에 화면 밖의 작은 입력 칸에 초점을 줘 두고, 편집 화면이 열리면 메모 칸으로 옮긴다.
+ * 편집 화면이 열리지 않으면(같은 날짜, 4초 넘게 못 연다) 놓아 준다.
+ */
+function raiseKeyboard(): void {
+  try {
+    let proxy = document.querySelector<HTMLInputElement>(`input.${KEYBOARD_PROXY_CLASS}`);
+    if (!proxy) {
+      proxy = document.createElement('input');
+      proxy.type = 'text';
+      proxy.className = KEYBOARD_PROXY_CLASS;
+      proxy.tabIndex = -1;
+      proxy.setAttribute('aria-hidden', 'true');
+      proxy.autocomplete = 'off';
+      document.body.append(proxy);
+    }
+    proxy.focus({ preventScroll: true });
+    const held = proxy;
+    setTimeout(() => {
+      if (document.activeElement === held) held.blur();
+    }, 5000);
+  } catch {
+    // 글자판이 바로 뜨지 않을 뿐이다.
+  }
+}
 
 /** 주소의 #...을 새 기록을 쌓지 않고 지운다. hashchange가 나지 않으므로 화면은 부른 쪽이 맞춘다. */
 function clearHash(): void {
@@ -495,6 +523,8 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   window.addEventListener('hashchange', syncRoute);
 
   const openDay = (dateKey: string): void => {
+    // 폰: 누르는 동작 안에서 숨은 입력 칸에 초점을 줘 글자판을 미리 띄운다. 편집 화면이 열리면 메모 칸으로 옮겨 간다(editor.ts).
+    if (!DESKTOP && editor?.dateKey !== dateKey) raiseKeyboard();
     pushedByApp = true;
     location.hash = dateKey;
   };

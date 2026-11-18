@@ -1054,3 +1054,6 @@ button { touch-action: manipulation; }
 .alarm-item:active { opacity: 0.6; }
 .alarm-text { font-size: 17px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
 .alarm-meta { font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* 날짜를 누를 때 폰의 글자판을 미리 띄우는 숨은 입력 칸(main.ts의 raiseKeyboard). 16px 아래면 iOS가 화면을 확대한다. */
+.kbd-proxy { position: fixed; top: 0; left: 0; width: 1px; height: 1px; padding: 0; border: 0; margin: 0; opacity: 0; font-size: 16px; pointer-events: none; caret-color: transparent; }

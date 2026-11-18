@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { playTone } from '../tones';
 import type { DayValue } from '../../core/types';
-import { mountEditor } from './editor';
+import { KEYBOARD_PROXY_CLASS, mountEditor } from './editor';
 import { swipeDown } from './fakeSwipe';
 import type { EventMap, EventRecord } from '../../core/events';
 
@@ -577,4 +577,22 @@ describe('화면이 가려질 때 저장해 두기(onKeep)', () => {
     setVisibility('hidden');
     expect([onSave.mock.calls.length, onCancel.mock.calls.length]).toEqual([0, 0]);
   });
+});
+
+it('폰에서도 열면 메모 칸의 글 끝에 커서가 간다(2026-11-18 사용자). 닫으면 글자판을 띄우던 숨은 칸으로는 초점을 돌려주지 않는다', () => {
+  vi.stubGlobal('innerWidth', 390);
+  try {
+    const proxy = document.createElement('input');
+    proxy.className = KEYBOARD_PROXY_CLASS;
+    document.body.append(proxy);
+    proxy.focus();
+    const { area, button } = mount({ text: '첫 줄\n둘째 줄', color: '' });
+    expect(document.activeElement).toBe(area);
+    expect([area.selectionStart, area.selectionEnd]).toEqual([area.value.length, area.value.length]);
+    button('취소').click();
+    expect(document.activeElement).not.toBe(proxy);
+    proxy.remove();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
