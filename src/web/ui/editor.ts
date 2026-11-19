@@ -21,6 +21,8 @@ const ICONS = {
 
 const WEEKDAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 const WIDE_PX = 880;
+/** 폰에서 메모 칸이 초점을 놓은 뒤(글자판의 완료) 저장하고 닫기까지 기다리는 시간. 그 사이 눌린 취소·저장이 먼저다. */
+export const KEYBOARD_DONE_MS = 100;
 /** 날짜를 누를 때 글자판을 미리 띄우는 숨은 입력 칸의 class(main.ts의 raiseKeyboard). */
 export const KEYBOARD_PROXY_CLASS = 'kbd-proxy';
 
@@ -330,10 +332,31 @@ export function mountEditor(
   area.setSelectionRange(area.value.length, area.value.length);
   area.scrollTop = area.scrollHeight;
 
+  // 폰: 글자판의 "완료"를 누르면 저장하고 달력으로 나간다(2026-11-19 사용자: "키패드 나오잖아. 완료 누르면 바로 저장 되서 캘린더 보이게 하고 싶어").
+  // 글자판의 완료는 메모 칸의 초점을 어디로도 옮기지 않고 놓는다(relatedTarget이 없다). 알림·카운트다운 시트와 색 고르기는 초점을 그쪽으로
+  // 옮기므로 여기에 걸리지 않는다. 잠깐 기다렸다가, 그 사이 취소나 저장이 눌렸거나 초점이 글 칸으로 돌아왔거나 앱을 나갔으면 하지 않는다.
+  // 닫으면 글자판과 편집 화면이 함께 내려간다(글자판만 내려가면 편집 화면이 그 뒤에 한 번에 늘어나 매끄럽지 않았다).
+  let doneTimer: ReturnType<typeof setTimeout> | null = null;
+  const onAreaBlur = (e: FocusEvent): void => {
+    if (e.relatedTarget !== null || finished || eventSheet !== null) return;
+    if (env?.focusText || window.innerWidth >= WIDE_PX || document.documentElement.classList.contains('desk')) return;
+    if (doneTimer !== null) clearTimeout(doneTimer);
+    doneTimer = setTimeout(() => {
+      doneTimer = null;
+      const active = document.activeElement;
+      if (finished || eventSheet !== null || document.visibilityState !== 'visible') return;
+      if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) return;
+      closeKeeping();
+    }, KEYBOARD_DONE_MS);
+  };
+  area.addEventListener('blur', onAreaBlur);
+
   return {
     close: closeKeeping,
     eventSheetOpen: () => eventSheet !== null,
     destroy() {
+      area.removeEventListener('blur', onAreaBlur);
+      if (doneTimer !== null) clearTimeout(doneTimer);
       document.removeEventListener('visibilitychange', keepIfHidden);
       palette?.destroy();
       palette = null;

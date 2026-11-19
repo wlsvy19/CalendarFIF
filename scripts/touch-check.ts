@@ -434,6 +434,23 @@ async function run(cdp: Cdp, url: string): Promise<Result[]> {
     `메모 칸 ${typedValue.includes(typed) ? '적힘' : '안 적힘'}, 놓은 뒤 시트 ${afterC.sheet ? '있음' : '없음'}, 칸에 ${afterC.text.includes(typed) ? '보임' : '안 보임'}, 대기열 쓰기 ${afterC.writes - writesC}번`,
   );
 
+  // 글자판의 완료(2026-11-19 사용자: "완료 누르면 바로 저장 되서 캘린더 보이게"). 헤드리스에는 글자판이 없어서, 완료가 하는 일
+  // (메모 칸이 초점을 어디로도 옮기지 않고 놓는다)을 blur()로 한다.
+  const typedDone = '완료로 저장';
+  await openDay();
+  await tap(await center($('.sheet textarea')));
+  await sleep(200);
+  await cdp.send('Input.insertText', { text: `\n${typedDone}` });
+  const writesK = await outboxWrites();
+  await cdp.evaluate("document.querySelector('.sheet textarea').blur()");
+  await sleep(800);
+  const afterK = { sheet: await sheetNow(), text: await cellText(), writes: await outboxWrites() };
+  record(
+    '글자판의 완료(메모 칸이 초점을 놓음)로 저장되고 편집 화면이 닫힌다',
+    afterK.sheet === null && afterK.text.includes(typedDone) && afterK.writes > writesK,
+    `시트 ${afterK.sheet ? '있음' : '없음'}, 칸에 ${afterK.text.includes(typedDone) ? '보임' : '안 보임'}, 대기열 쓰기 ${afterK.writes - writesK}번`,
+  );
+
   // DevTools로 보내는 터치 하나가 30~40ms 걸려서 그대로 보내면 빠르게 튕긴 손가락이 되지 않는다. 그래서 일어난 시각을
   // 60Hz 간격(16ms)으로 적어 보낸다. 시트는 놓을 때의 속도를 이벤트가 일어난 시각(timeStamp)으로 잰다.
   const restD = await openDay();

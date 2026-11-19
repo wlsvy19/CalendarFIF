@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { playTone } from '../tones';
 import type { DayValue } from '../../core/types';
-import { KEYBOARD_PROXY_CLASS, mountEditor } from './editor';
+import { KEYBOARD_DONE_MS, KEYBOARD_PROXY_CLASS, mountEditor } from './editor';
 import { swipeDown } from './fakeSwipe';
 import type { EventMap, EventRecord } from '../../core/events';
 
@@ -595,4 +595,71 @@ it('폰에서도 열면 메모 칸의 글 끝에 커서가 간다(2026-11-18 사
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+describe('폰: 글자판의 완료', () => {
+  const blurTo = (area: HTMLTextAreaElement, to: Element | null) => {
+    area.dispatchEvent(new FocusEvent('blur', { relatedTarget: to }));
+    if (to instanceof HTMLElement) to.focus();
+    else (document.activeElement as HTMLElement | null)?.blur();
+  };
+  const phone = () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('innerWidth', 390);
+  };
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('메모 칸이 초점을 어디로도 옮기지 않고 놓으면(글자판의 완료) 고친 것을 저장하고 닫는다', () => {
+    phone();
+    const { area, onSave, onCancel } = mount({ text: '가', color: '' });
+    area.value = '가\n나';
+    blurTo(area, null);
+    expect(onSave).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(KEYBOARD_DONE_MS);
+    expect(onSave).toHaveBeenCalledWith({ text: '가\n나', color: '' });
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+  it('고친 것이 없으면 그냥 닫는다', () => {
+    phone();
+    const { area, onSave, onCancel } = mount({ text: '가', color: '' });
+    blurTo(area, null);
+    vi.advanceTimersByTime(KEYBOARD_DONE_MS);
+    expect([onSave.mock.calls.length, onCancel.mock.calls.length]).toEqual([0, 1]);
+  });
+  it('그 사이 취소를 누르면 취소다. 초점이 다른 곳(시트, 단추)으로 가거나 글 칸으로 돌아오면 닫지 않는다', () => {
+    phone();
+    const a = mount({ text: '가', color: '' });
+    a.area.value = '바꿈';
+    blurTo(a.area, null);
+    a.button('취소').click();
+    vi.advanceTimersByTime(KEYBOARD_DONE_MS);
+    expect([a.onSave.mock.calls.length, a.onCancel.mock.calls.length]).toEqual([0, 1]);
+
+    const b = mount({ text: '가', color: '' });
+    b.area.value = '바꿈';
+    blurTo(b.area, b.root.querySelector('.sheet'));
+    vi.advanceTimersByTime(KEYBOARD_DONE_MS);
+    blurTo(b.area, null);
+    b.area.focus(); // 완료 도구처럼 곧바로 다시 초점을 준다
+    vi.advanceTimersByTime(KEYBOARD_DONE_MS);
+    expect([b.onSave.mock.calls.length, b.onCancel.mock.calls.length]).toEqual([0, 0]);
+  });
+  it('앱을 나가며 초점을 잃은 것이면 닫지 않는다. 넓은 화면과 PC 앱도 닫지 않는다', () => {
+    phone();
+    const a = mount({ text: '가', color: '' });
+    blurTo(a.area, null);
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    vi.advanceTimersByTime(KEYBOARD_DONE_MS);
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    expect(a.onCancel).not.toHaveBeenCalled();
+
+    vi.stubGlobal('innerWidth', 1024);
+    const b = mount({ text: '가', color: '' });
+    blurTo(b.area, null);
+    vi.advanceTimersByTime(KEYBOARD_DONE_MS);
+    expect(b.onCancel).not.toHaveBeenCalled();
+  });
 });
