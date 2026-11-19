@@ -184,22 +184,22 @@ body {
 
 /*
  * 위젯에서 연 달력: Scriptable의 Close(웹 화면 위, 왼쪽 위)를 가리키는 말풍선(ui/closeHint.ts). 편집 화면이 떠 있는 동안은 숨긴다.
- * 머리 첫 줄(년도와 동기화 표시)의 오른쪽 빈자리에 둔다. 2026-11-19 사용자: 왼쪽 위에 두었더니 "년도 가리니까 위치 옮겨줘".
- * 둘째 줄의 단추(오늘, 이전·다음 달, 설정)는 위에서 32px쯤부터라 그보다 위에서 끝나게 작게 한다. 꼬리는 왼쪽 위(Close 쪽)를 가리킨다.
+ * 떠 있는 동안(:root.close-hint-on) 달력 머리를 내려 빈자리를 만들고 거기 Close 바로 밑에 둔다. 아무것도 가리지 않는다.
+ * 2026-11-19 사용자: 왼쪽 위에 겹쳤더니 "년도 가리니까 위치 옮겨줘", 오른쪽으로 옮겼더니 "위치가 이상하잖아"(Close와 멀었다).
  */
 .close-hint {
   position: fixed;
   z-index: 19;
-  top: calc(env(safe-area-inset-top, 0px) + 6px);
-  right: max(12px, env(safe-area-inset-right, 0px));
+  top: calc(env(safe-area-inset-top, 0px) + 9px);
+  left: max(12px, env(safe-area-inset-left, 0px));
   max-width: calc(100vw - 24px);
   padding: 4px 10px;
   border-radius: 10px;
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
-  line-height: 16px;
+  line-height: 17px;
   white-space: nowrap;
   box-shadow: 0 6px 18px -6px var(--shadow);
   cursor: pointer;
@@ -209,13 +209,13 @@ body {
 .close-hint::before {
   content: "";
   position: absolute;
-  top: -6px;
-  left: -5px;
-  width: 16px;
-  height: 14px;
-  background: var(--accent);
-  clip-path: polygon(0 0, 100% 45%, 55% 100%);
+  top: -7px;
+  left: 18px;
+  border: 8px solid transparent;
+  border-top: 0;
+  border-bottom-color: var(--accent);
 }
+:root.close-hint-on .calendar .app-head { padding-top: 42px; } /* 편집 화면이 떠도 그대로 둔다(열고 닫을 때마다 칸을 다시 재지 않게) */
 .close-hint[hidden] { display: none; }
 :root.sheet-open .close-hint { display: none; }
 @keyframes close-hint-in { from { opacity: 0; transform: translateY(-8px); } }
