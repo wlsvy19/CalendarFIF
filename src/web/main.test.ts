@@ -711,7 +711,7 @@ it('웹앱: 위젯에서 연 화면은 메모를 고쳐 저장하면 Close를 �
     web.day()!.querySelector('textarea')!.value = '위젯에서 고친 메모';
     web.day()!.querySelector<HTMLElement>('.textbtn.end')!.click();
     await vi.waitFor(() => expect(web.day()).toBeNull());
-    expect([hint(web.root)?.hidden, hint(web.root)?.textContent]).toEqual([false, 'Close를 눌러야 저장 됩니다!']);
+    expect([hint(web.root)?.hidden, hint(web.root)?.textContent]).toEqual([false, '눌러야 저장됩니다!']);
     hint(web.root)!.click(); // 누르면 숨는다
     expect(hint(web.root)?.hidden).toBe(true);
   } finally {
