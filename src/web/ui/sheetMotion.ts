@@ -1,4 +1,5 @@
-export type DismissEnv = { animate?: boolean };
+/** animate: 움직일지(기본은 폰 화면). screenBottom: 화면 아래 끝(px, 시트의 top과 같은 기준). 기본은 창과 기기 화면 가운데 큰 것. */
+export type DismissEnv = { animate?: boolean; screenBottom?: number };
 
 const EXIT_MS = 260;
 const GIVE_UP_MS = 400;
@@ -46,6 +47,23 @@ export function exitMotion(from: number, height: number, velocity = 0): { durati
   return { duration: Math.round(duration), easing: `cubic-bezier(0.4, ${Math.round(0.4 * slope * 1000) / 1000}, 1, 1)` };
 }
 
+/**
+ * 시트가 화면 밖으로 다 나가려면 내려가야 할 거리(px). top: 움직이기 전(transform 없이) 시트의 위 끝.
+ * 글자판이 떠 있으면 시트는 글자판 위에 앉아 화면 가운데에 있어서, 제 높이만큼 내려가도 화면 안에 남았다가(글자판이 내려가면 드러난다)
+ * 갑자기 없어졌다. 2026-11-18 사용자: 글자판이 뜬 편집 화면을 끌어 내리면 "매끄럽지가 않아. 부드럽게 아래로 샥 들어가는 느낌이었으면".
+ * 높이를 모르면(0) 0을 준다(제 높이, translateY(100%)로 내려간다).
+ */
+export function exitTravel(height: number, top: number, screenBottom: number): number {
+  if (!(height > 0)) return 0;
+  return Math.max(height, Number.isFinite(screenBottom) && Number.isFinite(top) ? screenBottom - top : 0);
+}
+
+function defaultScreenBottom(): number {
+  const vv = window.visualViewport;
+  const shift = vv?.offsetTop ?? 0;
+  return Math.max(window.innerHeight || 0, document.documentElement.clientHeight || 0, vv ? shift + vv.height : 0, (window.screen?.height ?? 0) + shift);
+}
+
 /** 시트와 가림막을 치운다. 폰 화면에서는 아래로 미끄러져 나간 뒤에 없앤다. */
 export function dismiss(scrim: HTMLElement, sheet: HTMLElement, env?: DismissEnv): void {
   const remove = (): void => {
@@ -64,6 +82,10 @@ export function dismiss(scrim: HTMLElement, sheet: HTMLElement, env?: DismissEnv
     el.setAttribute('inert', '');
     el.style.pointerEvents = 'none';
   }
+  // 시트 안의 글 칸이 초점을 갖고 있으면 지금 놓는다: 글자판이 시트와 같은 때에 내려가기 시작한다(inert에 맡기면 늦거나,
+  // inert를 모르는 iOS에서는 시트가 없어질 때까지 글자판이 남는다).
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && sheet.contains(active)) active.blur();
   for (const el of sheet.querySelectorAll('[id]')) el.removeAttribute('id');
   sheet.removeAttribute('aria-labelledby');
   let done = false;
@@ -79,8 +101,12 @@ export function dismiss(scrim: HTMLElement, sheet: HTMLElement, env?: DismissEnv
   const from = { transform: getComputedStyle(sheet).transform, opacity: getComputedStyle(scrim).opacity };
   sheet.style.animation = 'none';
   scrim.style.animation = 'none';
-  const motion = exitMotion(translateYOf(from.transform), sheet.offsetHeight, velocity);
-  const slide = sheet.animate([{ transform: from.transform && from.transform !== 'none' ? from.transform : 'translateY(0)' }, { transform: 'translateY(100%)' }], {
+  const fromY = translateYOf(from.transform);
+  const height = sheet.offsetHeight;
+  const travel = exitTravel(height, sheet.getBoundingClientRect().top - fromY, env?.screenBottom ?? defaultScreenBottom());
+  const motion = exitMotion(fromY, travel > 0 ? travel : height, velocity);
+  const to = travel > height ? `translateY(${Math.ceil(travel)}px)` : 'translateY(100%)';
+  const slide = sheet.animate([{ transform: from.transform && from.transform !== 'none' ? from.transform : 'translateY(0)' }, { transform: to }], {
     duration: motion.duration,
     easing: motion.easing,
     fill: 'forwards',

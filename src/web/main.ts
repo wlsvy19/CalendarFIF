@@ -31,6 +31,7 @@ import { Interactivity } from './desktop/interactive';
 import { playDoneTone } from './desktop/tone';
 import { mountBlocked, type BlockedKind } from './ui/blocked';
 import { mountCalendar } from './ui/calendar';
+import { mountCloseHint } from './ui/closeHint';
 import { KEYBOARD_PROXY_CLASS, mountEditor, type EditorHandle } from './ui/editor';
 import { mountSettings } from './ui/settings';
 import { APP_VERSION } from './version';
@@ -252,8 +253,12 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
    * 위젯에서 연 화면에서 알림이나 카운트다운을 저장하거나 지웠다. 서버에 올라가면 위젯 스크립트에 저장이 있었다고 알린다
    * (스크립트는 그때 위젯을 새로 그리게 하고, 위젯은 알림 문서를 서버에서 읽어 그 날짜 칸에 그린다).
    */
+  // 위젯에서 연 화면: 고친 것이 있으면 Scriptable의 Close를 누르라는 말풍선을 띄운다(closeHint.ts). Close를 눌러야 위젯에 반영된다.
+  const closeHint = viaWidget() ? mountCloseHint(root) : null;
   const eventSavedForWidget = (): void => {
-    if (viaWidget()) eventHold.wait(events.flush());
+    if (!viaWidget()) return;
+    eventHold.wait(events.flush());
+    closeHint?.show();
   };
   const offWidget = viaWidget() ? store.onChange(tellWidget) : () => {};
   if (viaWidget()) {
@@ -425,6 +430,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       },
       onSave: (next) => {
         closeEditor(); // 주소가 바뀌기를 기다리지 않고 바로 닫는다
+        if (normalizeText(next.text) !== normalizeText(base.text) || normalizeColor(next.color) !== normalizeColor(base.color)) closeHint?.show();
         engine.saveEdit(monthId, day, base, next);
         store.refresh();
         if (appearance?.doneTone === 'short') playDoneTone();
@@ -644,6 +650,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       offStatus();
       offCommit();
       offWidget();
+      closeHint?.destroy();
       stopAutoFlush();
       store.destroy();
     },

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { dismiss, exitMotion, noteReleaseVelocity, translateYOf } from './sheetMotion';
+import { dismiss, exitMotion, exitTravel, noteReleaseVelocity, translateYOf } from './sheetMotion';
 
 function build() {
   const scrim = document.createElement('div');
@@ -155,11 +155,32 @@ it('적어 둔 놓은 속도는 다음 dismiss가 한 번 쓴다', () => {
   Object.defineProperty(sheet, 'offsetHeight', { value: 800 });
   vi.stubGlobal('getComputedStyle', (el: HTMLElement) => (el === sheet ? { transform: 'matrix(1, 0, 0, 1, 0, 60)' } : { opacity: '0.8' }));
   noteReleaseVelocity(sheet, 1.2);
-  dismiss(scrim, sheet, { animate: true });
+  dismiss(scrim, sheet, { animate: true, screenBottom: 740 }); // 위 끝 -60에서 화면 끝까지 800 = 제 높이
   const sheetAnimate = (sheet as unknown as { animate: ReturnType<typeof vi.fn> }).animate;
   expect(sheetAnimate.mock.calls[0][1]).toMatchObject({ duration: 241, easing: 'cubic-bezier(0.4, 0.156, 1, 1)' });
   expect((scrim as unknown as { animate: ReturnType<typeof vi.fn> }).animate.mock.calls[0][1]).toMatchObject({ duration: 241 });
-  dismiss(scrim, sheet, { animate: true });
+  dismiss(scrim, sheet, { animate: true, screenBottom: 740 });
   expect(sheetAnimate.mock.calls[1][1]).toMatchObject({ duration: 241, easing: 'cubic-bezier(0.4, 0, 1, 1)' });
   vi.unstubAllGlobals();
+});
+
+it('글자판 위에 앉은 시트는 제 높이가 아니라 화면 아래 끝까지 내려간다', () => {
+  expect(exitTravel(400, 52, 852)).toBe(800); // 글자판이 떠서 시트가 화면 가운데에 있다
+  expect(exitTravel(800, 52, 852)).toBe(800); // 글자판이 없으면 제 높이
+  expect(exitTravel(800, 52, 600)).toBe(800); // 제 높이보다 덜 내려가지 않는다
+  expect(exitTravel(0, 52, 852)).toBe(0); // 높이를 모르면 전처럼 100%
+  expect(exitTravel(400, Number.NaN, 852)).toBe(400);
+});
+it('글자판 위에 앉은 시트를 닫으면 화면 밖까지 px로 내려가고, 글 칸의 초점을 바로 놓는다', () => {
+  const { scrim, sheet } = build();
+  Object.defineProperty(sheet, 'offsetHeight', { value: 400 });
+  sheet.getBoundingClientRect = () => ({ top: 52 }) as DOMRect;
+  const area = sheet.querySelector('textarea')!;
+  area.focus();
+  expect(document.activeElement).toBe(area);
+  dismiss(scrim, sheet, { animate: true, screenBottom: 852 });
+  const call = (sheet as unknown as { animate: ReturnType<typeof vi.fn> }).animate.mock.calls[0];
+  expect(call[0]).toEqual([{ transform: 'translateY(0)' }, { transform: 'translateY(800px)' }]);
+  expect(call[1]).toMatchObject({ duration: 260 });
+  expect(document.activeElement).not.toBe(area);
 });

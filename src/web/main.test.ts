@@ -683,6 +683,43 @@ it('웹앱: 위젯에서 연 화면은 아직 올리지 못한 편집을 window.
   }
 });
 
+it('웹앱: 위젯에서 연 화면은 메모를 고쳐 저장하면 Close를 누르라는 말풍선을 띄운다. 고친 것 없이 저장하거나 보통 화면이면 띄우지 않는다', async () => {
+  const hint = (root: HTMLElement): HTMLElement | null => root.querySelector<HTMLElement>('.close-hint');
+  const open = async (uid: string) => {
+    const web = await startWeb(uid);
+    access.emit!(server(accessDoc()));
+    location.hash = '2000-01-03';
+    await vi.waitFor(() => expect(web.day()?.querySelector('h3')?.textContent).toBe(web.title('2000-01-03')));
+    return web;
+  };
+  try {
+    const plain = await open('hint-plain');
+    plain.day()!.querySelector('textarea')!.value = '보통 화면의 메모';
+    plain.day()!.querySelector<HTMLElement>('.textbtn.end')!.click();
+    await vi.waitFor(() => expect(plain.day()).toBeNull());
+    expect(hint(plain.root)).toBeNull();
+
+    sessionStorage.setItem('calfif.via', 'widget');
+    const web = await open('hint-widget');
+    expect(hint(web.root)?.hidden).toBe(true);
+    web.day()!.querySelector<HTMLElement>('.textbtn.end')!.click(); // 고친 것 없이 저장
+    await vi.waitFor(() => expect(web.day()).toBeNull());
+    expect(hint(web.root)?.hidden).toBe(true);
+
+    location.hash = '2000-01-04';
+    await vi.waitFor(() => expect(web.day()?.querySelector('h3')?.textContent).toBe(web.title('2000-01-04')));
+    web.day()!.querySelector('textarea')!.value = '위젯에서 고친 메모';
+    web.day()!.querySelector<HTMLElement>('.textbtn.end')!.click();
+    await vi.waitFor(() => expect(web.day()).toBeNull());
+    expect([hint(web.root)?.hidden, hint(web.root)?.textContent]).toEqual([false, 'Close를 눌러야 저장 됩니다!']);
+    hint(web.root)!.click(); // 누르면 숨는다
+    expect(hint(web.root)?.hidden).toBe(true);
+  } finally {
+    sessionStorage.removeItem('calfif.via');
+    delete (window as unknown as Record<string, unknown>).__calfifPending;
+  }
+});
+
 it('웹앱: 위젯에서 연 화면은 올릴 것이 없으면 빈 목록을 적어 둔다(위젯이 앞에 받아 둔 것을 지운다)', async () => {
   sessionStorage.setItem('calfif.via', 'widget');
   try {
