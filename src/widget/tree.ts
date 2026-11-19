@@ -8,7 +8,8 @@ import type { DayValue } from '../core/types';
 import { dayOfCell, type MonthData } from './scene';
 import type { Family, Size } from './sizes';
 import { ALARM_MARK, COUNTDOWN_MARK } from './eventLines';
-import { capLines, fitText, memoLines } from './text';
+import { fitRows } from '../core/memoRows';
+import { fitText, memoLines, wrapText } from './text';
 import { PALETTES, dayBackground, type Palette } from './theme';
 
 export type Dyn = { light: string; dark: string }; // 밝은 화면과 어두운 화면의 색 ('#RRGGBB')
@@ -64,23 +65,40 @@ const leading = (node: Node): StackNode => ({ kind: 'stack', dir: 'h', children:
 
 /** 그림과 글 사이의 틈(pt). */
 const ICON_GAP = 2;
+/** 접은 메모 한 줄: 행들(rows)과, 알림·카운트다운이면 앞에 놓을 그림. */
+type Wrapped = { symbol: IconNode['symbol'] | null; done: boolean; rows: string[]; room: number | null };
 /**
- * 메모 한 줄. 알림과 카운트다운의 줄(eventLines.ts가 그림 글자를 앞에 붙여 둔다)은 그 그림 글자 대신 웹앱과 같은 그림을 앞에 놓는다
- * (2026-11-18 사용자: 위젯의 종이 달력의 종과 달랐다. "캘린더에서 보이는거와 위젯에서 보이는거가 같아야").
- * width: 줄이 쓸 수 있는 폭(없으면 자르지 않는다).
+ * 메모 한 줄을 폭에 맞춰 여러 행으로 접는다(2026-11-20 사용자: "글이길면 … 안보여 자동으로 줄바꿈되서 최대한 보이게 해줘".
+ * 웹앱의 칸도 접는다). 알림과 카운트다운의 줄(eventLines.ts가 그림 글자를 앞에 붙여 둔다)은 그 그림 글자를 떼고 그림 자리만큼 좁다.
+ * width: 줄이 쓸 수 있는 폭(없으면 접지 않는다).
  */
-function memoLine(line: { text: string; done: boolean }, size: number, width: number | null, extra: Partial<TextNode> = {}): StackNode {
+function wrapLine(line: { text: string; done: boolean }, size: number, width: number | null): Wrapped {
   const symbol: IconNode['symbol'] | null = line.text.startsWith(`${ALARM_MARK} `) ? 'bell' : line.text.startsWith(`${COUNTDOWN_MARK} `) ? 'hourglass' : null;
   const mark = symbol === 'bell' ? ALARM_MARK : COUNTDOWN_MARK;
   const body = (line.done ? DONE_MARK : '') + (symbol ? line.text.slice(mark.length + 1) : line.text);
-  // 끝낸 줄은 0.55, 다른 달의 칸(extra.opacity 0.4)이면 거기에 곱한다.
-  const fade = Math.round((extra.opacity ?? 1) * (line.done ? 0.55 : 1) * 100) / 100;
-  const dim = fade < 1 ? { opacity: fade } : {};
   const room = width === null ? null : symbol ? width - size - ICON_GAP : width;
-  const words = text(room === null ? body : fitText(body, size, room), size, 'regular', C.ink, 1, { ...extra, ...dim });
-  if (!symbol) return leading(words);
-  const icon: IconNode = { kind: 'icon', symbol, size, color: C.ink, ...dim, fallback: mark };
-  return { kind: 'stack', dir: 'h', align: 'center', children: [icon, fixed(ICON_GAP), words, flex()] };
+  const rows = room === null ? [body] : wrapText(body, size, room);
+  return { symbol, done: line.done, rows: rows.length > 0 ? rows : [body], room };
+}
+
+/**
+ * 접은 줄의 앞 count행. 줄이 다 보이지 않으면 마지막 행 끝에 "…"를 붙인다(웹앱의 칸과 같다).
+ * 알림과 카운트다운은 첫 행 앞에 웹앱과 같은 그림을 놓고 이어지는 행은 그림 자리만큼 들인다
+ * (2026-11-18 사용자: 위젯의 종이 달력의 종과 달랐다. "캘린더에서 보이는거와 위젯에서 보이는거가 같아야").
+ */
+function memoRows(w: Wrapped, count: number, size: number, extra: Partial<TextNode> = {}): Node[] {
+  // 끝낸 줄은 0.55, 다른 달의 칸(extra.opacity 0.4)이면 거기에 곱한다.
+  const fade = Math.round((extra.opacity ?? 1) * (w.done ? 0.55 : 1) * 100) / 100;
+  const dim = fade < 1 ? { opacity: fade } : {};
+  const shown = w.rows.slice(0, count);
+  if (count < w.rows.length && count > 0 && w.room !== null) shown[count - 1] = `${fitText(shown[count - 1], size, w.room - size * 0.6).trimEnd()}…`;
+  return shown.map((row, i): Node => {
+    const words = text(row, size, 'regular', C.ink, 1, { ...extra, ...dim });
+    if (!w.symbol) return leading(words);
+    if (i > 0) return { kind: 'stack', dir: 'h', children: [fixed(size + ICON_GAP), words, flex()] };
+    const icon: IconNode = { kind: 'icon', symbol: w.symbol, size, color: C.ink, ...dim, fallback: w.symbol === 'bell' ? ALARM_MARK : COUNTDOWN_MARK };
+    return { kind: 'stack', dir: 'h', align: 'center', children: [icon, fixed(ICON_GAP), words, flex()] };
+  });
 }
 
 const monthTitle = (monthId: string): string => `${monthId.slice(0, 4)}년 ${Number(monthId.slice(5, 7))}월`;
@@ -142,10 +160,12 @@ function dayCell(cell: GridCell, day: DayValue | undefined, today: string, lay: 
     capacity -= 1;
   }
   if (day && capacity > 0) {
-    // 줄마다 한 줄짜리 글이다. 실제 폭이 어림보다 좁으면 iOS가 조금 줄이고, 그래도 넘치면 "…"로 자른다(다음 줄로 접지 않는다).
+    // 긴 줄은 칸 폭(어림)에서 접어 여러 행을 쓴다. capacity는 행 수다. 행마다 한 줄짜리 글이고, 실제 폭이 어림보다 좁으면
+    // iOS가 조금 줄이고 그래도 넘치면 "…"로 자른다.
     const memo = (t: string, extra: Partial<TextNode> = {}): Node => leading(text(t, 9, 'regular', C.ink, 1, { minScale: 0.9, ...extra }));
-    const { shown, more } = capLines(memoLines(day.text), capacity);
-    for (const l of shown) children.push(memoLine(l, 9, lay.innerWidth, { minScale: 0.9, ...faded }));
+    const wrapped = memoLines(day.text).map((l) => wrapLine(l, 9, lay.innerWidth));
+    const { counts, more } = fitRows(wrapped.map((w) => w.rows.length), capacity);
+    counts.forEach((n, i) => children.push(...memoRows(wrapped[i], n, 9, { minScale: 0.9, ...faded })));
     if (more > 0) children.push(memo(`+${more}`, faded));
   }
   children.push(flex());
@@ -199,9 +219,10 @@ function smallTree(input: TreeInput): Tree {
   if (lines.length === 0) {
     memo.push(leading(text('메모 없음', 11, 'regular', C.muted, 1)));
   } else {
-    // 날짜 아래 줄이 있으면 메모 한 줄을 덜 넣는다(작은 위젯의 높이를 넘지 않게).
-    const { shown, more } = capLines(lines, under === '' ? 6 : 5);
-    for (const l of shown) memo.push(memoLine(l, 11, null));
+    // 날짜 아래 줄이 있으면 메모 한 행을 덜 넣는다(작은 위젯의 높이를 넘지 않게). 긴 줄은 위젯 폭(어림)에서 접는다.
+    const wrapped = lines.map((l) => wrapLine(l, 11, input.size.width - 24));
+    const { counts, more } = fitRows(wrapped.map((w) => w.rows.length), under === '' ? 6 : 5);
+    counts.forEach((n, i) => memo.push(...memoRows(wrapped[i], n, 11)));
     if (more > 0) memo.push(leading(text(`+${more}`, 11, 'regular', C.muted, 1)));
   }
   const children: Node[] = [

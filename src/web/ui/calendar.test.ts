@@ -344,6 +344,22 @@ describe('웹(아이폰 화면)의 음력과 공휴일', () => {
       ['a', 'b', 'c', 'd', '+2'],
     ]);
   });
+  it('긴 줄은 접혀 여러 행을 쓰고, 칸에 남는 행만큼만 보인다(다른 줄을 밀어내지 않는다)', () => {
+    // 넓은 화면: 줄 높이 17, 칸 높이 115면 5행. 'long'으로 시작하는 줄은 접혀 3행(51px)이라고 친다.
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(115);
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('ln') && this.textContent!.startsWith('long') ? 51 : 17;
+    });
+    const root = mountWeb('2026-11-13', { '04': { text: 'long memo\nb', color: '' }, '05': { text: 'long memo\nb\nc\nd', color: '' } });
+    const lns = (key: string) => [...cell(root, key).querySelectorAll<HTMLElement>('.ln')];
+    expect(root.querySelector('.calendar')!.classList.contains('wrap-lines')).toBe(true);
+    // 다 들어간다: 그대로.
+    expect(lns('2026-11-04').map((l) => [l.textContent, l.classList.contains('clip')])).toEqual([['long memo', false], ['b', false]]);
+    // 네 줄이 5행에: 줄마다 한 행을 먼저 주고 남는 한 행을 긴 줄에. 긴 줄은 2행까지만 보인다.
+    const four = lns('2026-11-05');
+    expect(four.map((l) => l.textContent)).toEqual(['long memo', 'b', 'c', 'd']);
+    expect([four[0].classList.contains('clip'), four[0].style.getPropertyValue('--clamp'), four[0].style.maxHeight]).toEqual([true, '2', '34px']);
+  });
 });
 describe('웹앱의 설정(모양은 웹, 동작은 설정)', () => {
   const eight = { text: ['[+]a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].join('\n'), color: '' };

@@ -366,10 +366,13 @@ describe('messageTree', () => {
 });
 
 describe('칸 폭과 수용량', () => {
-  it('402x874 화면의 큰 위젯에서 `가족 모임`은 잘리지 않고 한글 여섯 글자는 잘린다', () => {
+  it('402x874 화면의 큰 위젯에서 `가족 모임`은 잘리지 않고 한글 여섯 글자는 칸에 남는 행으로 접힌다', () => {
     const size = widgetSize({ width: 402, height: 874 }, 'large');
     const t = buildTree({ family: 'large', size, today: TODAY, month: month({ '14': { text: '가족 모임\n가나다라마바', color: '' } }), offline: false });
-    expect(memoTexts(cellOf(t, 14))).toEqual(['가족 모임', '가나다라']);
+    expect(memoTexts(cellOf(t, 14))).toEqual(['가족 모임', '가나다라', '마바']);
+    // 줄이 칸보다 많으면 접을 행이 없어 앞의 두 줄이 한 행씩 보이고(다 못 보인 줄은 끝에 …) 나머지는 +2다(긴 줄이 다른 줄을 밀어내지 않는다).
+    const full = buildTree({ family: 'large', size, today: TODAY, month: month({ '14': { text: '가족 모임\n가나다라마바\n장보기\n세탁', color: '' } }), offline: false });
+    expect(memoTexts(cellOf(full, 14))).toEqual(['가족 모임', '가나다…', '+2']);
   });
 
   const ten = Array.from({ length: 10 }, (_, i) => `줄${i}`).join('\n');

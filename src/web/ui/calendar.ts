@@ -3,6 +3,7 @@ import { countdownChips, countdownLabel, eventsByDate, type CountdownChip, type 
 import { holidayDataVersion, holidayLabel } from '../../core/holidays';
 import { buildPage, pageMonths, stepPage, type Page } from '../../core/layout';
 import { lunarLabel, lunarShort } from '../../core/lunar';
+import { fitRows } from '../../core/memoRows';
 import { seasonNames } from '../../core/solarTerms';
 import type { Point } from '../../desktop/api';
 import { parseLine, splitLines } from '../../core/text';
@@ -237,18 +238,47 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     const maxLines = linesIn(used);
     // 웹에서는 공휴일 이름이 숫자 아래에 한 줄을 차지한다(PC 앱은 숫자 옆에 놓는다).
     const maxNamedLines = custom ? maxLines : linesIn(used + (wide ? HOLIDAY_LINE_PX.wide : HOLIDAY_LINE_PX.narrow));
+    const lineSpan = ({ done, text, ev }: CellLine): HTMLSpanElement => {
+      const cls = ['ln'];
+      if (ev) cls.push('ev', ev.type, ...(ev.kind === 'birthday' ? ['birthday'] : []));
+      if (done) cls.push('done');
+      return spanOf(cls.join(' '), text);
+    };
+    // 웹 모양: 긴 줄은 칸 폭에서 접혀 여러 행을 쓴다(styles.css의 .wrap-lines). 모든 줄을 넣고, 줄마다 몇 행인지 한꺼번에 읽은 뒤
+    // (배치 계산 한 번) 칸에 들어가는 만큼 남긴다. 2026-11-20 사용자: "글이길면 … 안보여 자동으로 줄바꿈되서 최대한 보이게 해줘".
+    // PC 앱(custom)은 전처럼 한 줄에 한 행이다.
+    const wrapped: { memo: HTMLElement; spans: HTMLSpanElement[]; capacity: number }[] = [];
     for (const { button, lines, named } of built) {
       if (lines.length === 0) continue;
-      const { shown, more } = visibleLines(lines, named ? maxNamedLines : maxLines);
       const memo = spanOf('memo', '');
-      for (const { done, text, ev } of shown) {
-        const cls = ['ln'];
-        if (ev) cls.push('ev', ev.type, ...(ev.kind === 'birthday' ? ['birthday'] : []));
-        if (done) cls.push('done');
-        memo.append(spanOf(cls.join(' '), text));
+      if (custom) {
+        const { shown, more } = visibleLines(lines, named ? maxNamedLines : maxLines);
+        for (const l of shown) memo.append(lineSpan(l));
+        if (more > 0) memo.append(spanOf('ln more', `+${more}`));
+      } else {
+        const spans = lines.map(lineSpan);
+        memo.append(...spans);
+        wrapped.push({ memo, spans, capacity: named ? maxNamedLines : maxLines });
       }
-      if (more > 0) memo.append(spanOf('ln more', `+${more}`));
       button.append(memo);
+    }
+    if (wrapped.length > 0) {
+      // 먼저 모두 읽고(배치 계산 한 번) 그다음에 고친다. 읽기와 고치기를 섞으면 칸마다 배치를 다시 계산한다.
+      const rowsBy = wrapped.map(({ spans }) => spans.map((s) => Math.max(1, Math.round(s.offsetHeight / lineHeight))));
+      wrapped.forEach(({ memo, spans, capacity }, i) => {
+        const rowsOf = rowsBy[i];
+        const { counts, more } = fitRows(rowsOf, capacity);
+        spans.forEach((s, j) => {
+          if (j >= counts.length) s.remove();
+          else if (counts[j] < rowsOf[j]) {
+            // 남은 행만큼만 보이고 끝에 "…"를 붙인다.
+            s.classList.add('clip');
+            s.style.setProperty('--clamp', String(counts[j]));
+            s.style.maxHeight = `${counts[j] * lineHeight}px`;
+          }
+        });
+        if (more > 0) memo.append(spanOf('ln more', `+${more}`));
+      });
     }
     if (!custom && (a.lunar || a.solarTerms)) fitLunar(target);
     // 잘린 줄 표시: 폭을 모두 읽은 뒤에 표시를 붙인다(줄마다 배치를 다시 계산하지 않게).
@@ -308,6 +338,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     el.classList.toggle('month-gap', a.monthGap);
     el.classList.toggle('with-wk', a.weekNumbers);
     el.dataset.bullet = a.bullet;
+    el.classList.toggle('wrap-lines', !custom);
     head.hidden = !a.titleBar;
     const monthLayout = a.layout === 'month';
     prevBtn.setAttribute('aria-label', monthLayout ? '이전 달' : '이전');

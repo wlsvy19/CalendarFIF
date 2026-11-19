@@ -643,6 +643,29 @@ button.primary:disabled { opacity: 0.55; cursor: default; }
   white-space: nowrap;
   overflow: hidden;
 }
+/*
+ * 웹 모양(웹앱, 위젯에서 연 달력): 긴 줄은 칸 폭에서 접혀 여러 행을 쓴다. 칸에 들어가는 만큼은 calendar.ts가 정한다
+ * (줄마다 행 수를 읽어 남기고, 남은 행만큼만 보이는 줄은 .clip). 2026-11-20 사용자: "자동으로 줄바꿈되서 최대한 보이게 해줘".
+ * PC 앱은 전처럼 한 줄에 한 행이다.
+ */
+.calendar.wrap-lines .ln {
+  height: auto;
+  min-height: var(--memo-line, 13px);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* 접힐 때 줄 머리 기호가 홀로 한 행에 남지 않게 기호 뒤의 빈칸을 끊기지 않는 빈칸으로 바꾼다. */
+.calendar.wrap-lines[data-bullet="dot"] .ln:not(.more):not(.ev)::before { content: "\2022\00a0"; }
+.calendar.wrap-lines[data-bullet="number"] .ln:not(.more):not(.ev)::before { content: counter(ln) ".\00a0"; }
+/* 알림·카운트다운의 그림은 첫 행 앞에 걸고, 이어지는 행은 그림 자리만큼 들인다(위젯과 같다). */
+.calendar.wrap-lines .ln.ev { position: relative; padding-left: 1.2em; }
+.calendar.wrap-lines .ln.ev::before { position: absolute; left: 0; top: calc((var(--memo-line, 13px) - 0.95em) / 2); margin-right: 0; }
+.calendar.wrap-lines .ln.clip {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--clamp, 1);
+  overflow: hidden;
+}
 .ln.done { text-decoration: line-through; opacity: 0.6; }
 .ln.cut {
   -webkit-mask-image: linear-gradient(to right, #000 78%, transparent);
