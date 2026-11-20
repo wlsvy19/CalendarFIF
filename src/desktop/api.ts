@@ -32,7 +32,9 @@ export type DesktopCommand =
   | { type: 'contentHidden'; hidden: boolean }
   | { type: 'adjust'; active: boolean }
   /** 입력을 받는 창이 앞에 왔다: 글 칸의 초점을 다시 준다(한/영 키, src/web/desktop/imeRefocus.ts). */
-  | { type: 'refocusText' };
+  | { type: 'refocusText' }
+  /** 마우스를 바탕화면으로 흘려보내는 동안 날짜 칸을 두 번 눌렀거나(open) 오른쪽으로 눌렀다(menu). 창 좌표(CSS 픽셀). */
+  | { type: 'deskClick'; kind: 'open' | 'menu'; x: number; y: number };
 
 export interface CalfifDesktop {
   setInteractive(on: boolean): void; // send CH.interactive
@@ -42,7 +44,7 @@ export interface CalfifDesktop {
   setSystem(patch: SystemPatch): Promise<SystemState>; // invoke CH.setSystem
   dragStart(): void; // send CH.dragStart
   drag(kind: DragKind, dx: number, dy: number): void; // send CH.drag
-  setPassThrough(on: boolean): void; // send CH.passThrough (아이콘 자리 위: 마우스를 바탕화면으로 보낸다)
+  setPassThrough(on: boolean, armed?: boolean): void; // send CH.passThrough (마우스를 바탕화면으로 보낸다. armed: 그 자리가 날짜 칸)
   onIconHoles(listener: (holes: HoleRect[]) => void): () => void; // CH.iconHoles, 메인 → 화면
   adjustDone(apply: boolean): void; // send CH.adjustDone
   showAlarms(items: AlarmPopupItem[], tone: AlarmTone): void; // send CH.alarm (맨 위 알림 창)

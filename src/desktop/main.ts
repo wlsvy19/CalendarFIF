@@ -144,10 +144,10 @@ if (!app.requestSingleInstanceLock()) {
       const drag = parseDrag(kind, dx, dy);
       if (isFromWindow(e) && drag) dragTo(drag.kind, drag.dx, drag.dy);
     });
-    // 아이콘 자리 위에 마우스가 있는지(화면이 알린다).
-    ipcMain.on(CH.passThrough, (e, on: unknown) => {
+    // 마우스를 바탕화면으로 보낼지, 그 자리가 날짜 칸인지(화면이 알린다).
+    ipcMain.on(CH.passThrough, (e, on: unknown, armed: unknown) => {
       const value = parseBool(on);
-      if (isFromWindow(e) && value !== null) setPassThrough(value);
+      if (isFromWindow(e) && value !== null) setPassThrough(value, parseBool(armed) === true);
     });
     ipcMain.on(CH.adjustDone, (e, apply: unknown) => {
       const value = parseBool(apply);

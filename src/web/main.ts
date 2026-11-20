@@ -143,7 +143,7 @@ if (!DESKTOP && typeof navigator !== 'undefined' && navigator.serviceWorker) {
 // 로그인 뒤 화면이 열려 있는 동안 메인 프로세스의 명령을 받는 동작들. 로그인 전에는 null이라 명령을 무시한다.
 // 저장되지 않아 이 페이지의 메모리에만 있는 편집이 있는가. mountMain이 로그인 중에만 채운다(새 버전으로 다시 읽기를 미룰지 정한다).
 let unsavedOnlyInMemory: () => boolean = () => false;
-let deskActions: { goToday(): void; openSettings(page?: SettingsPage): void; signOut(): void } | null = null;
+let deskActions: { goToday(): void; openSettings(page?: SettingsPage): void; signOut(): void; deskClick(kind: 'open' | 'menu', x: number, y: number): void } | null = null;
 
 /**
  * 폰의 글자판을 미리 띄운다. iOS(Safari, Scriptable의 웹 화면)는 누르는 동작 안에서 준 초점에만 글자판을 띄운다.
@@ -552,6 +552,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   const closeCellMenu = (): void => {
     cellMenu?.destroy();
     cellMenu = null;
+    deskHoles?.resync();
   };
   const openCellMenu = (dateKey: string, at: { x: number; y: number }): void => {
     closeCellMenu();
@@ -594,9 +595,9 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     settingsPage = page;
     location.hash = 'settings';
   };
-  // PC 앱: 바탕화면 아이콘 자리를 뚫는다(iconHoles.ts). 편집이나 설정이 떠 있거나 위치 조정 중이거나 칸 메뉴가 떠 있으면
-  // 마우스를 바탕화면으로 보내지 않는다. 창을 끌어 옮기는 것은 "위치 및 크기"의 조정 상태에서만 한다(adjust.ts).
-  const deskBusy = (): boolean => interactivity.active() || adjust !== null || cellMenu !== null;
+  // PC 앱: 바탕화면 아이콘 자리를 뚫고, 단추가 아닌 달력 위의 마우스를 바탕화면으로 보낸다(iconHoles.ts). 편집이나 설정이 떠 있거나
+  // 위치 조정 중이거나 칸 메뉴나 년월 고르기가 떠 있으면 보내지 않는다. 창을 끌어 옮기는 것은 "위치 및 크기"의 조정 상태에서만 한다(adjust.ts).
+  const deskBusy = (): boolean => interactivity.active() || adjust !== null || cellMenu !== null || root.querySelector('.datepick') !== null;
   const deskHoles = bridge ? mountIconHoles(bridge, () => root.querySelector<HTMLElement>('.calendar'), deskBusy) : null;
   if (DESKTOP) {
     deskActions = {
@@ -604,6 +605,15 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       openSettings: openSettingsFromCommand,
       // 보내지 못한 편집이 남아 있으면 로그아웃으로 잃지 않도록 설정 화면(대기 건수 안내)을 연다.
       signOut: () => (engine.status().pending === 0 ? signOutNow() : openSettingsFromCommand('account')),
+      // 마우스를 바탕화면으로 보내는 동안 날짜 칸을 두 번 눌렀거나 오른쪽으로 눌렀다(메인의 마우스 훅이 알린다).
+      deskClick: (kind, x, y) => {
+        if (deskBusy()) return;
+        const key = document.elementFromPoint(x, y)?.closest<HTMLElement>('.grid.current .cell')?.dataset.key;
+        if (!key) return;
+        if (kind === 'open') openDay(key);
+        else openCellMenu(key, { x, y });
+        deskHoles?.resync(); // 칸 메뉴가 떴으면 그 위의 마우스를 달력이 받는다
+      },
     };
   }
   // 알림 시계: 시각이 된 알림을 화면 안 알림으로 띄우고 소리를 낸다(PC 앱은 별도 알림 창으로 보낸다).
@@ -759,6 +769,9 @@ bridge?.onCommand((c) => {
     case 'adjust':
       adjust?.destroy();
       adjust = c.active && bridge ? mountAdjust(document.body, bridge) : null;
+      break;
+    case 'deskClick':
+      deskActions?.deskClick(c.kind, c.x, c.y);
       break;
     case 'refocusText':
       // 창이 활성화되기 전에 초점을 받은 글 칸은 한/영 키가 듣지 않는다. 창이 앞에 왔으니 초점을 다시 준다(imeRefocus.ts).

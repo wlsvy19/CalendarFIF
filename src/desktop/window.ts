@@ -323,17 +323,75 @@ function sendHoles(): void {
   } catch {
     // 화면이 죽었으면 다시 뜰 때 보낸다.
   }
-  if (holes.length === 0) setPassThrough(false);
 }
 
-/** 마우스가 아이콘 자리 위에 있는 동안 창이 마우스를 바탕화면으로 보낸다(화면이 알린다). 입력 중, 조정 중에는 받는다. */
-export function setPassThrough(on: boolean): void {
+// ---- 달력 위의 마우스를 바탕화면으로(deskClicks.ts, mouseHook.ts). 2026-11-20 사용자: DesktopCal처럼 달력 위에서 끌면 바탕화면의 선택 상자가 생겨야 한다. ----
+let mouseArmed = false;
+let sentMouse = '';
+let testDesk = 0n;
+// 시험 실행이 읽고 쓴다.
+export const deskMouse = {
+  clicks: 0, ignored: 0, errors: 0, lastError: '',
+  /** 훅이 본 단추 사건과 판단(마지막 20개). 날짜 칸 위에서만 오는 것이 아니라 모든 단추 사건이다. 내용은 단추와 까닭뿐이다. */
+  trace: [] as string[],
+  armed: (): boolean => passThrough && mouseArmed,
+  setTestDesk(hwnd: bigint): void {
+    testDesk = hwnd;
+    pushMouse();
+  },
+};
+
+/** 훅 스레드가 읽을 상태(날짜 칸 위인지, 창의 자리)를 아이콘 프로세스에 보낸다. 바뀌었을 때만. */
+function pushMouse(): void {
   const win = getWindow();
+  if (!win || !iconWorker) return;
+  let rect: [number, number, number, number] = [0, 0, 0, 0];
+  try {
+    const r = screen.dipToScreenRect(win, win.getBounds());
+    rect = [r.x, r.y, r.x + r.width, r.y + r.height];
+  } catch {
+    // 자리를 모르면 아무 데도 날짜 칸으로 보지 않는다.
+  }
+  const mouse = { armed: passThrough && mouseArmed && win.isVisible(), rect, testDesk: testDesk.toString() };
+  const text = JSON.stringify(mouse);
+  if (text === sentMouse) return;
+  sentMouse = text;
+  try {
+    iconWorker.postMessage({ mouse });
+  } catch {
+    // 프로세스가 끝나는 중이다. 다시 뜨면 처음부터 보낸다.
+  }
+}
+
+/** 훅이 날짜 칸의 두 번 누르기나 오른쪽 누르기를 알아챘다(실제 픽셀). 흘려보내는 중일 때만 화면에 창 좌표로 넘긴다. */
+function deskClick(e: { kind?: unknown; x?: unknown; y?: unknown }): void {
+  const win = getWindow();
+  const kind = e.kind === 'open' || e.kind === 'menu' ? e.kind : null;
+  if (!win || !kind || typeof e.x !== 'number' || typeof e.y !== 'number' || !deskMouse.armed() || windowState.interactive || windowState.adjusting) {
+    deskMouse.ignored += 1;
+    return;
+  }
+  deskMouse.clicks += 1;
+  const p = screen.screenToDipPoint({ x: e.x, y: e.y });
+  const b = win.getBounds();
+  sendCommand({ type: 'deskClick', kind, x: p.x - b.x, y: p.y - b.y });
+}
+
+/**
+ * 창이 마우스를 바탕화면으로 보낼지(화면이 마우스 자리를 보고 알린다: 단추가 아닌 달력 위, 아이콘 자리). 입력 중, 조정 중에는 받는다.
+ * armed는 그 자리가 날짜 칸이라는 뜻이다. 그때 훅이 두 번 누르기와 오른쪽 누르기를 알아챈다.
+ */
+export function setPassThrough(on: boolean, armed = false): void {
+  const win = getWindow();
+  if (!win) return;
   const next = on && !windowState.interactive && !windowState.adjusting;
-  if (!win || next === passThrough) return;
-  passThrough = next;
-  if (next) win.setIgnoreMouseEvents(true, { forward: true });
-  else win.setIgnoreMouseEvents(false);
+  mouseArmed = next && armed;
+  if (next !== passThrough) {
+    passThrough = next;
+    if (next) win.setIgnoreMouseEvents(true, { forward: true });
+    else win.setIgnoreMouseEvents(false);
+  }
+  pushMouse();
 }
 
 function applyIconGrid(): void {
@@ -356,7 +414,24 @@ function startIconWatch(): void {
     return;
   }
   iconWorker = child;
+  sentMouse = '';
+  pushMouse();
   child.on('message', (m: unknown) => {
+    if (typeof m === 'object' && m !== null && 'deskClick' in m) {
+      deskClick(((m as { deskClick: unknown }).deskClick ?? {}) as { kind?: unknown; x?: unknown; y?: unknown });
+      return;
+    }
+    if (typeof m === 'object' && m !== null && 'mouseTrace' in m) {
+      deskMouse.trace.push(String((m as { mouseTrace: unknown }).mouseTrace).slice(0, 80));
+      if (deskMouse.trace.length > 20) deskMouse.trace.shift();
+      return;
+    }
+    if (typeof m === 'object' && m !== null && 'mouseError' in m) {
+      deskMouse.errors += 1;
+      deskMouse.lastError = String((m as { mouseError: unknown }).mouseError).slice(0, 200);
+      console.error('마우스 훅:', deskMouse.lastError);
+      return;
+    }
     if (typeof m === 'object' && m !== null && 'error' in m) {
       iconWatch.errors += 1;
       iconWatch.lastError = String((m as { error: unknown }).error).slice(0, 200);
@@ -531,7 +606,9 @@ export function createDesktopWindow(): BrowserWindow {
   // 창이 옮겨지거나 크기가 바뀌면 뚫을 자리도 바뀐다. 창 메시지 처리 안이므로 다음 턴에 한다.
   const holesSoon = (): void => {
     setImmediate(() => {
-      if (win === current && !win.isDestroyed()) sendHoles();
+      if (win !== current || win.isDestroyed()) return;
+      sendHoles();
+      pushMouse();
     });
   };
   win.on('move', holesSoon);
@@ -584,6 +661,7 @@ export function showWindow(): void {
   const win = getWindow();
   if (win && mode !== null && !win.isVisible()) win.showInactive();
   keepBottom();
+  pushMouse();
 }
 
 export const isHidden = (): boolean => windowState.hidden;
@@ -594,6 +672,7 @@ export function toggleHidden(): void {
   if (windowState.adjusting) return;
   windowState.hidden = true;
   getWindow()?.hide();
+  pushMouse();
 }
 
 // 맨 위에 보기. 켜면 맨 아래 지키기가 멈추고, 끄면 다시 맨 아래로 보낸다. 위치 조정 중에는 조정이 끝날 때 반영된다.

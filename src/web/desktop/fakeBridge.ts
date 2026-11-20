@@ -58,8 +58,8 @@ export class FakeBridge implements CalfifDesktop {
   drag(kind: DragKind, dx: number, dy: number): void {
     this.calls.push(['drag', kind, dx, dy]);
   }
-  setPassThrough(on: boolean): void {
-    this.calls.push(['setPassThrough', on]);
+  setPassThrough(on: boolean, armed = false): void {
+    this.calls.push(['setPassThrough', on, armed]);
   }
   onIconHoles(listener: (holes: HoleRect[]) => void): () => void {
     this.holeListeners.add(listener);
