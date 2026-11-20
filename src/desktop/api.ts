@@ -7,7 +7,6 @@ export const CH = {
   setSystem: 'calfif:set-system',
   dragStart: 'calfif:drag-start',
   drag: 'calfif:drag',
-  dragEnd: 'calfif:drag-end',
   passThrough: 'calfif:pass-through',
   iconHoles: 'calfif:icon-holes',
   adjustDone: 'calfif:adjust-done',
@@ -31,7 +30,9 @@ export type DesktopCommand =
   | { type: 'openSettings'; page?: SettingsPage }
   | { type: 'signOut' }
   | { type: 'contentHidden'; hidden: boolean }
-  | { type: 'adjust'; active: boolean };
+  | { type: 'adjust'; active: boolean }
+  /** 입력을 받는 창이 앞에 왔다: 글 칸의 초점을 다시 준다(한/영 키, src/web/desktop/imeRefocus.ts). */
+  | { type: 'refocusText' };
 
 export interface CalfifDesktop {
   setInteractive(on: boolean): void; // send CH.interactive
@@ -41,7 +42,6 @@ export interface CalfifDesktop {
   setSystem(patch: SystemPatch): Promise<SystemState>; // invoke CH.setSystem
   dragStart(): void; // send CH.dragStart
   drag(kind: DragKind, dx: number, dy: number): void; // send CH.drag
-  dragEnd(): void; // send CH.dragEnd (평소 상태에서 끌어 옮기기가 끝남: 자리를 저장한다)
   setPassThrough(on: boolean): void; // send CH.passThrough (아이콘 자리 위: 마우스를 바탕화면으로 보낸다)
   onIconHoles(listener: (holes: HoleRect[]) => void): () => void; // CH.iconHoles, 메인 → 화면
   adjustDone(apply: boolean): void; // send CH.adjustDone

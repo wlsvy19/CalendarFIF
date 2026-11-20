@@ -58,9 +58,6 @@ export class FakeBridge implements CalfifDesktop {
   drag(kind: DragKind, dx: number, dy: number): void {
     this.calls.push(['drag', kind, dx, dy]);
   }
-  dragEnd(): void {
-    this.calls.push(['dragEnd']);
-  }
   setPassThrough(on: boolean): void {
     this.calls.push(['setPassThrough', on]);
   }

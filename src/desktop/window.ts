@@ -14,6 +14,8 @@ const WM_WINDOWPOSCHANGED = 0x47;
 const ATTACH_FALLBACK_MS = 2000;
 const PROGMAN_POLL_MS = 5000;
 const DISPLAY_DEBOUNCE_MS = 500;
+/** 창이 앞에 온 뒤 글 칸의 초점을 다시 주라고 하기까지(ms). 바로 그때 주면 입력기가 아직 붙지 않아 듣지 않을 수 있다. */
+const IME_REFOCUS_DELAY_MS = 200;
 
 export type AttachMode = 'owned' | 'bottom';
 
@@ -28,8 +30,6 @@ let settings: DesktopSettings;
 let settingsFile = '';
 let adjustBefore: Rect | null = null;
 let adjustBase: Rect | null = null;
-// 평소 상태(위치 조정이 아닐 때)에서 달력을 끌어 옮기는 중인지(2026-11-20 사용자: "캘린더데스크처럼 드래그 되게 해").
-let moving = false;
 let preloadPath: string;
 let iconWorkerPath = '';
 let current: BrowserWindow | null = null;
@@ -243,7 +243,6 @@ export function startAdjust(): void {
   }
   adjustBefore = win.getBounds();
   adjustBase = null;
-  moving = false;
   windowState.adjusting = step.adjusting;
   setPassThrough(false);
   sendHoles(); // 조정하는 동안은 뚫지 않는다
@@ -256,40 +255,17 @@ export function startAdjust(): void {
   sendAdjust(win, true);
 }
 
-// 끌기의 시작. 위치 조정 중이면 옮기기와 크기 바꾸기, 평소에는 옮기기만 한다(편집이나 설정이 떠 있으면 하지 않는다).
+// 끌어 옮기기와 크기 바꾸기는 위치 조정 상태(메뉴의 "위치 및 크기")에서만 한다. 2026-11-20 사용자: 평소 상태에서 끌려 옮겨지게 했더니
+// "마우스 끄는거는 위치 및 크기 눌러서 이 상태일때만 끌게 되야지".
 export function beginDrag(): void {
   const win = getWindow();
-  if (!win) return;
-  if (windowState.adjusting) {
-    adjustBase = win.getBounds();
-    return;
-  }
-  if (windowState.interactive) return;
-  adjustBase = win.getBounds();
-  moving = true;
-  setPassThrough(false);
+  if (win && windowState.adjusting) adjustBase = win.getBounds();
 }
 
 export function dragTo(kind: DragKind, dx: number, dy: number): void {
   const win = getWindow();
-  if (!win || !adjustBase) return;
-  if (windowState.adjusting) win.setBounds(applyDrag(adjustBase, kind, dx, dy, workAreas()));
-  else if (moving && kind === 'move') win.setBounds(applyDrag(adjustBase, 'move', dx, dy, workAreas()));
-}
-
-// 평소 상태의 끌어 옮기기가 끝났다: 화면 안으로 맞추고 이 모니터 구성의 자리로 저장한다.
-export function endDrag(): void {
-  if (!moving) return;
-  moving = false;
-  adjustBase = null;
-  const win = getWindow();
-  if (!win) return;
-  const placed = clampBounds(win.getBounds(), workAreas());
-  win.setBounds(placed);
-  saveBounds(placed);
-  limiter.reached();
-  keepBottom();
-  sendHoles();
+  if (!win || !windowState.adjusting || !adjustBase) return;
+  win.setBounds(applyDrag(adjustBase, kind, dx, dy, workAreas()));
 }
 
 function saveBounds(placed: Rect): void {
@@ -350,10 +326,10 @@ function sendHoles(): void {
   if (holes.length === 0) setPassThrough(false);
 }
 
-/** 마우스가 아이콘 자리 위에 있는 동안 창이 마우스를 바탕화면으로 보낸다(화면이 알린다). 입력 중, 조정 중, 끌기 중에는 받는다. */
+/** 마우스가 아이콘 자리 위에 있는 동안 창이 마우스를 바탕화면으로 보낸다(화면이 알린다). 입력 중, 조정 중에는 받는다. */
 export function setPassThrough(on: boolean): void {
   const win = getWindow();
-  const next = on && !windowState.interactive && !windowState.adjusting && !moving;
+  const next = on && !windowState.interactive && !windowState.adjusting;
   if (!win || next === passThrough) return;
   passThrough = next;
   if (next) win.setIgnoreMouseEvents(true, { forward: true });
@@ -519,7 +495,6 @@ export function createDesktopWindow(): BrowserWindow {
   win.setAlwaysOnTop(settings.alwaysOnTop);
   adjustBefore = null;
   adjustBase = null;
-  moving = false;
   passThrough = false;
   sentHoles = null;
   limiter.reached();
@@ -580,6 +555,13 @@ export function createDesktopWindow(): BrowserWindow {
     });
   });
   win.on('focus', scheduleKeepBottom);
+  // 입력을 받는 동안 창이 앞에 오면 화면에 글 칸의 초점을 다시 주라고 한다. 활성화되기 전에 초점을 받은 글 칸은 한/영 키가 듣지 않는다
+  // (2026-11-20 사용자: "한영키 가 안먹어"). 입력기가 붙을 시간을 조금 준다.
+  win.on('focus', () => {
+    setTimeout(() => {
+      if (win === current && !win.isDestroyed() && windowState.interactive && win.isFocused()) sendCommand({ type: 'refocusText' });
+    }, IME_REFOCUS_DELAY_MS);
+  });
   win.hookWindowMessage(WM_WINDOWPOSCHANGED, scheduleKeepBottom);
   win.on('show', () => events.onChange());
   win.on('hide', () => events.onChange());

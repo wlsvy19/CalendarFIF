@@ -10,7 +10,7 @@ import { guardLoginItem, runSmoke } from './smoke';
 import { startupAction, tryLoginItem } from './startup';
 import { buildMenu, createTray, destroyTray, refreshTray } from './tray';
 import {
-  beginDrag, dragTo, endDrag, setPassThrough, events, finishAdjust, getSettings, getWindow, installSecurity, isFromWindow, isHidden, keepBottom, markQuitting, registerAppProtocol,
+  beginDrag, dragTo, setPassThrough, events, finishAdjust, getSettings, getWindow, installSecurity, isFromWindow, isHidden, keepBottom, markQuitting, registerAppProtocol,
   sendCommand, setAlwaysOnTop, setContentHidden, setInteractive, showWindow, signals, startAdjust, startDesktopWindow, toggleHidden, updateSettings,
 } from './window';
 
@@ -143,9 +143,6 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.on(CH.drag, (e, kind: unknown, dx: unknown, dy: unknown) => {
       const drag = parseDrag(kind, dx, dy);
       if (isFromWindow(e) && drag) dragTo(drag.kind, drag.dx, drag.dy);
-    });
-    ipcMain.on(CH.dragEnd, (e) => {
-      if (isFromWindow(e)) endDrag();
     });
     // 아이콘 자리 위에 마우스가 있는지(화면이 알린다).
     ipcMain.on(CH.passThrough, (e, on: unknown) => {

@@ -12,14 +12,14 @@ import type { Runtime, Scenario } from './runtime';
 import { loadDesktopSettings } from './settings';
 import { findProgman, getExStyle, getOwner, isWindow, nativeLoaded, nestedNativeCalls, windowsBelow } from './win32';
 import {
-  blocked, displayInfos, getHwnd, getMode, getProgman, getSettings, getWindow, iconWatch, sendCommand, setStaleProgmanForSmoke, signals, startAdjust, windowState, windowsCreated,
+  blocked, displayInfos, getHwnd, getMode, getProgman, getSettings, getWindow, iconWatch, sendCommand, setAlwaysOnTop, setStaleProgmanForSmoke, signals, startAdjust, windowState, windowsCreated,
 } from './window';
 
 // main.ts가 메뉴 항목과 단축키가 부르는 길을 시험 실행에 건넨다.
 export type Desk = { runAction(a: MenuAction): void; applySystem(p: SystemPatch): SystemState };
 type Result = { fields: Record<string, unknown>; checks: Record<string, boolean> };
 const TOTAL_MS = 60000;
-const BRIDGE_KEYS = ['adjustDone', 'drag', 'dragEnd', 'dragStart', 'getSystem', 'onCommand', 'onIconHoles', 'setInteractive', 'setPassThrough', 'setSystem', 'showAlarms', 'showMenu'];
+const BRIDGE_KEYS = ['adjustDone', 'drag', 'dragStart', 'getSystem', 'onCommand', 'onIconHoles', 'setInteractive', 'setPassThrough', 'setSystem', 'showAlarms', 'showMenu'];
 const HIDE_KEY = 'Ctrl+Alt+Shift+F9';
 const CONTENT_KEY = 'Ctrl+Alt+Shift+F10';
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -100,6 +100,93 @@ function secondInstance(): Promise<{ exitCode: number | null; notified: boolean 
   });
 }
 
+// 한/영 키(2026-11-20 사용자: "pc버전에서 메모 작성하려고 하는데 한영키 가 안먹어. 영어 밖에 안써져").
+// 사용자가 하는 그대로 해 본다: 이 시험 창(에뮬레이터 자료)을 잠시 맨 위에 두고 날짜를 두 번 누르고(마우스 자리는 되돌린다),
+// 편집 화면이 열리면 한/영 키(VK_HANGUL)를 누르고 r, k를 친다. 한글이 켜지면 메모 칸에 '가'가 들어간다. 끝나면 한/영을 되돌리고 취소한다.
+// 키는 이 창이 맨 앞일 때만 보낸다(아니면 다른 창에 가므로 보내지 않고 건너뛴다). Win32는 이 시험의 차례(창 메시지 처리 밖)에서만 부른다.
+async function imeProbe(win: BrowserWindow): Promise<Record<string, unknown>> {
+  const koffi = require('koffi') as typeof import('koffi');
+  const u32 = koffi.load('user32.dll');
+  const GetForegroundWindow = u32.func('intptr_t __stdcall GetForegroundWindow()');
+  const GetCursorPos = u32.func('int __stdcall GetCursorPos(_Out_ int32_t *pt)');
+  const SetCursorPos = u32.func('int __stdcall SetCursorPos(int x, int y)');
+  const SendInput = u32.func('uint32_t __stdcall SendInput(uint32_t n, uint8_t *inputs, int size)');
+  const WindowFromPoint = u32.func('intptr_t __stdcall WindowFromPoint(int64_t pt)');
+  const GetAncestor = u32.func('intptr_t __stdcall GetAncestor(intptr_t h, uint32_t flags)');
+  const own = getHwnd();
+  // 누를 자리의 맨 위 창이 이 시험 창인지. 아니면 다른 앱의 창을 누르게 되므로 누르지 않는다.
+  const ownsPoint = (x: number, y: number): boolean => BigInt(GetAncestor(WindowFromPoint((BigInt(y) << 32n) | (BigInt(x) & 0xffffffffn)), 2)) === own;
+  const front = (): boolean => BigInt(GetForegroundWindow()) === own;
+  const input = (fill: (v: DataView) => void): Uint8Array => {
+    const b = new Uint8Array(40); // INPUT(x64)
+    fill(new DataView(b.buffer));
+    return b;
+  };
+  const mouse = (flags: number) => input((v) => v.setUint32(20, flags, true));
+  const key = (vk: number, up: boolean) => input((v) => {
+    v.setUint32(0, 1, true);
+    v.setUint16(8, vk, true);
+    v.setUint32(12, up ? 2 : 0, true);
+  });
+  const send = (...items: Uint8Array[]): void => {
+    const all = new Uint8Array(40 * items.length);
+    items.forEach((it, i) => all.set(it, i * 40));
+    SendInput(items.length, all, 40);
+  };
+  const tap = (vk: number) => send(key(vk, false), key(vk, true));
+  const value = async (): Promise<string> => String(await js(win, "(document.querySelector('.sheet textarea') || {}).value ?? ''").catch(() => ''));
+
+  const out: Record<string, unknown> = {};
+  const rect = (await js(win, "(() => { const c = document.querySelector('.grid.current .cell:not(.other)'); if (!c) return null; const r = c.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height - 12 }; })()")) as { x: number; y: number } | null;
+  if (!rect) return { skipped: 'no cell' };
+  const saved = new Int32Array(2);
+  GetCursorPos(saved);
+  // 맨 위에 보기를 켠다(창의 win.setAlwaysOnTop만 하면 맨 아래 지키기가 곧 다시 내린다).
+  setAlwaysOnTop(true);
+  await sleep(300);
+  const b = win.getBounds();
+  const pt = screen.dipToScreenPoint({ x: b.x + rect.x, y: b.y + rect.y });
+  out.ownsPoint = ownsPoint(pt.x, pt.y);
+  if (!out.ownsPoint) {
+    setAlwaysOnTop(false);
+    return { ...out, skipped: 'point not ours' };
+  }
+  SetCursorPos(pt.x, pt.y);
+  if (ownsPoint(pt.x, pt.y)) send(mouse(2), mouse(4), mouse(2), mouse(4)); // 두 번 누르기
+  await sleep(100);
+  SetCursorPos(saved[0], saved[1]);
+  out.editorOpened = await until(async () => (await js(win, "document.activeElement && document.activeElement.matches('.sheet textarea')").catch(() => false)) === true, 4000);
+  out.foreground = await until(front, 3000);
+  await sleep(300); // 창이 앞에 온 뒤 글 칸의 초점을 다시 주는 것(imeRefocus.ts)이 끝나게
+  if (out.editorOpened && out.foreground) {
+    const before = await value();
+    tap(0x15); // 한/영
+    await sleep(200);
+    if (front()) {
+      tap(0x52); // r
+      tap(0x4b); // k
+      await sleep(300);
+    }
+    const after = await value();
+    out.typedKorean = after.slice(before.length).includes('가');
+    out.typed = after.slice(before.length);
+    out.bounces = await js(win, 'document.documentElement.dataset.imeBounce || 0').catch(() => null);
+    if (front()) {
+      tap(0x1b); // Esc: 조합을 끝낸다(편집 화면의 Esc는 조합 중이면 듣지 않는다)
+      await sleep(100);
+      tap(0x15); // 한/영을 되돌린다
+      await sleep(100);
+    }
+    await js(win, `(() => { const t = document.querySelector('.sheet textarea'); if (t) { t.value = ${JSON.stringify(before)}; t.dispatchEvent(new Event('input', { bubbles: true })); } return 1; })()`).catch(() => {});
+  } else {
+    out.skipped = 'editor or foreground';
+  }
+  await js(win, "(() => { const c = document.querySelector('.sheet .textbtn.start'); if (c) c.click(); return 1; })()").catch(() => {});
+  setAlwaysOnTop(false);
+  await until(() => !win.isFocusable(), 3000);
+  return out;
+}
+
 async function attach(_rt: Runtime, desk: Desk): Promise<Result> {
   let win = getWindow();
   if (!win) return { fields: {}, checks: { window: false } };
@@ -110,16 +197,10 @@ async function attach(_rt: Runtime, desk: Desk): Promise<Result> {
   const rendered = (await js(first0, RENDERED)) as string;
   // 로그인 화면은 입력을 위해 창을 활성화 가능하게 둔다. 달력으로 넘어가 입력이 끝나면 다시 맨 아래로 간다.
   await until(() => !first0.isFocusable() && bottomNow(), 3000);
-  // 평소 상태에서 끌어 옮기기(moveDrag.ts가 보내는 것과 같은 차례): 따라 움직이고, 놓으면 그 자리를 저장한다. 시험 뒤 제자리로 되돌린다.
-  const freeMove = async (dx: number, dy: number): Promise<boolean> => {
-    const from = first0.getBounds();
-    await js(first0, `window.calfifDesktop.dragStart(); window.calfifDesktop.drag('move', ${dx}, ${dy}); 1`);
-    const followed = await until(() => first0.getBounds().x === from.x + dx && first0.getBounds().y === from.y + dy, 2000);
-    await js(first0, 'window.calfifDesktop.dragEnd(); 1');
-    const saved = await until(() => JSON.stringify(getSettings().bounds[layoutKey(displayInfos())]) === JSON.stringify(first0.getBounds()), 2000);
-    return followed && saved;
-  };
-  const freeMoved = (await freeMove(30, 20)) && (await freeMove(-30, -20));
+  // 끌어 옮기기는 위치 조정 상태에서만 된다(2026-11-20 사용자). 평소 상태에서 끌기를 보내도 창은 그대로다.
+  const fromBounds = first0.getBounds();
+  await js(first0, "window.calfifDesktop.dragStart(); window.calfifDesktop.drag('move', 30, 20); 1");
+  const freeMoveIgnored = !(await until(() => first0.getBounds().x !== fromBounds.x || first0.getBounds().y !== fromBounds.y, 1500));
   // 바탕화면 아이콘 자리를 읽는 프로세스(iconWorker)가 자리를 보냈는지. 읽기만 한다.
   await until(() => iconWatch.grids > 0 || iconWatch.errors > 0, 10000);
   // 창을 아이콘 하나 위로 옮기면 달력에 그 자리가 뚫리고, 화면이 알리면 마우스를 바탕화면으로 보낸다. 시험 뒤 제자리로.
@@ -165,6 +246,7 @@ async function attach(_rt: Runtime, desk: Desk): Promise<Result> {
     toolWindowDuring.push(toolStyle());
   }
   const atBottomAfterInteractive = await until(bottomNow, 2000);
+  const ime = await imeProbe(first0);
 
   const shotInfo = await capture(first0, 'attach');
 
@@ -207,7 +289,7 @@ async function attach(_rt: Runtime, desk: Desk): Promise<Result> {
     toolWindowWhileInteractive: toolWindowDuring[0], toolWindowAfterInteractive: toolWindowDuring[1], atBottomAfterInteractive, closeBlocked,
     recreated, ownerIsProgmanAfterRecreate: second?.ownerIsProgman ?? false, atBottomAfterRecreate: second?.atBottom ?? false, minimizeRestored, ...crash, ...ownerLost,
     loginItemCalls, nativeLoaded: nativeLoaded(), nestedNativeCalls: nestedNativeCalls(), bottomAsserts: bottomAssertsNormal, bottomAssertsTotal: blocked.bottomAsserts,
-    secondInstance: instance, ...shotInfo, freeMoved, ...icons,
+    secondInstance: instance, ...shotInfo, freeMoveIgnored, ...icons, ime,
   };
   const checks = {
     mode: first.mode === 'owned', ownerIsProgman: first.ownerIsProgman, atBottom: first.atBottom, toolWindow: first.toolWindow,
@@ -219,7 +301,7 @@ async function attach(_rt: Runtime, desk: Desk): Promise<Result> {
     recreated, ownerIsProgmanAfterRecreate: fields.ownerIsProgmanAfterRecreate, crashRecovered: crash.crashRecovered === true, ownerLostRecovered: ownerLost.ownerLostRecovered === true,
     loginItemCalls: loginItemCalls === 0, nativeLoaded: fields.nativeLoaded, nestedNativeCalls: fields.nestedNativeCalls === 0,
     secondInstance: instance.exitCode === 0 && instance.notified, bottomAsserts: bottomAssertsNormal <= 20,
-    freeMoved, iconsRead: icons.iconGrids > 0 && icons.iconErrors === 0, holeCut: icons.iconCount === 0 || (holeCut && passThroughToggled),
+    imeKorean: ime.skipped !== undefined || ime.typedKorean === true, freeMoveIgnored, iconsRead: icons.iconGrids > 0 && icons.iconErrors === 0, holeCut: icons.iconCount === 0 || (holeCut && passThroughToggled),
   };
   return { fields, checks };
 }

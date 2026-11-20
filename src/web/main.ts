@@ -28,7 +28,7 @@ import { makeDraggable, sessionMemory } from './desktop/dragSheet';
 import { mountDesktopSettings } from './desktop/settingsPages';
 import { mountCellMenu } from './desktop/cellMenu';
 import { mountIconHoles } from './desktop/iconHoles';
-import { mountMoveDrag } from './desktop/moveDrag';
+import { refocusText } from './desktop/imeRefocus';
 import { Interactivity } from './desktop/interactive';
 import { playDoneTone } from './desktop/tone';
 import { mountBlocked, type BlockedKind } from './ui/blocked';
@@ -594,10 +594,9 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     settingsPage = page;
     location.hash = 'settings';
   };
-  // PC 앱: 달력 위를 끌어 창을 옮기고(moveDrag.ts), 바탕화면 아이콘 자리를 뚫는다(iconHoles.ts). 편집이나 설정이 떠 있거나
-  // 위치 조정 중이거나 칸 메뉴가 떠 있으면 하지 않는다.
+  // PC 앱: 바탕화면 아이콘 자리를 뚫는다(iconHoles.ts). 편집이나 설정이 떠 있거나 위치 조정 중이거나 칸 메뉴가 떠 있으면
+  // 마우스를 바탕화면으로 보내지 않는다. 창을 끌어 옮기는 것은 "위치 및 크기"의 조정 상태에서만 한다(adjust.ts).
   const deskBusy = (): boolean => interactivity.active() || adjust !== null || cellMenu !== null;
-  const deskMove = bridge ? mountMoveDrag(root, bridge, () => !deskBusy()) : null;
   const deskHoles = bridge ? mountIconHoles(bridge, () => root.querySelector<HTMLElement>('.calendar'), deskBusy) : null;
   if (DESKTOP) {
     deskActions = {
@@ -647,7 +646,6 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       closeEditor();
       closeSettings();
       closeUsers();
-      deskMove?.destroy();
       deskHoles?.destroy();
       calendar.destroy();
       alarmClock.stop();
@@ -761,6 +759,10 @@ bridge?.onCommand((c) => {
     case 'adjust':
       adjust?.destroy();
       adjust = c.active && bridge ? mountAdjust(document.body, bridge) : null;
+      break;
+    case 'refocusText':
+      // 창이 활성화되기 전에 초점을 받은 글 칸은 한/영 키가 듣지 않는다. 창이 앞에 왔으니 초점을 다시 준다(imeRefocus.ts).
+      refocusText();
       break;
   }
 });

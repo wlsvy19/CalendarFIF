@@ -15,7 +15,6 @@ const bridge: CalfifDesktop = {
   setSystem: (patch) => ipcRenderer.invoke(CH.setSystem, patch),
   dragStart: () => ipcRenderer.send(CH.dragStart),
   drag: (kind, dx, dy) => ipcRenderer.send(CH.drag, kind, dx, dy),
-  dragEnd: () => ipcRenderer.send(CH.dragEnd),
   setPassThrough: (on) => ipcRenderer.send(CH.passThrough, on),
   onIconHoles: (listener) => {
     const handler = (_e: unknown, holes: HoleRect[]) => listener(holes);
