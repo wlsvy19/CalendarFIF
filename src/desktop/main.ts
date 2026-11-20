@@ -10,7 +10,7 @@ import { guardLoginItem, runSmoke } from './smoke';
 import { startupAction, tryLoginItem } from './startup';
 import { buildMenu, createTray, destroyTray, refreshTray } from './tray';
 import {
-  beginDrag, dragTo, events, finishAdjust, getSettings, getWindow, installSecurity, isFromWindow, isHidden, keepBottom, markQuitting, registerAppProtocol,
+  beginDrag, dragTo, endDrag, setPassThrough, events, finishAdjust, getSettings, getWindow, installSecurity, isFromWindow, isHidden, keepBottom, markQuitting, registerAppProtocol,
   sendCommand, setAlwaysOnTop, setContentHidden, setInteractive, showWindow, signals, startAdjust, startDesktopWindow, toggleHidden, updateSettings,
 } from './window';
 
@@ -144,6 +144,14 @@ if (!app.requestSingleInstanceLock()) {
       const drag = parseDrag(kind, dx, dy);
       if (isFromWindow(e) && drag) dragTo(drag.kind, drag.dx, drag.dy);
     });
+    ipcMain.on(CH.dragEnd, (e) => {
+      if (isFromWindow(e)) endDrag();
+    });
+    // 아이콘 자리 위에 마우스가 있는지(화면이 알린다).
+    ipcMain.on(CH.passThrough, (e, on: unknown) => {
+      const value = parseBool(on);
+      if (isFromWindow(e) && value !== null) setPassThrough(value);
+    });
     ipcMain.on(CH.adjustDone, (e, apply: unknown) => {
       const value = parseBool(apply);
       if (isFromWindow(e) && value !== null) finishAdjust(value);
@@ -165,7 +173,7 @@ if (!app.requestSingleInstanceLock()) {
       return parsed ? applySystem(parsed) : systemState(); // 틀린 요청은 바꾸지 않고 지금 상태만 돌려준다
 
     });
-    startDesktopWindow(rt, join(__dirname, 'preload.cjs'));
+    startDesktopWindow(rt, join(__dirname, 'preload.cjs'), join(__dirname, 'iconWorker.cjs'));
     // 꾸린 앱의 실제 실행이면 시작할 때마다 본다. 켜 두었는데 이 실행 파일로 걸려 있지 않으면(폴더를 옮김) 다시 건다.
     const startup = startupAction({ manage: rt.manageLoginItem, saved: getSettings().startWithWindows, system: loginItemOn() });
     // 걸지 못하면 저장하지 않아 다음 시작에 다시 시도한다.

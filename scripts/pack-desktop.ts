@@ -137,6 +137,7 @@ if (problem) {
 }
 build({ CALFIF_EMU_BUILD: emuBuild }, ['-c', 'vite.desktop.config.ts']);
 build({ CALFIF_EMU_BUILD: emuBuild, VITE_DESKTOP_ENTRY: 'preload' }, ['-c', 'vite.desktop.config.ts']);
+build({ CALFIF_EMU_BUILD: emuBuild, VITE_DESKTOP_ENTRY: 'iconWorker' }, ['-c', 'vite.desktop.config.ts']);
 
 if (hasTopLevelKoffiRequire(readFileSync(resolve(root, 'build/desktop/main.cjs'), 'utf8'))) {
   console.error('main.cjs가 맨 위에서 koffi를 읽는다. koffi.node를 못 읽는 PC에서 앱이 시작 전에 죽는다');

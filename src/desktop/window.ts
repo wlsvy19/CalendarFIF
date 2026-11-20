@@ -1,8 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { BrowserWindow, app, protocol, screen, session } from 'electron';
-import { CH, type DesktopCommand, type DragKind } from './api';
+import { BrowserWindow, app, protocol, screen, session, utilityProcess, type UtilityProcess } from 'electron';
+import { CH, type DesktopCommand, type DragKind, type HoleRect } from './api';
 import { applyDrag, clampBounds, layoutKey, resolveBounds, type DisplayInfo, type Rect } from './bounds';
+import { holesIn, iconScreenRects, parseIconGrid, sameHoles, type IconGrid } from './holes';
 import { CSP, contentType, isAppUrl, resolveAppPath } from './protocol';
 import { BottomLimiter, CrashBackoff, PageInput, Reattacher, adjustStep, isAtBottom, isBlockedKey, leavesPage, ownerStatus, shouldKeepBottom } from './policy';
 import type { Runtime } from './runtime';
@@ -27,7 +28,10 @@ let settings: DesktopSettings;
 let settingsFile = '';
 let adjustBefore: Rect | null = null;
 let adjustBase: Rect | null = null;
+// 평소 상태(위치 조정이 아닐 때)에서 달력을 끌어 옮기는 중인지(2026-11-20 사용자: "캘린더데스크처럼 드래그 되게 해").
+let moving = false;
 let preloadPath: string;
+let iconWorkerPath = '';
 let current: BrowserWindow | null = null;
 let currentHwnd: Hwnd = 0n;
 let currentProgman: Hwnd = 0n;
@@ -115,6 +119,11 @@ export const windowsCreated = (): number => created;
 export function markQuitting(): void {
   quitting = true;
   clearTimers();
+  try {
+    iconWorker?.kill();
+  } catch {
+    // 이미 끝났다.
+  }
 }
 
 // "맨 아래 지키기". 입력 중이 아니고 맨 아래가 아닐 때만 맨 아래로 보낸다.
@@ -172,6 +181,7 @@ export function setInteractive(on: boolean): void {
   pageInput.report(on);
   windowState.interactive = on;
   if (on) {
+    setPassThrough(false); // 편집이나 설정이 떠 있는 동안은 아이콘 자리도 달력이 받는다
     setFocusable(win, true);
     win.focus();
   } else {
@@ -233,7 +243,10 @@ export function startAdjust(): void {
   }
   adjustBefore = win.getBounds();
   adjustBase = null;
+  moving = false;
   windowState.adjusting = step.adjusting;
+  setPassThrough(false);
+  sendHoles(); // 조정하는 동안은 뚫지 않는다
   setFocusable(win, true); // 덮개에서 Esc를 받으려면 눌렀을 때 활성화될 수 있어야 한다
   win.setAlwaysOnTop(true);
   if (!win.isVisible()) {
@@ -243,15 +256,47 @@ export function startAdjust(): void {
   sendAdjust(win, true);
 }
 
+// 끌기의 시작. 위치 조정 중이면 옮기기와 크기 바꾸기, 평소에는 옮기기만 한다(편집이나 설정이 떠 있으면 하지 않는다).
 export function beginDrag(): void {
   const win = getWindow();
-  if (win && windowState.adjusting) adjustBase = win.getBounds();
+  if (!win) return;
+  if (windowState.adjusting) {
+    adjustBase = win.getBounds();
+    return;
+  }
+  if (windowState.interactive) return;
+  adjustBase = win.getBounds();
+  moving = true;
+  setPassThrough(false);
 }
 
 export function dragTo(kind: DragKind, dx: number, dy: number): void {
   const win = getWindow();
-  if (!win || !windowState.adjusting || !adjustBase) return;
-  win.setBounds(applyDrag(adjustBase, kind, dx, dy, workAreas()));
+  if (!win || !adjustBase) return;
+  if (windowState.adjusting) win.setBounds(applyDrag(adjustBase, kind, dx, dy, workAreas()));
+  else if (moving && kind === 'move') win.setBounds(applyDrag(adjustBase, 'move', dx, dy, workAreas()));
+}
+
+// 평소 상태의 끌어 옮기기가 끝났다: 화면 안으로 맞추고 이 모니터 구성의 자리로 저장한다.
+export function endDrag(): void {
+  if (!moving) return;
+  moving = false;
+  adjustBase = null;
+  const win = getWindow();
+  if (!win) return;
+  const placed = clampBounds(win.getBounds(), workAreas());
+  win.setBounds(placed);
+  saveBounds(placed);
+  limiter.reached();
+  keepBottom();
+  sendHoles();
+}
+
+function saveBounds(placed: Rect): void {
+  const displays = displayInfos();
+  if (displays.length === 0) return;
+  settings = { ...settings, bounds: { ...settings.bounds, [layoutKey(displays)]: placed } };
+  saveSettings();
 }
 
 export function finishAdjust(apply: boolean, event: 'finish' | 'reload' = 'finish'): void {
@@ -262,11 +307,7 @@ export function finishAdjust(apply: boolean, event: 'finish' | 'reload' = 'finis
   if (apply && event === 'finish') {
     const placed = clampBounds(win.getBounds(), areas);
     win.setBounds(placed);
-    const displays = displayInfos();
-    if (displays.length > 0) {
-      settings = { ...settings, bounds: { ...settings.bounds, [layoutKey(displays)]: placed } };
-      saveSettings();
-    }
+    saveBounds(placed);
   } else if (adjustBefore) {
     win.setBounds(clampBounds(adjustBefore, areas)); // 그 사이 모니터가 빠졌어도 보이는 곳으로
   }
@@ -279,7 +320,89 @@ export function finishAdjust(apply: boolean, event: 'finish' | 'reload' = 'finis
   limiter.reached(); // 사용자가 직접 한 동작 뒤이므로 맨 아래로 보내는 횟수를 처음부터 센다.
   keepBottom();
   sendAdjust(win, false);
+  sendHoles();
   if (layoutPending) scheduleLayout(); // 조정 중에 온 화면 구성 변화를 이제 반영한다
+}
+
+// ---- 바탕화면 아이콘 자리 뚫기(holes.ts). 2026-11-20 사용자: "파일같은것도 위에 냅둘 수 있께 해", "맨 뒤로 보내기 같은 거지". ----
+let iconWorker: UtilityProcess | null = null;
+let iconWorkerExits = 0;
+let iconGrid: IconGrid | null = null;
+let iconRects: Rect[] = []; // 화면 좌표(DIP)
+let sentHoles: HoleRect[] | null = null;
+let passThrough = false;
+// 시험 실행이 읽는다.
+export const iconWatch = { grids: 0, errors: 0, lastError: '', holesSent: 0, passThrough: () => passThrough, rects: (): Rect[] => iconRects };
+
+/** 아이콘 자리를 창 좌표로 바꿔 화면에 보낸다. 바뀌었을 때만 보낸다. 위치 조정 중에는 뚫지 않는다. */
+function sendHoles(): void {
+  const win = getWindow();
+  if (!win) return;
+  const holes = windowState.adjusting ? [] : holesIn(iconRects, win.getBounds());
+  if (sentHoles && sameHoles(sentHoles, holes)) return;
+  sentHoles = holes;
+  iconWatch.holesSent += 1;
+  try {
+    win.webContents.send(CH.iconHoles, holes);
+  } catch {
+    // 화면이 죽었으면 다시 뜰 때 보낸다.
+  }
+  if (holes.length === 0) setPassThrough(false);
+}
+
+/** 마우스가 아이콘 자리 위에 있는 동안 창이 마우스를 바탕화면으로 보낸다(화면이 알린다). 입력 중, 조정 중, 끌기 중에는 받는다. */
+export function setPassThrough(on: boolean): void {
+  const win = getWindow();
+  const next = on && !windowState.interactive && !windowState.adjusting && !moving;
+  if (!win || next === passThrough) return;
+  passThrough = next;
+  if (next) win.setIgnoreMouseEvents(true, { forward: true });
+  else win.setIgnoreMouseEvents(false);
+}
+
+function applyIconGrid(): void {
+  try {
+    iconRects = iconGrid ? iconScreenRects(iconGrid).map((r) => screen.screenToDipRect(null, r)) : [];
+  } catch {
+    iconRects = [];
+  }
+  sendHoles();
+}
+
+/** 아이콘 자리를 읽는 프로세스를 띄운다. 죽으면 조금씩 더 기다렸다가 다시 띄우고, 여러 번 죽으면 그만둔다(뚫지 않은 채로 둔다). */
+function startIconWatch(): void {
+  if (quitting || !iconWorkerPath || iconWorker) return;
+  let child: UtilityProcess;
+  try {
+    child = utilityProcess.fork(iconWorkerPath, [], { serviceName: 'CalendarFIF desktop icons' });
+  } catch (e) {
+    console.error('바탕화면 아이콘 자리를 읽는 프로세스를 띄우지 못했다', e);
+    return;
+  }
+  iconWorker = child;
+  child.on('message', (m: unknown) => {
+    if (typeof m === 'object' && m !== null && 'error' in m) {
+      iconWatch.errors += 1;
+      iconWatch.lastError = String((m as { error: unknown }).error).slice(0, 200);
+      console.error('바탕화면 아이콘 자리를 읽지 못했다:', iconWatch.lastError);
+      iconGrid = null;
+      applyIconGrid();
+      return;
+    }
+    const grid = parseIconGrid(typeof m === 'object' && m !== null ? (m as { grid?: unknown }).grid : null);
+    if (!grid) return;
+    iconWatch.grids += 1;
+    iconGrid = grid;
+    applyIconGrid();
+  });
+  child.on('exit', () => {
+    if (iconWorker === child) iconWorker = null;
+    if (quitting) return;
+    iconGrid = null;
+    applyIconGrid();
+    iconWorkerExits += 1;
+    if (iconWorkerExits <= 5) setTimeout(startIconWatch, 10000 * iconWorkerExits);
+  });
 }
 
 let layoutPending = false;
@@ -304,6 +427,13 @@ function watchDisplays(): void {
   screen.on('display-added', scheduleLayout);
   screen.on('display-removed', scheduleLayout);
   screen.on('display-metrics-changed', scheduleLayout);
+  // 배율이 바뀌면 실제 픽셀을 DIP로 바꾸는 값도 바뀐다.
+  const iconsSoon = (): void => {
+    setImmediate(applyIconGrid);
+  };
+  screen.on('display-added', iconsSoon);
+  screen.on('display-removed', iconsSoon);
+  screen.on('display-metrics-changed', iconsSoon);
 }
 
 // 못 붙이면(Win32 호출이 막히면) 일반 맨 아래 창으로 남는다.
@@ -389,6 +519,9 @@ export function createDesktopWindow(): BrowserWindow {
   win.setAlwaysOnTop(settings.alwaysOnTop);
   adjustBefore = null;
   adjustBase = null;
+  moving = false;
+  passThrough = false;
+  sentHoles = null;
   limiter.reached();
   created += 1;
 
@@ -414,7 +547,20 @@ export function createDesktopWindow(): BrowserWindow {
     finishAdjust(false, 'reload');
     resetZoom(win);
     sendCommand({ type: 'contentHidden', hidden: settings.contentHidden });
+    if (win !== current) return;
+    // 새 화면에는 뚫린 자리가 없다. 마우스도 다시 받는다.
+    sentHoles = null;
+    setPassThrough(false);
+    sendHoles();
   });
+  // 창이 옮겨지거나 크기가 바뀌면 뚫을 자리도 바뀐다. 창 메시지 처리 안이므로 다음 턴에 한다.
+  const holesSoon = (): void => {
+    setImmediate(() => {
+      if (win === current && !win.isDestroyed()) sendHoles();
+    });
+  };
+  win.on('move', holesSoon);
+  win.on('resize', holesSoon);
   // 다시 읽기와 확대·축소 키는 화면에 보내지 않는다(편집 중에 누르면 쓰던 글이 없어진다).
   win.webContents.on('before-input-event', (e, input) => {
     if (!isBlockedKey(input)) return;
@@ -493,9 +639,10 @@ export function setStaleProgmanForSmoke(stale: Hwnd): void {
 }
 
 // 창 만들기와 탐색기 재시작 대응을 시작한다.
-export function startDesktopWindow(rt: Runtime, preload: string): void {
+export function startDesktopWindow(rt: Runtime, preload: string, iconWorkerFile = ''): void {
   runtime = rt;
   preloadPath = preload;
+  iconWorkerPath = iconWorkerFile;
   settingsFile = join(rt.profileDir, 'settings.json');
   const loaded = loadDesktopSettings(settingsFile);
   if (loaded.status === 'corrupt') console.error('settings.json이 깨져 있어 settings.json.corrupt로 옮기고 기본 설정으로 시작한다');
@@ -503,6 +650,7 @@ export function startDesktopWindow(rt: Runtime, preload: string): void {
   windowState.alwaysOnTop = settings.alwaysOnTop;
   watchDisplays();
   createDesktopWindow();
+  startIconWatch();
   setInterval(() => {
     if (!quitting && current && mode === 'owned' && ownerStatus(isWindow(currentProgman)) === 'lost') reattacher.ownerLost();
   }, PROGMAN_POLL_MS);

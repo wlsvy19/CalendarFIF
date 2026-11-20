@@ -1,4 +1,4 @@
-import type { AlarmPopupItem, AlarmTone, CalfifDesktop, DesktopCommand, DragKind, Hotkey, HotkeyState, Point, SystemPatch, SystemState } from '../../desktop/api';
+import type { AlarmPopupItem, AlarmTone, CalfifDesktop, DesktopCommand, DragKind, HoleRect, Hotkey, HotkeyState, Point, SystemPatch, SystemState } from '../../desktop/api';
 
 /** 시험용 다리. 부른 함수는 calls에 [함수 이름, ...인자]로 쌓인다. */
 export class FakeBridge implements CalfifDesktop {
@@ -14,6 +14,11 @@ export class FakeBridge implements CalfifDesktop {
     canStartWithWindows: false,
   };
   private listeners = new Set<(c: DesktopCommand) => void>();
+  private holeListeners = new Set<(holes: HoleRect[]) => void>();
+
+  emitHoles(holes: HoleRect[]): void {
+    for (const l of [...this.holeListeners]) l(holes);
+  }
 
   emit(c: DesktopCommand): void {
     for (const l of [...this.listeners]) l(c);
@@ -52,6 +57,18 @@ export class FakeBridge implements CalfifDesktop {
   }
   drag(kind: DragKind, dx: number, dy: number): void {
     this.calls.push(['drag', kind, dx, dy]);
+  }
+  dragEnd(): void {
+    this.calls.push(['dragEnd']);
+  }
+  setPassThrough(on: boolean): void {
+    this.calls.push(['setPassThrough', on]);
+  }
+  onIconHoles(listener: (holes: HoleRect[]) => void): () => void {
+    this.holeListeners.add(listener);
+    return () => {
+      this.holeListeners.delete(listener);
+    };
   }
   adjustDone(apply: boolean): void {
     this.calls.push(['adjustDone', apply]);

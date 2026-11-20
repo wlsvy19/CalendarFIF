@@ -27,6 +27,8 @@ import { mountAdjust } from './desktop/adjust';
 import { makeDraggable, sessionMemory } from './desktop/dragSheet';
 import { mountDesktopSettings } from './desktop/settingsPages';
 import { mountCellMenu } from './desktop/cellMenu';
+import { mountIconHoles } from './desktop/iconHoles';
+import { mountMoveDrag } from './desktop/moveDrag';
 import { Interactivity } from './desktop/interactive';
 import { playDoneTone } from './desktop/tone';
 import { mountBlocked, type BlockedKind } from './ui/blocked';
@@ -592,6 +594,11 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     settingsPage = page;
     location.hash = 'settings';
   };
+  // PC 앱: 달력 위를 끌어 창을 옮기고(moveDrag.ts), 바탕화면 아이콘 자리를 뚫는다(iconHoles.ts). 편집이나 설정이 떠 있거나
+  // 위치 조정 중이거나 칸 메뉴가 떠 있으면 하지 않는다.
+  const deskBusy = (): boolean => interactivity.active() || adjust !== null || cellMenu !== null;
+  const deskMove = bridge ? mountMoveDrag(root, bridge, () => !deskBusy()) : null;
+  const deskHoles = bridge ? mountIconHoles(bridge, () => root.querySelector<HTMLElement>('.calendar'), deskBusy) : null;
   if (DESKTOP) {
     deskActions = {
       goToday: () => calendar.goToday(),
@@ -640,6 +647,8 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       closeEditor();
       closeSettings();
       closeUsers();
+      deskMove?.destroy();
+      deskHoles?.destroy();
       calendar.destroy();
       alarmClock.stop();
       for (const b of banners) b.destroy(); // 내려간 화면 위에 알림 상자가 남지 않게 한다

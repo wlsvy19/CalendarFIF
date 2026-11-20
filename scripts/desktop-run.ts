@@ -32,6 +32,7 @@ if (packaged) {
   build({}, ['--mode', emu ? 'desktop-emu' : 'desktop']);
   build({}, ['-c', 'vite.desktop.config.ts']);
   build({ VITE_DESKTOP_ENTRY: 'preload' }, ['-c', 'vite.desktop.config.ts']);
+  build({ VITE_DESKTOP_ENTRY: 'iconWorker' }, ['-c', 'vite.desktop.config.ts']);
   const preload = readFileSync(resolve(root, 'build/desktop/preload.cjs'), 'utf8');
   const stray = [...preload.matchAll(/require\(([^)]*)\)/g)].filter((m) => m[1] !== '"electron"');
   if (stray.length > 0) {

@@ -7,6 +7,9 @@ export const CH = {
   setSystem: 'calfif:set-system',
   dragStart: 'calfif:drag-start',
   drag: 'calfif:drag',
+  dragEnd: 'calfif:drag-end',
+  passThrough: 'calfif:pass-through',
+  iconHoles: 'calfif:icon-holes',
   adjustDone: 'calfif:adjust-done',
   alarm: 'calfif:alarm',
 } as const;
@@ -14,6 +17,8 @@ export const CH = {
 export type AlarmTone = 'none' | 'chime' | 'bell';
 export type AlarmPopupItem = { time: string; text: string; date: string; advance: number };
 export type Point = { x: number; y: number };
+/** 창 안의 네모(CSS 픽셀, 창의 왼쪽 위 기준). 바탕화면 아이콘이 있는 자리. */
+export type HoleRect = { x: number; y: number; width: number; height: number };
 export type DragKind = 'move' | 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 export type Hotkey = { accelerator: string; enabled: boolean };
 export type HotkeyState = 'ok' | 'off' | 'taken' | 'invalid';
@@ -36,6 +41,9 @@ export interface CalfifDesktop {
   setSystem(patch: SystemPatch): Promise<SystemState>; // invoke CH.setSystem
   dragStart(): void; // send CH.dragStart
   drag(kind: DragKind, dx: number, dy: number): void; // send CH.drag
+  dragEnd(): void; // send CH.dragEnd (평소 상태에서 끌어 옮기기가 끝남: 자리를 저장한다)
+  setPassThrough(on: boolean): void; // send CH.passThrough (아이콘 자리 위: 마우스를 바탕화면으로 보낸다)
+  onIconHoles(listener: (holes: HoleRect[]) => void): () => void; // CH.iconHoles, 메인 → 화면
   adjustDone(apply: boolean): void; // send CH.adjustDone
   showAlarms(items: AlarmPopupItem[], tone: AlarmTone): void; // send CH.alarm (맨 위 알림 창)
 }

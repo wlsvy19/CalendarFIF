@@ -12,14 +12,14 @@ import type { Runtime, Scenario } from './runtime';
 import { loadDesktopSettings } from './settings';
 import { findProgman, getExStyle, getOwner, isWindow, nativeLoaded, nestedNativeCalls, windowsBelow } from './win32';
 import {
-  blocked, displayInfos, getHwnd, getMode, getProgman, getSettings, getWindow, sendCommand, setStaleProgmanForSmoke, signals, startAdjust, windowState, windowsCreated,
+  blocked, displayInfos, getHwnd, getMode, getProgman, getSettings, getWindow, iconWatch, sendCommand, setStaleProgmanForSmoke, signals, startAdjust, windowState, windowsCreated,
 } from './window';
 
 // main.ts가 메뉴 항목과 단축키가 부르는 길을 시험 실행에 건넨다.
 export type Desk = { runAction(a: MenuAction): void; applySystem(p: SystemPatch): SystemState };
 type Result = { fields: Record<string, unknown>; checks: Record<string, boolean> };
 const TOTAL_MS = 60000;
-const BRIDGE_KEYS = ['adjustDone', 'drag', 'dragStart', 'getSystem', 'onCommand', 'setInteractive', 'setSystem', 'showAlarms', 'showMenu'];
+const BRIDGE_KEYS = ['adjustDone', 'drag', 'dragEnd', 'dragStart', 'getSystem', 'onCommand', 'onIconHoles', 'setInteractive', 'setPassThrough', 'setSystem', 'showAlarms', 'showMenu'];
 const HIDE_KEY = 'Ctrl+Alt+Shift+F9';
 const CONTENT_KEY = 'Ctrl+Alt+Shift+F10';
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -110,6 +110,35 @@ async function attach(_rt: Runtime, desk: Desk): Promise<Result> {
   const rendered = (await js(first0, RENDERED)) as string;
   // 로그인 화면은 입력을 위해 창을 활성화 가능하게 둔다. 달력으로 넘어가 입력이 끝나면 다시 맨 아래로 간다.
   await until(() => !first0.isFocusable() && bottomNow(), 3000);
+  // 평소 상태에서 끌어 옮기기(moveDrag.ts가 보내는 것과 같은 차례): 따라 움직이고, 놓으면 그 자리를 저장한다. 시험 뒤 제자리로 되돌린다.
+  const freeMove = async (dx: number, dy: number): Promise<boolean> => {
+    const from = first0.getBounds();
+    await js(first0, `window.calfifDesktop.dragStart(); window.calfifDesktop.drag('move', ${dx}, ${dy}); 1`);
+    const followed = await until(() => first0.getBounds().x === from.x + dx && first0.getBounds().y === from.y + dy, 2000);
+    await js(first0, 'window.calfifDesktop.dragEnd(); 1');
+    const saved = await until(() => JSON.stringify(getSettings().bounds[layoutKey(displayInfos())]) === JSON.stringify(first0.getBounds()), 2000);
+    return followed && saved;
+  };
+  const freeMoved = (await freeMove(30, 20)) && (await freeMove(-30, -20));
+  // 바탕화면 아이콘 자리를 읽는 프로세스(iconWorker)가 자리를 보냈는지. 읽기만 한다.
+  await until(() => iconWatch.grids > 0 || iconWatch.errors > 0, 10000);
+  // 창을 아이콘 하나 위로 옮기면 달력에 그 자리가 뚫리고, 화면이 알리면 마우스를 바탕화면으로 보낸다. 시험 뒤 제자리로.
+  let holeCut = false;
+  let passThroughToggled = false;
+  const icon = iconWatch.rects()[0];
+  if (icon) {
+    const keep = first0.getBounds();
+    first0.setBounds({ ...keep, x: Math.round(icon.x - 20), y: Math.round(icon.y - 20) });
+    const clip = "(document.querySelector('.calendar') || {style:{}}).style.clipPath || ''";
+    holeCut = await until(async () => String(await js(first0, clip)).includes('evenodd'), 4000);
+    await js(first0, 'window.calfifDesktop.setPassThrough(true); 1');
+    const on = await until(() => iconWatch.passThrough(), 2000);
+    await js(first0, 'window.calfifDesktop.setPassThrough(false); 1');
+    passThroughToggled = on && (await until(() => !iconWatch.passThrough(), 2000));
+    first0.setBounds(keep);
+    await until(async () => !String(await js(first0, clip)).includes('evenodd') || keep.x === icon.x, 4000);
+  }
+  const icons = { iconGrids: iconWatch.grids, iconErrors: iconWatch.errors, iconLastError: iconWatch.lastError, holesSent: iconWatch.holesSent, iconCount: iconWatch.rects().length, holeCut, passThroughToggled };
   const first = await measure(win);
   const bridgeKeys = (await js(win, 'Object.keys(window.calfifDesktop || {}).sort()')) as string[];
   const rendererGlobals = (await js(win, '[typeof require, typeof process].join(",")')) as string;
@@ -178,7 +207,7 @@ async function attach(_rt: Runtime, desk: Desk): Promise<Result> {
     toolWindowWhileInteractive: toolWindowDuring[0], toolWindowAfterInteractive: toolWindowDuring[1], atBottomAfterInteractive, closeBlocked,
     recreated, ownerIsProgmanAfterRecreate: second?.ownerIsProgman ?? false, atBottomAfterRecreate: second?.atBottom ?? false, minimizeRestored, ...crash, ...ownerLost,
     loginItemCalls, nativeLoaded: nativeLoaded(), nestedNativeCalls: nestedNativeCalls(), bottomAsserts: bottomAssertsNormal, bottomAssertsTotal: blocked.bottomAsserts,
-    secondInstance: instance, ...shotInfo,
+    secondInstance: instance, ...shotInfo, freeMoved, ...icons,
   };
   const checks = {
     mode: first.mode === 'owned', ownerIsProgman: first.ownerIsProgman, atBottom: first.atBottom, toolWindow: first.toolWindow,
@@ -190,6 +219,7 @@ async function attach(_rt: Runtime, desk: Desk): Promise<Result> {
     recreated, ownerIsProgmanAfterRecreate: fields.ownerIsProgmanAfterRecreate, crashRecovered: crash.crashRecovered === true, ownerLostRecovered: ownerLost.ownerLostRecovered === true,
     loginItemCalls: loginItemCalls === 0, nativeLoaded: fields.nativeLoaded, nestedNativeCalls: fields.nestedNativeCalls === 0,
     secondInstance: instance.exitCode === 0 && instance.notified, bottomAsserts: bottomAssertsNormal <= 20,
+    freeMoved, iconsRead: icons.iconGrids > 0 && icons.iconErrors === 0, holeCut: icons.iconCount === 0 || (holeCut && passThroughToggled),
   };
   return { fields, checks };
 }
