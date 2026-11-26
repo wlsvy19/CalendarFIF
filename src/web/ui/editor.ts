@@ -25,6 +25,10 @@ const WIDE_PX = 880;
 export const KEYBOARD_DONE_MS = 100;
 /** 날짜를 누를 때 글자판을 미리 띄우는 숨은 입력 칸의 class(main.ts의 raiseKeyboard). */
 export const KEYBOARD_PROXY_CLASS = 'kbd-proxy';
+/** PC 앱에서 편집 화면을 연 뒤 이만큼은 창이 초점을 잃어도 닫지 않는다(두 번 누름의 뒤끝이 바탕화면에 간다). */
+const DESK_BLUR_GRACE_MS = 700;
+/** PC 앱에서 창이 초점을 잃고 이만큼 기다려 돌아오지 않으면 저장하고 닫는다. */
+const DESK_BLUR_WAIT_MS = 150;
 
 function titleOf(dateKey: string): string {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -279,8 +283,11 @@ export function mountEditor(
   saveBtn.addEventListener('click', save);
   cancelBtn.addEventListener('click', cancel);
   // 바깥을 눌러 닫는 것은 고친 것이 없을 때만이다. 적던 글이 실수로 사라지지 않게 한다.
+  // PC 앱은 바깥을 누르면 고친 것을 저장하고 닫는다(2026-11-26 사용자: "밖에 다른 영역 눌러도 창닫히고 저장 되게 해").
+  const isDesk = (): boolean => document.documentElement.classList.contains('desk');
   scrim.addEventListener('click', () => {
-    if (!changed()) cancel();
+    if (isDesk()) closeKeeping();
+    else if (!changed()) cancel();
   });
   sheet.addEventListener('keydown', (e) => {
     if (e.isComposing) return; // 한글 조합 중의 Esc와 Ctrl+Enter는 조합을 끝내는 키다
@@ -351,12 +358,30 @@ export function mountEditor(
   };
   area.addEventListener('blur', onAreaBlur);
 
+  // PC 앱: 창 밖(바탕화면, 다른 창)을 눌러 창이 초점을 잃어도 저장하고 닫는다. 날짜 칸을 두 번 눌러 연 직후에는 그 누름이
+  // 바탕화면에도 가서 초점이 잠깐 빠질 수 있어 연 뒤 잠깐은 보지 않는다. 초점이 금방 돌아오면(창 안의 다른 곳) 닫지 않는다.
+  // 알림·카운트다운 시트가 열린 동안은 그 시트의 저장을 기다린다.
+  const openedAt = Date.now();
+  let blurTimer: ReturnType<typeof setTimeout> | null = null;
+  const onWindowBlur = (): void => {
+    if (!isDesk() || finished || Date.now() - openedAt < DESK_BLUR_GRACE_MS) return;
+    if (blurTimer !== null) clearTimeout(blurTimer);
+    blurTimer = setTimeout(() => {
+      blurTimer = null;
+      if (finished || eventSheet !== null || document.hasFocus()) return;
+      closeKeeping();
+    }, DESK_BLUR_WAIT_MS);
+  };
+  window.addEventListener('blur', onWindowBlur);
+
   return {
     close: closeKeeping,
     eventSheetOpen: () => eventSheet !== null,
     destroy() {
       area.removeEventListener('blur', onAreaBlur);
       if (doneTimer !== null) clearTimeout(doneTimer);
+      window.removeEventListener('blur', onWindowBlur);
+      if (blurTimer !== null) clearTimeout(blurTimer);
       document.removeEventListener('visibilitychange', keepIfHidden);
       palette?.destroy();
       palette = null;

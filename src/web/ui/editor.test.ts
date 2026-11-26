@@ -289,6 +289,59 @@ it('바깥을 누르면 고친 것이 없을 때만 닫는다', () => {
   untouched.root.querySelector<HTMLElement>('.scrim')!.click();
   expect(untouched.onCancel).toHaveBeenCalledTimes(1);
 });
+describe('PC 앱(html.desk)에서 바깥을 누르면', () => {
+  afterEach(() => {
+    document.documentElement.classList.remove('desk');
+    vi.useRealTimers();
+  });
+  it('달력 쪽(덮개)을 누르면 고친 것을 저장하고 닫고, 고친 것이 없으면 그냥 닫는다', () => {
+    document.documentElement.classList.add('desk');
+    const typed = mount({ text: 'a', color: '' });
+    typed.area.value = 'a\nb';
+    typed.root.querySelector<HTMLElement>('.scrim')!.click();
+    expect(typed.onSave).toHaveBeenCalledWith({ text: 'a\nb', color: '' });
+    const untouched = mount({ text: 'a', color: '' });
+    untouched.root.querySelector<HTMLElement>('.scrim')!.click();
+    expect(untouched.onCancel).toHaveBeenCalledTimes(1);
+    expect(untouched.onSave).not.toHaveBeenCalled();
+  });
+  it('창 밖(바탕화면, 다른 창)을 눌러 창이 초점을 잃으면 저장하고 닫는다. 연 직후와 초점이 금방 돌아오면 하지 않는다', () => {
+    vi.useFakeTimers();
+    document.documentElement.classList.add('desk');
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    const early = mount({ text: 'a', color: '' });
+    early.area.value = 'early';
+    window.dispatchEvent(new Event('blur'));
+    vi.advanceTimersByTime(1000);
+    expect(early.onSave).not.toHaveBeenCalled(); // 두 번 눌러 연 직후 바탕화면이 초점을 잠깐 가져가는 것
+    const typed = mount({ text: 'a', color: '' });
+    typed.area.value = 'a\nb';
+    vi.advanceTimersByTime(1000);
+    window.dispatchEvent(new Event('blur'));
+    vi.advanceTimersByTime(1000);
+    expect(typed.onSave).toHaveBeenCalledWith({ text: 'a\nb', color: '' });
+    // 초점이 금방 돌아오면(창 안의 다른 곳) 닫지 않는다
+    const back = mount({ text: 'a', color: '' });
+    back.area.value = 'back';
+    vi.advanceTimersByTime(1000);
+    focus.mockReturnValue(true);
+    window.dispatchEvent(new Event('blur'));
+    vi.advanceTimersByTime(1000);
+    expect(back.onSave).not.toHaveBeenCalled();
+    focus.mockRestore();
+  });
+  it('폰과 웹 화면에서는 창이 초점을 잃어도 닫지 않는다', () => {
+    vi.useFakeTimers();
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    const web = mount({ text: 'a', color: '' });
+    web.area.value = 'web';
+    vi.advanceTimersByTime(1000);
+    window.dispatchEvent(new Event('blur'));
+    vi.advanceTimersByTime(1000);
+    expect(web.onSave).not.toHaveBeenCalled();
+    focus.mockRestore();
+  });
+});
 it('폰 화면에서 아래로 끌어 닫으면 고친 것이 있을 때 저장하고 없으면 취소한다', () => {
   const untouched = mount({ text: 'a', color: 'F12424' });
   swipeDown(untouched.root.querySelector('.sheet-bar h3')!);
