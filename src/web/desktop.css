@@ -167,9 +167,10 @@
   background: rgba(106, 166, 255, 0.14);
   user-select: none;
 }
+/* 아래에 둔다. 위에 두면 달력 머리(년도, 월, 동기화 표시)를 가렸다(2026-11-26 사용자). */
 :root.desk .adjust-bar {
   position: absolute;
-  top: 8px;
+  bottom: 12px;
   left: 16px;
   right: 16px;
   z-index: 2;
