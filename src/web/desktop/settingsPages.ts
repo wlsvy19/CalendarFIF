@@ -222,6 +222,7 @@ export function mountDesktopSettings(
   }));
 
   // 글꼴 및 색상 쪽
+  add('font', makeRow('테마')).ctl.append(radioGroup('테마', [['system', '시스템 설정'], ['light', '라이트'], ['dark', '다크']], cur.theme, (v) => set('theme', v as Appearance['theme'])));
   const hexCommits: (() => boolean)[] = [];
   const colorRow = (label: string, get: () => string, put: (hex: string) => void, withNone: boolean, extra?: HTMLElement): void => {
     const row = add('font', makeRow(label));

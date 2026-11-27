@@ -141,13 +141,16 @@
   --paper-ink: #1d1d1f;
   --paper-muted: #8a8a8e;
   --paper-line: rgba(0, 0, 0, 0.07);
+  --paper-hover: rgba(0, 0, 0, 0.06);
+  --paper-hint: #b9b9bd;
+  --paper-edge: rgba(0, 0, 0, 0.08);
   transform: none;
   max-height: none;
   min-width: 180px;
   min-height: 180px;
   gap: 0;
   padding: 0;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--paper-edge);
   border-radius: 12px;
   background: var(--paper);
   color: var(--paper-ink);
@@ -184,7 +187,7 @@
   border: 0;
   border-radius: 50%;
   background: var(--paper-ink);
-  color: #fff;
+  color: var(--paper);
   transition: transform 0.1s ease, opacity 0.1s ease;
 }
 :root.desk .sheet.memo-pop .textbtn.end:hover { opacity: 0.85; }
@@ -203,13 +206,13 @@
   color: var(--paper-ink);
   font-size: 13.5px;
   line-height: 1.55;
-  caret-color: #2f6fed;
+  caret-color: var(--paper-caret, #2f6fed);
 }
-:root.desk .sheet.memo-pop .memo-input::placeholder { color: #b9b9bd; }
+:root.desk .sheet.memo-pop .memo-input::placeholder { color: var(--paper-hint); }
 :root.desk .sheet.memo-pop .memo-input:focus,
 :root.desk .sheet.memo-pop .memo-input:focus-visible { outline: none; }
 :root.desk .sheet.memo-pop .memo-input::-webkit-scrollbar { width: 6px; }
-:root.desk .sheet.memo-pop .memo-input::-webkit-scrollbar-thumb { border-radius: 3px; background: rgba(0, 0, 0, 0.15); }
+:root.desk .sheet.memo-pop .memo-input::-webkit-scrollbar-thumb { border-radius: 3px; background: var(--paper-line); }
 :root.desk .sheet.memo-pop .ev-strip { gap: 4px; max-height: 30%; padding: 0 12px 6px; }
 :root.desk .sheet.memo-pop .ev-chip { min-height: 22px; padding: 2px 8px; font-size: 12px; }
 
@@ -229,9 +232,35 @@
 :root.desk .sheet.memo-pop .tool > span:not(.dot) { display: none; }
 :root.desk .sheet.memo-pop .tool .tool-icon { width: 17px; height: 17px; stroke-width: 1.8; }
 :root.desk .sheet.memo-pop .tool:hover,
-:root.desk .sheet.memo-pop .tool[aria-expanded="true"] { background: rgba(0, 0, 0, 0.06); color: var(--paper-ink); }
+:root.desk .sheet.memo-pop .tool[aria-expanded="true"] { background: var(--paper-hover); color: var(--paper-ink); }
 :root.desk .sheet.memo-pop .tool .dot { top: auto; bottom: 4px; right: 4px; width: 7px; height: 7px; border: 1px solid rgba(0, 0, 0, 0.15); }
 :root.desk .sheet.memo-pop .tool .dot.none { display: none; }
+/* 다크 테마(설정 → 글꼴 및 색상 → 테마, 시스템 설정이면 Windows의 앱 모드): 검은 종이에 밝은 글. */
+:root.desk[data-theme="dark"] .sheet.memo-pop {
+  --paper: #1e1e21;
+  --paper-ink: #ececef;
+  --paper-muted: #8e8e93;
+  --paper-line: rgba(255, 255, 255, 0.09);
+  --paper-hover: rgba(255, 255, 255, 0.08);
+  --paper-hint: #5c5c61;
+  --paper-edge: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 40px -10px rgba(0, 0, 0, 0.7);
+}
+@media (prefers-color-scheme: dark) {
+  :root.desk:not([data-theme="light"]) .sheet.memo-pop {
+    --paper: #1e1e21;
+    --paper-ink: #ececef;
+    --paper-muted: #8e8e93;
+    --paper-line: rgba(255, 255, 255, 0.09);
+    --paper-hover: rgba(255, 255, 255, 0.08);
+    --paper-hint: #5c5c61;
+    --paper-edge: rgba(255, 255, 255, 0.1);
+    --paper-caret: #6aa6ff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 40px -10px rgba(0, 0, 0, 0.7);
+  }
+}
+
+:root.desk[data-theme="dark"] .sheet.memo-pop { --paper-caret: #6aa6ff; }
 
 /* 칸 메뉴 */
 :root.desk .cellmenu {

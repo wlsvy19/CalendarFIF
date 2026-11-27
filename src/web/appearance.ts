@@ -3,6 +3,8 @@ import type { KeyValueStore } from '../sync/outbox';
 
 export type Bullet = 'none' | 'number' | 'dot';
 export type AlarmTone = 'none' | 'chime' | 'bell';
+/** PC 앱의 테마(메모 편집 화면, 설정 창, 메뉴). 시스템은 Windows의 앱 모드를 따른다. 달력의 칸은 자기 색 설정을 쓴다. */
+export type DeskTheme = 'system' | 'light' | 'dark';
 export type FontSetting = { color: string; size: number };
 export type Appearance = {
   version: 1; layout: Layout; maxRows: number; pastWeeks: number; monthGap: boolean; weekNumbers: boolean;
@@ -11,7 +13,7 @@ export type Appearance = {
   calendarFont: FontSetting; memoFont: FontSetting; calendarBg: string; restBg: string; todayBorder: string;
   titleButton: string; holidayInk: string; lunarInk: string; termInk: string; transparency: number; weekStart: number;
   firstWeek: WeekRule; showRestDays: boolean; restDays: number[];
-  showAlarmTime: boolean; alarmTone: AlarmTone;
+  showAlarmTime: boolean; alarmTone: AlarmTone; theme: DeskTheme;
 };
 
 export const APPEARANCE_KEY = 'calfif.appearance';
@@ -22,7 +24,7 @@ export const DEFAULT_APPEARANCE: Appearance = {
   showDone: true, doneTone: 'none', calendarFont: { color: 'FFFFFF', size: 13 }, memoFont: { color: 'FFFFFF', size: 14 },
   calendarBg: '141820', restBg: '3A1F24', todayBorder: '6AA6FF', titleButton: 'FFFFFF', holidayInk: 'FF6B6B',
   lunarInk: '9FB3C8', termInk: '5FD37A', transparency: 60, weekStart: 0, firstWeek: 'jan1', showRestDays: true, restDays: [0, 6],
-  showAlarmTime: true, alarmTone: 'chime',
+  showAlarmTime: true, alarmTone: 'chime', theme: 'system',
 };
 
 /** 웹앱(아이폰 화면)의 기본값. 전체 월 배치이고 음력과 공휴일을 보여 준다. */
@@ -107,6 +109,7 @@ export function parseAppearance(input: unknown): Appearance {
     restDays: readRestDays(raw.restDays, [...d.restDays]),
     showAlarmTime: readBool(raw.showAlarmTime, d.showAlarmTime),
     alarmTone: readChoice(raw.alarmTone, ['none', 'chime', 'bell'] as const, d.alarmTone),
+    theme: readChoice(raw.theme, ['system', 'light', 'dark'] as const, d.theme),
   };
 }
 
@@ -154,6 +157,12 @@ export function appearanceVars(a: Appearance): Record<string, string> {
     '--desk-term-ink': solid(a.termInk),
     '--desk-day-pct': `${Math.round(Math.max(0.5, alpha) * 100)}%`,
   };
+}
+
+/** 테마를 문서에 건다(styles.css의 :root[data-theme]). 시스템이면 떼어 prefers-color-scheme을 따른다. 웹앱의 applyPrefs와 같은 방식이다. */
+export function applyDeskTheme(el: HTMLElement, a: Appearance): void {
+  if (a.theme === 'system') el.removeAttribute('data-theme');
+  else el.dataset.theme = a.theme;
 }
 
 export function applyAppearance(el: HTMLElement, a: Appearance): void {

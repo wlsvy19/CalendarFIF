@@ -762,3 +762,26 @@ describe('PC 앱의 쪽지 모양(누른 칸 위에 뜬다)', () => {
     expect([sheet.classList.contains('memo-pop'), sheet.querySelector<HTMLElement>('.textbtn.start')!.hidden, sheet.querySelector('h3')!.textContent]).toEqual([false, false, '11월 13일 금요일']);
   });
 });
+
+describe('PC 앱의 줄 머리(설정 → 셀)', () => {
+  it('열면 줄마다 머리가 보이고, 저장하는 글에는 없다. 고치지 않았으면 고친 것이 아니다', () => {
+    const { area, root, onSave, onCancel } = mount({ text: '회의\n운동', color: '' }, { heads: 'number' });
+    expect(area.value).toBe('1. 회의\n2. 운동');
+    root.querySelector<HTMLElement>('.scrim')!.click(); // 웹 모양: 고친 것이 없을 때만 닫힌다
+    expect(onCancel).toHaveBeenCalled();
+    const b = mount({ text: '', color: '' }, { heads: 'dot' });
+    expect(b.area.value).toBe('• ');
+    b.area.value = '• 장보기';
+    b.button('저장').click();
+    expect(b.onSave).toHaveBeenCalledWith({ text: '장보기', color: '' });
+    expect(onSave).not.toHaveBeenCalled();
+  });
+  it('Enter로 생긴 새 줄에 머리를 붙이고 번호를 다시 매긴다', () => {
+    const { area } = mount({ text: 'a\nb', color: '' }, { heads: 'number' });
+    // "1. a" 끝에서 Enter: 브라우저가 줄을 넣은 뒤 input이 온다.
+    area.value = '1. a\n\n2. b';
+    area.setSelectionRange(5, 5);
+    area.dispatchEvent(new InputEvent('input', { inputType: 'insertLineBreak' }));
+    expect([area.value, area.selectionStart]).toEqual(['1. a\n2. \n3. b', 8]);
+  });
+});

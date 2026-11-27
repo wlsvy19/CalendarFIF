@@ -7,6 +7,7 @@ import type { EventsView } from '../eventsStore';
 import { playTone } from '../tones';
 import { mountEventSheet } from './eventSheet';
 import { mountPalette } from './palette';
+import { addHeads, headOf, renumber, stripHeads, toggleDoneWithHeads, type HeadStyle } from './lineHeads';
 import { dismiss } from './sheetMotion';
 import { attachSwipeToClose } from './sheetSwipe';
 
@@ -102,6 +103,11 @@ export function mountEditor(
      * 그 뒤에 취소하면 처음 값을 이것으로 다시 넘겨 되돌린다. 없으면 가려져도 저장하지 않는다.
      */
     onKeep?(next: DayValue): void;
+    /**
+     * PC 앱: 설정 → 셀의 줄 머리(점, 번호). 주면 메모 칸의 줄마다 그 머리를 붙여 보이고 Enter의 새 줄에도 붙인다(번호는 다시 매긴다).
+     * 저장하는 글에서는 뗀다. 없으면(없음, 웹, 폰) 붙이지 않는다.
+     */
+    heads?: HeadStyle;
   },
   env?: {
     visualViewport?: VisualViewportLike | null;
@@ -177,7 +183,32 @@ export function mountEditor(
   const alarmBtn = sheet.querySelector<HTMLButtonElement>('.tool.alarm')!;
   const countdownBtn = sheet.querySelector<HTMLButtonElement>('.tool.countdown')!;
   const dot = colorBtn.querySelector<HTMLElement>('.dot')!;
-  area.value = props.value.text;
+  const heads = props.heads;
+  area.value = heads ? addHeads(props.value.text, heads) : props.value.text;
+  /** 줄 머리를 뗀, 저장할 글. */
+  const plainText = (): string => (heads ? stripHeads(area.value, heads) : area.value);
+  const applyRenumber = (): void => {
+    if (heads !== 'number') return;
+    const r = renumber(area.value, { start: area.selectionStart, end: area.selectionEnd });
+    if (r.text === area.value) return;
+    area.value = r.text;
+    area.setSelectionRange(r.start, r.end);
+  };
+  if (heads) {
+    // Enter로 생긴 새 줄에 머리를 붙인다. 키를 가로채지 않고 줄이 생긴 뒤에 붙인다(한글 조합 중의 Enter도 같은 길로 온다).
+    area.addEventListener('input', (e) => {
+      const ev = e as InputEvent;
+      if (ev.isComposing) return;
+      if (ev.inputType === 'insertLineBreak' || ev.inputType === 'insertParagraph') {
+        const p = area.selectionStart;
+        const head = headOf(heads, 1);
+        area.value = area.value.slice(0, p) + head + area.value.slice(p);
+        area.setSelectionRange(p + head.length, p + head.length);
+      }
+      applyRenumber();
+    });
+    area.addEventListener('compositionend', applyRenumber);
+  }
   if (pop) {
     const place = popRect(pop, { width: window.innerWidth, height: window.innerHeight });
     sheet.classList.add('memo-pop');
@@ -325,7 +356,7 @@ export function mountEditor(
   const save = (): void => {
     if (finished) return;
     finished = true;
-    props.onSave({ text: normalizeText(area.value), color });
+    props.onSave({ text: normalizeText(plainText()), color });
   };
   const cancel = (): void => {
     if (finished) return;
@@ -339,16 +370,16 @@ export function mountEditor(
   const keepIfHidden = (): void => {
     if (finished || !props.onKeep || document.visibilityState !== 'hidden') return;
     if (!kept && !changed()) return; // 고친 것이 없다
-    const now: DayValue = { text: normalizeText(area.value), color };
+    const now: DayValue = { text: normalizeText(plainText()), color };
     const last = kept ?? props.value;
     if (now.text === last.text && now.color === last.color) return;
     kept = now;
     props.onKeep(now);
   };
   document.addEventListener('visibilitychange', keepIfHidden);
-  const changed = (): boolean => area.value !== props.value.text || color !== props.value.color;
+  const changed = (): boolean => plainText() !== props.value.text || color !== props.value.color;
   doneBtn.addEventListener('click', () => {
-    const r = toggleDoneInRange(area.value, area.selectionStart, area.selectionEnd);
+    const r = heads ? toggleDoneWithHeads(area.value, area.selectionStart, area.selectionEnd, heads) : toggleDoneInRange(area.value, area.selectionStart, area.selectionEnd);
     area.value = r.text;
     area.setSelectionRange(r.selStart, r.selEnd);
     area.focus();

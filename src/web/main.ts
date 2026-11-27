@@ -20,7 +20,7 @@ import { IOS_LABEL } from '../push/doc';
 import { OPEN_MESSAGE } from '../push/sw';
 import type { PushSectionDeps } from './ui/pushSection';
 import { FirestoreEventsSource } from '../sync/firestoreEvents';
-import { loadAppearance, saveAppearance, applyAppearance, type Appearance } from './appearance';
+import { loadAppearance, saveAppearance, applyAppearance, applyDeskTheme, type Appearance } from './appearance';
 import type { SettingsPage } from '../desktop/api';
 import { getBridge } from './desktop/bridge';
 import { mountAdjust } from './desktop/adjust';
@@ -213,7 +213,10 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       });
   const stopPush = push ? push.start() : () => {};
   let appearance: Appearance | undefined = DESKTOP ? loadAppearance(storage.store) : undefined;
-  if (appearance) applyAppearance(document.documentElement, appearance);
+  if (appearance) {
+    applyAppearance(document.documentElement, appearance);
+    applyDeskTheme(document.documentElement, appearance);
+  }
   // 웹앱의 설정(밝기, 색상, 달력과 메모의 표시). 이 기기의 브라우저에만 저장한다.
   let prefs: Prefs | undefined = DESKTOP ? undefined : loadPrefs(storage.store);
   const engine = new SyncEngine({ store: source, outbox, editedBy });
@@ -324,6 +327,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
   const changeAppearance = (next: Appearance): boolean => {
     appearance = next;
     applyAppearance(document.documentElement, next);
+    applyDeskTheme(document.documentElement, next);
     calendar.setAppearance(next);
     try {
       saveAppearance(storage.store, next);
@@ -424,6 +428,8 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       value: base,
       note: dayNote(dateKey),
       doneTone: prefs?.doneTone ?? appearance?.doneTone,
+      // PC 앱만: 설정 → 셀의 줄 머리를 편집 화면의 줄마다 붙여 보인다(저장하는 글에는 넣지 않는다).
+      heads: appearance && appearance.bullet !== 'none' ? appearance.bullet : undefined,
       events: {
         view: events,
         save: (id, rec) => {
