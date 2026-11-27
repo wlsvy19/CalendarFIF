@@ -7,7 +7,7 @@ import type { EventsView } from '../eventsStore';
 import { playTone } from '../tones';
 import { mountEventSheet } from './eventSheet';
 import { mountPalette } from './palette';
-import { addHeads, headOf, renumber, stripHeads, toggleDoneWithHeads, type HeadStyle } from './lineHeads';
+import { addHeads, headOf, removeHeadBefore, renumber, stripHeads, toggleDoneWithHeads, type HeadStyle } from './lineHeads';
 import { dismiss } from './sheetMotion';
 import { attachSwipeToClose } from './sheetSwipe';
 
@@ -208,6 +208,17 @@ export function mountEditor(
       applyRenumber();
     });
     area.addEventListener('compositionend', applyRenumber);
+    // 줄 머리 바로 뒤의 Backspace는 머리를 통째로 지운다.
+    area.addEventListener('keydown', (e) => {
+      if (e.key !== 'Backspace' || e.isComposing || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+      if (area.selectionStart !== area.selectionEnd) return;
+      const r = removeHeadBefore(area.value, area.selectionStart, heads);
+      if (!r) return;
+      e.preventDefault();
+      area.value = r.text;
+      area.setSelectionRange(r.pos, r.pos);
+      applyRenumber();
+    });
   }
   if (pop) {
     const place = popRect(pop, { width: window.innerWidth, height: window.innerHeight });

@@ -770,7 +770,7 @@ describe('PC 앱의 줄 머리(설정 → 셀)', () => {
     root.querySelector<HTMLElement>('.scrim')!.click(); // 웹 모양: 고친 것이 없을 때만 닫힌다
     expect(onCancel).toHaveBeenCalled();
     const b = mount({ text: '', color: '' }, { heads: 'dot' });
-    expect(b.area.value).toBe('• ');
+    expect(b.area.value).toBe('• ');
     b.area.value = '• 장보기';
     b.button('저장').click();
     expect(b.onSave).toHaveBeenCalledWith({ text: '장보기', color: '' });
@@ -783,5 +783,9 @@ describe('PC 앱의 줄 머리(설정 → 셀)', () => {
     area.setSelectionRange(5, 5);
     area.dispatchEvent(new InputEvent('input', { inputType: 'insertLineBreak' }));
     expect([area.value, area.selectionStart]).toEqual(['1. a\n2. \n3. b', 8]);
+    // 바로 Backspace 한 번: 머리가 통째로 지워지고 아래 번호가 다시 매겨진다.
+    const back = new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true });
+    area.dispatchEvent(back);
+    expect([back.defaultPrevented, area.value, area.selectionStart]).toEqual([true, '1. a\n\n2. b', 5]);
   });
 });

@@ -1,7 +1,7 @@
 {
   "name": "calendarfif",
   "private": true,
-  "version": "0.9.44",
+  "version": "0.9.45",
   "type": "module",
   "main": "build/desktop/main.cjs",
   "scripts": {
