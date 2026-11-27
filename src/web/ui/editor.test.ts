@@ -763,7 +763,7 @@ describe('PC 앱의 쪽지 모양(누른 칸 위에 뜬다)', () => {
   });
 });
 
-describe('PC 앱의 줄 머리(설정 → 셀)', () => {
+describe('편집 화면의 줄 머리(설정의 줄 머리)', () => {
   it('열면 줄마다 머리가 보이고, 저장하는 글에는 없다. 고치지 않았으면 고친 것이 아니다', () => {
     const { area, root, onSave, onCancel } = mount({ text: '회의\n운동', color: '' }, { heads: 'number' });
     expect(area.value).toBe('1. 회의\n2. 운동');
@@ -787,5 +787,20 @@ describe('PC 앱의 줄 머리(설정 → 셀)', () => {
     const back = new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true });
     area.dispatchEvent(back);
     expect([back.defaultPrevented, area.value, area.selectionStart]).toEqual([true, '1. a\n\n2. b', 5]);
+  });
+  it('폰: 조합 중이라고 온 줄바꿈에도 머리를 붙이고, 키 없이 오는 지우기(beforeinput)로도 머리를 지운다', () => {
+    const { area } = mount({ text: 'a', color: '' }, { heads: 'dot' });
+    area.value = '• a\n';
+    area.setSelectionRange(4, 4);
+    area.dispatchEvent(new InputEvent('input', { inputType: 'insertLineBreak', isComposing: true }));
+    expect([area.value, area.selectionStart]).toEqual(['• a\n• ', 6]);
+    const del = new InputEvent('beforeinput', { inputType: 'deleteContentBackward', cancelable: true });
+    area.dispatchEvent(del);
+    expect([del.defaultPrevented, area.value, area.selectionStart]).toEqual([true, '• a\n', 4]);
+    // 머리 뒤가 아니면 막지 않는다.
+    const plain = new InputEvent('beforeinput', { inputType: 'deleteContentBackward', cancelable: true });
+    area.setSelectionRange(3, 3);
+    area.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(false);
   });
 });

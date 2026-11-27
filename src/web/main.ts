@@ -418,6 +418,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     if (r && r.width > 0 && r.height > 0) return { focusText: true, anchor: { left: r.left, top: r.top, width: r.width, height: r.height } };
     return { focusText: true, attachDrag: (sheet, handle) => makeDraggable(sheet, handle, editorMemory) };
   };
+  const headsFor = (bullet: 'none' | 'number' | 'dot' | undefined): 'number' | 'dot' | undefined => (bullet === 'number' || bullet === 'dot' ? bullet : undefined);
   const openEditor = (dateKey: string): void => {
     const { monthId, day } = splitDateKey(dateKey)!;
     // 편집 화면이 처음 보여 준 값이 base다. 서버 문서를 따로 읽지 않는다.
@@ -428,8 +429,8 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
       value: base,
       note: dayNote(dateKey),
       doneTone: prefs?.doneTone ?? appearance?.doneTone,
-      // PC 앱만: 설정 → 셀의 줄 머리를 편집 화면의 줄마다 붙여 보인다(저장하는 글에는 넣지 않는다).
-      heads: appearance && appearance.bullet !== 'none' ? appearance.bullet : undefined,
+      // 설정의 줄 머리(웹앱은 prefs, PC 앱은 셀 설정)를 편집 화면의 줄마다 붙여 보인다(저장하는 글에는 넣지 않는다).
+      heads: headsFor(prefs?.bullet ?? appearance?.bullet),
       events: {
         view: events,
         save: (id, rec) => {

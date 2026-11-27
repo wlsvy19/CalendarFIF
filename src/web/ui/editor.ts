@@ -104,8 +104,8 @@ export function mountEditor(
      */
     onKeep?(next: DayValue): void;
     /**
-     * PC 앱: 설정 → 셀의 줄 머리(점, 번호). 주면 메모 칸의 줄마다 그 머리를 붙여 보이고 Enter의 새 줄에도 붙인다(번호는 다시 매긴다).
-     * 저장하는 글에서는 뗀다. 없으면(없음, 웹, 폰) 붙이지 않는다.
+     * 설정의 줄 머리(점, 번호). 주면 메모 칸의 줄마다 그 머리를 붙여 보이고 Enter의 새 줄에도 붙인다(번호는 다시 매긴다).
+     * 저장하는 글에서는 뗀다. 없으면(줄 머리 없음) 붙이지 않는다. PC 앱(2026-11-27)에 이어 같은 날 폰과 웹에도("응 ㄱ").
      */
     heads?: HeadStyle;
   },
@@ -195,22 +195,24 @@ export function mountEditor(
     area.setSelectionRange(r.start, r.end);
   };
   if (heads) {
-    // Enter로 생긴 새 줄에 머리를 붙인다. 키를 가로채지 않고 줄이 생긴 뒤에 붙인다(한글 조합 중의 Enter도 같은 길로 온다).
+    // Enter로 생긴 새 줄에 머리를 붙인다. 키를 가로채지 않고 줄이 생긴 뒤에 붙인다. 줄바꿈은 한글 조합의 일부가 아니므로
+    // 조합 중이라고 와도(아이폰 키보드) 붙인다. 그 밖의 입력은 조합이 끝난 뒤에 번호만 다시 매긴다.
     area.addEventListener('input', (e) => {
       const ev = e as InputEvent;
-      if (ev.isComposing) return;
       if (ev.inputType === 'insertLineBreak' || ev.inputType === 'insertParagraph') {
         const p = area.selectionStart;
         const head = headOf(heads, 1);
         area.value = area.value.slice(0, p) + head + area.value.slice(p);
         area.setSelectionRange(p + head.length, p + head.length);
+      } else if (ev.isComposing) {
+        return;
       }
       applyRenumber();
     });
     area.addEventListener('compositionend', applyRenumber);
-    // 줄 머리 바로 뒤의 Backspace는 머리를 통째로 지운다.
-    area.addEventListener('keydown', (e) => {
-      if (e.key !== 'Backspace' || e.isComposing || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+    // 줄 머리 바로 뒤의 지우기는 머리를 통째로 지운다. PC는 키(keydown)로, 폰은 키가 오지 않을 수 있어 입력 직전(beforeinput)으로도 받는다.
+    // 키에서 막으면 beforeinput은 오지 않으므로 두 번 지우지 않는다.
+    const eraseHead = (e: Event): void => {
       if (area.selectionStart !== area.selectionEnd) return;
       const r = removeHeadBefore(area.value, area.selectionStart, heads);
       if (!r) return;
@@ -218,6 +220,14 @@ export function mountEditor(
       area.value = r.text;
       area.setSelectionRange(r.pos, r.pos);
       applyRenumber();
+    };
+    area.addEventListener('keydown', (e) => {
+      if (e.key !== 'Backspace' || e.isComposing || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+      eraseHead(e);
+    });
+    area.addEventListener('beforeinput', (e) => {
+      if (e.inputType !== 'deleteContentBackward' || e.isComposing) return;
+      eraseHead(e);
     });
   }
   if (pop) {
