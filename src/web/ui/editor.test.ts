@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { playTone } from '../tones';
 import type { DayValue } from '../../core/types';
-import { KEYBOARD_DONE_MS, KEYBOARD_PROXY_CLASS, mountEditor } from './editor';
+import { KEYBOARD_DONE_MS, KEYBOARD_PROXY_CLASS, mountEditor, popRect } from './editor';
 import { swipeDown } from './fakeSwipe';
 import type { EventMap, EventRecord } from '../../core/events';
 
@@ -714,5 +714,51 @@ describe('폰: 글자판의 완료', () => {
     blurTo(b.area, null);
     vi.advanceTimersByTime(KEYBOARD_DONE_MS);
     expect(b.onCancel).not.toHaveBeenCalled();
+  });
+});
+
+describe('PC 앱의 쪽지 모양(누른 칸 위에 뜬다)', () => {
+  it('칸의 가운데에 칸 폭으로 놓고, 작은 칸이면 최소 크기, 창 밖으로 나가지 않는다', () => {
+    const view = { width: 1200, height: 900 };
+    expect(popRect({ left: 165, top: 108, width: 173, height: 184 }, view)).toEqual({ left: 152, top: 70, width: 200, height: 260 });
+    expect(popRect({ left: 400, top: 300, width: 240, height: 200 }, view)).toEqual({ left: 400, top: 264, width: 240, height: 272 });
+    // 오른쪽 아래 끝 칸: 창 안으로 밀어 넣는다. 왼쪽 위 끝 칸: 가장자리에 8px 남긴다.
+    expect(popRect({ left: 1100, top: 820, width: 100, height: 80 }, view)).toEqual({ left: 992, top: 632, width: 200, height: 260 });
+    expect(popRect({ left: 0, top: 0, width: 100, height: 80 }, view)).toEqual({ left: 8, top: 8, width: 200, height: 260 });
+    // 창이 더 작으면 창에 맞춘다.
+    expect(popRect({ left: 0, top: 0, width: 300, height: 300 }, { width: 250, height: 200 })).toEqual({ left: 8, top: 8, width: 234, height: 184 });
+  });
+  it('제목은 큰 날짜 숫자와 월·요일, 저장은 체크 단추, 취소 단추는 숨고 Esc로 취소한다. 덮개는 투명하다', () => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    const onSave = vi.fn();
+    const onCancel = vi.fn();
+    mountEditor(root, { dateKey: '2026-11-10', value: { text: 'a', color: 'F12424' }, note: { lunar: '음 10.1', holiday: '' }, onSave, onCancel }, { anchor: { left: 165, top: 108, width: 173, height: 184 } });
+    const sheet = root.querySelector<HTMLElement>('.sheet')!;
+    expect([sheet.classList.contains('memo-pop'), root.querySelector('.scrim')!.classList.contains('clear')]).toEqual([true, true]);
+    expect([sheet.style.left, sheet.style.top, sheet.style.width, sheet.style.height]).toEqual(['152px', '70px', '200px', '260px']);
+    const h3 = sheet.querySelector('h3')!;
+    expect([h3.querySelector('.pop-day')!.textContent, h3.querySelector('.pop-when')!.textContent, h3.getAttribute('aria-label')]).toEqual(['10', '11월 화요일', '2026년 11월 10일 화요일']);
+    expect([sheet.querySelector<HTMLElement>('.sheet-note')!.hidden, sheet.querySelector('.sheet-note')!.textContent]).toEqual([false, '음 10.1']);
+    expect(sheet.style.getPropertyValue('--day-color')).toBe('#F12424');
+    const cancelBtn = sheet.querySelector<HTMLButtonElement>('.textbtn.start')!;
+    const saveBtn = sheet.querySelector<HTMLButtonElement>('.textbtn.end')!;
+    expect([cancelBtn.hidden, saveBtn.getAttribute('aria-label'), saveBtn.querySelector('svg') !== null]).toEqual([true, '저장', true]);
+    expect(sheet.querySelector<HTMLButtonElement>('.tool.color')!.getAttribute('aria-label')).toBe('배경');
+    sheet.querySelector('textarea')!.value = 'a\nb';
+    saveBtn.click();
+    expect(onSave).toHaveBeenCalledWith({ text: 'a\nb', color: 'F12424' });
+
+    const root2 = document.createElement('div');
+    document.body.append(root2);
+    const onCancel2 = vi.fn();
+    mountEditor(root2, { dateKey: '2026-11-10', value: { text: 'a', color: '' }, onSave: vi.fn(), onCancel: onCancel2 }, { anchor: { left: 0, top: 0, width: 100, height: 100 } });
+    root2.querySelector<HTMLElement>('.sheet')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(onCancel2).toHaveBeenCalled();
+  });
+  it('자리를 주지 않으면(웹, 폰) 전과 같다', () => {
+    const { root } = mount({ text: 'a', color: '' });
+    const sheet = root.querySelector<HTMLElement>('.sheet')!;
+    expect([sheet.classList.contains('memo-pop'), sheet.querySelector<HTMLElement>('.textbtn.start')!.hidden, sheet.querySelector('h3')!.textContent]).toEqual([false, false, '11월 13일 금요일']);
   });
 });

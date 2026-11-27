@@ -129,6 +129,110 @@
   :root.desk .sheet { width: calc(100vw - 24px); }
 }
 
+/*
+ * 쪽지 모양의 메모 편집 화면(editor.ts의 anchor): 누른 날짜 칸 위에 칸 폭으로 뜬다. 자리와 크기는 editor.ts가 inline으로 준다.
+ * 2026-11-27 사용자: DesktopCal의 메모 창처럼 칸 위에 뜨게, 그리고 "너무 old 하다. AI티 안나면서 이쁘게".
+ * 종이 한 장처럼: 입력 상자의 틀 없이 종이에 바로 쓰고, 색은 무채색에 가깝게, 그림자는 얕게 둘. 메모에 고른 배경색이 있으면
+ * 종이가 그 색을 옅게 띤다. 달력은 어둡게 덮지 않는다(바깥을 누르면 저장하고 닫힌다).
+ */
+:root.desk .scrim.clear { background: transparent; }
+:root.desk .sheet.memo-pop {
+  --paper: #fbfaf7;
+  --paper-ink: #1d1d1f;
+  --paper-muted: #8a8a8e;
+  --paper-line: rgba(0, 0, 0, 0.07);
+  transform: none;
+  max-height: none;
+  min-width: 180px;
+  min-height: 180px;
+  gap: 0;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--paper-ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 14px 36px -10px rgba(0, 0, 0, 0.45);
+  resize: both;
+  overflow: hidden;
+  font-size: 13px;
+  animation: memo-pop-in 0.14s ease-out;
+}
+:root.desk .sheet.memo-pop:has(.memo-input[data-color]) { background: color-mix(in srgb, var(--day-color) 16%, var(--paper)); }
+@keyframes memo-pop-in { from { opacity: 0; transform: translateY(4px) scale(0.985); } }
+
+/* 머리: 큰 날짜 숫자, 옆에 월·요일, 그 아래 음력·절기·공휴일. 오른쪽에 저장. */
+:root.desk .sheet.memo-pop .sheet-bar {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px 10px 6px 14px;
+}
+:root.desk .sheet.memo-pop .textbtn.start { display: none; }
+:root.desk .sheet.memo-pop .sheet-title { text-align: left; }
+:root.desk .sheet.memo-pop h3 { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; overflow: hidden; }
+:root.desk .sheet.memo-pop .pop-day { font-size: 22px; font-weight: 600; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+:root.desk .sheet.memo-pop .pop-when { font-size: 12px; font-weight: 500; color: var(--paper-muted); }
+:root.desk .sheet.memo-pop .sheet-note { margin-top: 4px; font-size: 11px; color: var(--paper-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:root.desk .sheet.memo-pop .sheet-note span + span::before { color: var(--paper-muted); }
+:root.desk .sheet.memo-pop .textbtn.end {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--paper-ink);
+  color: #fff;
+  transition: transform 0.1s ease, opacity 0.1s ease;
+}
+:root.desk .sheet.memo-pop .textbtn.end:hover { opacity: 0.85; }
+:root.desk .sheet.memo-pop .textbtn.end:active { transform: scale(0.94); }
+:root.desk .sheet.memo-pop .textbtn.end .tool-icon { width: 15px; height: 15px; stroke-width: 2.4; }
+
+/* 메모: 틀 없이 종이에 바로 쓴다. */
+:root.desk .sheet.memo-pop .field.grow { padding: 0 6px; }
+:root.desk .sheet.memo-pop .memo-input,
+:root.desk .sheet.memo-pop .memo-input[data-color] {
+  min-height: 0;
+  padding: 4px 8px 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--paper-ink);
+  font-size: 13.5px;
+  line-height: 1.55;
+  caret-color: #2f6fed;
+}
+:root.desk .sheet.memo-pop .memo-input::placeholder { color: #b9b9bd; }
+:root.desk .sheet.memo-pop .memo-input:focus,
+:root.desk .sheet.memo-pop .memo-input:focus-visible { outline: none; }
+:root.desk .sheet.memo-pop .memo-input::-webkit-scrollbar { width: 6px; }
+:root.desk .sheet.memo-pop .memo-input::-webkit-scrollbar-thumb { border-radius: 3px; background: rgba(0, 0, 0, 0.15); }
+:root.desk .sheet.memo-pop .ev-strip { gap: 4px; max-height: 30%; padding: 0 12px 6px; }
+:root.desk .sheet.memo-pop .ev-chip { min-height: 22px; padding: 2px 8px; font-size: 12px; }
+
+/* 도구 줄: 가는 선 아래 흐린 그림들. 오른쪽 끝은 크기 바꾸는 손잡이 자리로 비운다. */
+:root.desk .sheet.memo-pop .editor-tools { gap: 2px; padding: 5px 18px 6px 8px; border-top: 1px solid var(--paper-line); }
+:root.desk .sheet.memo-pop .tool {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--paper-muted);
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+:root.desk .sheet.memo-pop .tool > span:not(.dot) { display: none; }
+:root.desk .sheet.memo-pop .tool .tool-icon { width: 17px; height: 17px; stroke-width: 1.8; }
+:root.desk .sheet.memo-pop .tool:hover,
+:root.desk .sheet.memo-pop .tool[aria-expanded="true"] { background: rgba(0, 0, 0, 0.06); color: var(--paper-ink); }
+:root.desk .sheet.memo-pop .tool .dot { top: auto; bottom: 4px; right: 4px; width: 7px; height: 7px; border: 1px solid rgba(0, 0, 0, 0.15); }
+:root.desk .sheet.memo-pop .tool .dot.none { display: none; }
+
 /* 칸 메뉴 */
 :root.desk .cellmenu {
   position: fixed;

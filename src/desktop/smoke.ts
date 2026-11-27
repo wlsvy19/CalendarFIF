@@ -78,7 +78,7 @@ async function measure(win: BrowserWindow) {
 }
 
 // 잠금 화면 뒤에서는 그림이 비어 있을 수 있다. 비면 shot은 null이다(실패 아님).
-async function capture(win: BrowserWindow, scenario: Scenario): Promise<{ shot: string | null; cornerTransparent: boolean | null }> {
+async function capture(win: BrowserWindow, scenario: Scenario | 'editor'): Promise<{ shot: string | null; cornerTransparent: boolean | null }> {
   const image = await Promise.race([win.webContents.capturePage(), sleep(5000).then(() => null)]).catch(() => null);
   if (!image || image.isEmpty()) return { shot: null, cornerTransparent: null };
   const shots = join(dirname(dirname(app.getPath('userData'))), 'shots');
@@ -395,6 +395,11 @@ async function attach(_rt: Runtime, desk: Desk): Promise<Result> {
   const ime = await deskProbe(first0);
 
   const shotInfo = await capture(first0, 'attach');
+  // 메모 편집 화면(쪽지 모양)의 그림: 메모가 있는 첫 칸을 두 번 누른 것으로 쳐서 열고 찍은 뒤 Esc로 닫는다(지어낸 자료).
+  const editorOpened = await js(first0, `(() => { const c = [...document.querySelectorAll('.grid.current .cell')].find((x) => x.querySelector('.ln')) ?? document.querySelector('.grid.current .cell'); c?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); return !!c; })()`).catch(() => false);
+  await sleep(800);
+  const editorShot = editorOpened ? (await capture(first0, 'editor')).shot : null;
+  await js(first0, `document.querySelector('.sheet')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); 1`).catch(() => undefined);
 
   // 탐색기 재시작 흉내: 창을 없애면 5초 안에 다시 붙은 창이 있어야 한다.
   const createdBefore = windowsCreated();
@@ -435,7 +440,7 @@ async function attach(_rt: Runtime, desk: Desk): Promise<Result> {
     toolWindowWhileInteractive: toolWindowDuring[0], toolWindowAfterInteractive: toolWindowDuring[1], atBottomAfterInteractive, closeBlocked,
     recreated, ownerIsProgmanAfterRecreate: second?.ownerIsProgman ?? false, atBottomAfterRecreate: second?.atBottom ?? false, minimizeRestored, ...crash, ...ownerLost,
     loginItemCalls, nativeLoaded: nativeLoaded(), nestedNativeCalls: nestedNativeCalls(), bottomAsserts: bottomAssertsNormal, bottomAssertsTotal: blocked.bottomAsserts,
-    secondInstance: instance, ...shotInfo, freeMoveIgnored, ...icons, ime,
+    secondInstance: instance, ...shotInfo, editorShot, freeMoveIgnored, ...icons, ime,
   };
   const checks = {
     mode: first.mode === 'owned', ownerIsProgman: first.ownerIsProgman, atBottom: first.atBottom, toolWindow: first.toolWindow,

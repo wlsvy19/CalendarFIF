@@ -17,6 +17,7 @@ const ICONS = {
   color: SVG('<path d="M12 3c4.5 5 6.5 8 6.5 11a6.5 6.5 0 0 1-13 0C5.5 11 7.5 8 12 3z"/>'),
   alarm: SVG('<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 21h4"/>'),
   countdown: SVG('<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2.5h6"/>'),
+  check: SVG('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
 };
 
 const WEEKDAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
@@ -29,6 +30,32 @@ export const KEYBOARD_PROXY_CLASS = 'kbd-proxy';
 const DESK_BLUR_GRACE_MS = 700;
 /** PC 앱에서 창이 초점을 잃고 이만큼 기다려 돌아오지 않으면 저장하고 닫는다. */
 const DESK_BLUR_WAIT_MS = 150;
+
+export type Rect = { left: number; top: number; width: number; height: number };
+/** PC 앱의 쪽지 모양 편집 화면의 가장 작은 폭과 높이, 창 가장자리에 남길 틈(px). */
+const POP_MIN = { width: 200, height: 260 };
+const POP_MARGIN = 8;
+
+/**
+ * PC 앱의 쪽지 모양 편집 화면이 놓일 자리. 누른 날짜 칸의 가운데에 칸 폭으로 놓고(DesktopCal의 메모 창처럼),
+ * 칸보다 위아래로 조금 길게 한다. 창 밖으로 나가지 않게 자른다.
+ */
+export function popRect(cell: Rect, view: { width: number; height: number }): Rect {
+  const width = Math.min(Math.max(cell.width, POP_MIN.width), view.width - 2 * POP_MARGIN);
+  const height = Math.min(Math.max(cell.height + 72, POP_MIN.height), view.height - 2 * POP_MARGIN);
+  const fit = (start: number, size: number, room: number): number => Math.round(Math.max(POP_MARGIN, Math.min(start, room - size - POP_MARGIN)));
+  return {
+    left: fit(cell.left + (cell.width - width) / 2, width, view.width),
+    top: fit(cell.top + (cell.height - height) / 2, height, view.height),
+    width: Math.round(width),
+    height: Math.round(height),
+  };
+}
+
+function popTitleOf(dateKey: string): string {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return `${year}년 ${month}월 ${day}일`;
+}
 
 function titleOf(dateKey: string): string {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -76,7 +103,17 @@ export function mountEditor(
      */
     onKeep?(next: DayValue): void;
   },
-  env?: { visualViewport?: VisualViewportLike | null; focusText?: boolean; attachDrag?: (sheet: HTMLElement, handle: HTMLElement) => { destroy(): void } },
+  env?: {
+    visualViewport?: VisualViewportLike | null;
+    focusText?: boolean;
+    attachDrag?: (sheet: HTMLElement, handle: HTMLElement) => { destroy(): void };
+    /**
+     * PC 앱: 누른 날짜 칸의 자리(창 안 px). 주면 가운데 큰 상자 대신 그 칸 위에 쪽지 모양으로 뜬다(2026-11-27 사용자:
+     * DesktopCal의 메모 창 사진과 함께 "pc버전에서 메모 할때, 이렇게 나오게 하자"). 제목은 날짜만, 저장은 오른쪽 위의 체크,
+     * 취소 단추는 없고 Esc로 취소한다. 도구는 그림만 보인다. 오른쪽 아래 끝을 끌어 크기를 바꾼다.
+     */
+    anchor?: Rect;
+  },
 ): EditorHandle {
   const viewport = env?.visualViewport === undefined ? (window.visualViewport ?? null) : env.visualViewport;
   const previouslyFocused = document.activeElement as HTMLElement | null;
@@ -107,7 +144,22 @@ export function mountEditor(
       <button type="button" class="tool alarm" hidden>${ICONS.alarm}<span>알림</span></button>
       <button type="button" class="tool countdown" hidden>${ICONS.countdown}<span>카운트다운</span></button>
     </div>`;
-  sheet.querySelector('h3')!.textContent = titleOf(props.dateKey);
+  const pop = env?.anchor;
+  const h3 = sheet.querySelector('h3')!;
+  if (pop) {
+    // 쪽지 모양의 제목: 큰 날짜 숫자와 그 옆의 작은 월·요일. 읽는 이름은 날짜 전체다.
+    const [, month, day] = props.dateKey.split('-').map(Number);
+    const dayEl = document.createElement('span');
+    dayEl.className = 'pop-day';
+    dayEl.textContent = String(day);
+    const whenEl = document.createElement('span');
+    whenEl.className = 'pop-when';
+    whenEl.textContent = `${month}월 ${titleOf(props.dateKey).split(' ').pop()}`;
+    h3.append(dayEl, whenEl);
+    h3.setAttribute('aria-label', `${popTitleOf(props.dateKey)} ${titleOf(props.dateKey).split(' ').pop()}`);
+  } else {
+    h3.textContent = titleOf(props.dateKey);
+  }
   const noteEl = sheet.querySelector<HTMLElement>('.sheet-note')!;
   for (const [className, text] of [['note-lunar', props.note?.lunar ?? ''], ['note-season', props.note?.season ?? ''], ['note-holiday', props.note?.holiday ?? '']]) {
     if (text === '') continue;
@@ -126,6 +178,26 @@ export function mountEditor(
   const countdownBtn = sheet.querySelector<HTMLButtonElement>('.tool.countdown')!;
   const dot = colorBtn.querySelector<HTMLElement>('.dot')!;
   area.value = props.value.text;
+  if (pop) {
+    const place = popRect(pop, { width: window.innerWidth, height: window.innerHeight });
+    sheet.classList.add('memo-pop');
+    scrim.classList.add('clear');
+    sheet.style.left = `${place.left}px`;
+    sheet.style.top = `${place.top}px`;
+    sheet.style.width = `${place.width}px`;
+    sheet.style.height = `${place.height}px`;
+    cancelBtn.hidden = true;
+    saveBtn.innerHTML = ICONS.check;
+    saveBtn.setAttribute('aria-label', '저장');
+    saveBtn.title = '저장 (Ctrl+Enter)';
+    area.placeholder = '메모';
+    // 도구는 그림만 보인다. 이름은 마우스를 올리면 나온다.
+    for (const tool of sheet.querySelectorAll<HTMLButtonElement>('.tool')) {
+      const name = tool.querySelector('span:not(.dot)')?.textContent ?? '';
+      tool.setAttribute('aria-label', name);
+      tool.title = name;
+    }
+  }
 
   let color = props.value.color;
   // 고른 색을 메모 칸 바탕(칸과 같은 --day-color 섞기)과 배경 단추의 점에 칠한다.
@@ -133,11 +205,13 @@ export function mountEditor(
     if (color === '') {
       delete area.dataset.color;
       area.style.removeProperty('--day-color');
+      sheet.style.removeProperty('--day-color');
       dot.style.removeProperty('--sw');
       dot.classList.add('none');
     } else {
       area.dataset.color = color;
       area.style.setProperty('--day-color', `#${color}`);
+      sheet.style.setProperty('--day-color', `#${color}`); // 쪽지 모양의 제목 앞 막대 색
       dot.style.setProperty('--sw', `#${color}`);
       dot.classList.remove('none');
     }

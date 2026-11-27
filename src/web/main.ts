@@ -406,6 +406,14 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
     location.replace(`#${dateKey}`);
     syncRoute();
   };
+  // PC 앱: 그 날짜 칸이 지금 쪽에 보이면 그 칸 위에 쪽지 모양으로 연다(DesktopCal처럼). 안 보이면(알림 상자에서 다른 달을 열 때)
+  // 전처럼 가운데 상자로 열고 끌어 옮길 수 있다.
+  const deskEditorEnv = (dateKey: string): Parameters<typeof mountEditor>[2] => {
+    const cell = document.querySelector<HTMLElement>(`.grid.current .cell[data-key="${dateKey}"]`);
+    const r = cell?.getBoundingClientRect();
+    if (r && r.width > 0 && r.height > 0) return { focusText: true, anchor: { left: r.left, top: r.top, width: r.width, height: r.height } };
+    return { focusText: true, attachDrag: (sheet, handle) => makeDraggable(sheet, handle, editorMemory) };
+  };
   const openEditor = (dateKey: string): void => {
     const { monthId, day } = splitDateKey(dateKey)!;
     // 편집 화면이 처음 보여 준 값이 base다. 서버 문서를 따로 읽지 않는다.
@@ -450,7 +458,7 @@ function mountCalendarScreen(root: HTMLElement, session: Session, ctx: ScreenCon
           base = { text: normalizeText(next.text), color: normalizeColor(next.color) }; // 대기열에 들어간 값 그대로
           store.refresh();
         },
-    }, DESKTOP ? { focusText: true, attachDrag: (sheet, handle) => makeDraggable(sheet, handle, editorMemory) } : undefined);
+    }, DESKTOP ? deskEditorEnv(dateKey) : undefined);
     editor = { dateKey, handle };
     interactivity.begin('editor');
   };
