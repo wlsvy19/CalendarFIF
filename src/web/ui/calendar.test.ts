@@ -255,6 +255,25 @@ describe('화면 설정', () => {
     const off = mountA({ shadow: false, titleBar: false }).querySelector<HTMLElement>('.calendar')!;
     expect([has(off, 'shadow'), off.querySelector<HTMLElement>('.app-head')!.hidden]).toEqual([false, true]);
   });
+  it('PC 앱도 긴 줄은 접혀 여러 행을 쓰고, 칸에 남는 행만큼만 보인다', () => {
+    // 줄 높이는 설정의 메모 글자 크기 × 줄 간격. 칸에 5행이 들어가고, '회의'는 접혀 3행이라고 친다.
+    const line = Math.round(DEFAULT_APPEARANCE.memoFont.size * DEFAULT_APPEARANCE.lineSpacing);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(5 * line);
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      if (!this.classList.contains('ln')) return 0;
+      return this.textContent === '회의' ? 3 * line : line;
+    });
+    try {
+      const root = mountA({ showDone: true, doneToBottom: false });
+      expect(root.querySelector('.calendar')!.classList.contains('wrap-lines')).toBe(true);
+      // 네 줄이 5행에: 줄마다 한 행을 먼저 주고 남는 한 행을 긴 줄에. 긴 줄은 2행까지만 보인다.
+      const lns = [...cell(root, '2026-11-13').querySelectorAll<HTMLElement>('.ln')];
+      expect(lns.map((l) => l.textContent)).toEqual(['끝낸 일', '회의', '장보기', '운동']);
+      expect([has(lns[1], 'clip'), lns[1].style.getPropertyValue('--clamp'), lns[1].style.maxHeight]).toEqual([true, '2', `${2 * line}px`]);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
 });
 describe('웹(아이폰 화면)의 음력과 공휴일', () => {
   function mountWeb(today: string, days: Record<string, DayValue> = {}) {

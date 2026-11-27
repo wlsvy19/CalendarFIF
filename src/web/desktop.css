@@ -90,9 +90,11 @@
 :root.desk .calendar .lunar { margin-left: auto; font-size: calc(var(--desk-cal-size) - 2px); color: var(--desk-lunar-ink); white-space: nowrap; }
 :root.desk .calendar .lunar.term { color: var(--desk-term-ink); }
 
-/* 메모 줄 */
+/* 메모 줄. 긴 줄은 칸 폭에서 접힌다(styles.css의 .wrap-lines, 2026-11-27 사용자). --memo-line은 알림 그림의 자리를 잡는 데 쓴다. */
+:root.desk .calendar { --memo-line: calc(var(--desk-memo-size) * var(--desk-line)); }
 :root.desk .calendar .ln {
-  height: calc(var(--desk-memo-size) * var(--desk-line));
+  height: auto;
+  min-height: calc(var(--desk-memo-size) * var(--desk-line));
   font-size: var(--desk-memo-size);
   line-height: calc(var(--desk-memo-size) * var(--desk-line));
   letter-spacing: normal;

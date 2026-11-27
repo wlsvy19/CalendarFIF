@@ -244,22 +244,16 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
       if (done) cls.push('done');
       return spanOf(cls.join(' '), text);
     };
-    // 웹 모양: 긴 줄은 칸 폭에서 접혀 여러 행을 쓴다(styles.css의 .wrap-lines). 모든 줄을 넣고, 줄마다 몇 행인지 한꺼번에 읽은 뒤
+    // 긴 줄은 칸 폭에서 접혀 여러 행을 쓴다(styles.css의 .wrap-lines). 모든 줄을 넣고, 줄마다 몇 행인지 한꺼번에 읽은 뒤
     // (배치 계산 한 번) 칸에 들어가는 만큼 남긴다. 2026-11-20 사용자: "글이길면 … 안보여 자동으로 줄바꿈되서 최대한 보이게 해줘".
-    // PC 앱(custom)은 전처럼 한 줄에 한 행이다.
+    // PC 앱도 같다(2026-11-27 사용자: "pc버전에서 한줄 내용 길때 줄바꿈되서 나오게 해야지", DesktopCal처럼).
     const wrapped: { memo: HTMLElement; spans: HTMLSpanElement[]; capacity: number }[] = [];
     for (const { button, lines, named } of built) {
       if (lines.length === 0) continue;
       const memo = spanOf('memo', '');
-      if (custom) {
-        const { shown, more } = visibleLines(lines, named ? maxNamedLines : maxLines);
-        for (const l of shown) memo.append(lineSpan(l));
-        if (more > 0) memo.append(spanOf('ln more', `+${more}`));
-      } else {
-        const spans = lines.map(lineSpan);
-        memo.append(...spans);
-        wrapped.push({ memo, spans, capacity: named ? maxNamedLines : maxLines });
-      }
+      const spans = lines.map(lineSpan);
+      memo.append(...spans);
+      wrapped.push({ memo, spans, capacity: named ? maxNamedLines : maxLines });
       button.append(memo);
     }
     if (wrapped.length > 0) {
@@ -338,7 +332,7 @@ export function mountCalendar(root: HTMLElement, deps: CalendarDeps, env: Calend
     el.classList.toggle('month-gap', a.monthGap);
     el.classList.toggle('with-wk', a.weekNumbers);
     el.dataset.bullet = a.bullet;
-    el.classList.toggle('wrap-lines', !custom);
+    el.classList.add('wrap-lines');
     head.hidden = !a.titleBar;
     const monthLayout = a.layout === 'month';
     prevBtn.setAttribute('aria-label', monthLayout ? '이전 달' : '이전');
